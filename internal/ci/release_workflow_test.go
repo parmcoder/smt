@@ -55,7 +55,7 @@ func TestReleaseAutomationContract(t *testing.T) {
 		"dist/smt_${VERSION}_${OS}_${ARCH}.tar.gz",
 		"sha256sum",
 		"GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
-		"gh release create \"$GITHUB_REF_NAME\" --verify-tag --generate-notes",
+		"gh release create \"$GITHUB_REF_NAME\" --repo \"$GITHUB_REPOSITORY\" --verify-tag --generate-notes",
 		"smt_${VERSION}_linux_amd64.tar.gz",
 		"smt_${VERSION}_linux_arm64.tar.gz",
 		"smt_${VERSION}_darwin_amd64.tar.gz",
