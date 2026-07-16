@@ -1,0 +1,78 @@
+version: 1
+
+providers:
+  gitlab:
+    api_base_url: https://gitlab.com/api/v4
+
+commit:
+  types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert]
+  scopes: [api, database, web, infra, repo]
+
+repositories:
+  - id: repo
+    path: .
+    provider: gitlab
+    project: sanovy/mono-repo
+    scope: repo
+    checks:
+      submit: []
+      ci-parity: []
+
+  - id: api
+    path: apis
+    provider: gitlab
+    project: sanovy/apis
+    scope: api
+    checks:
+      hook:
+        - kind: command
+          argv: [gofmt, -l, .]
+        - kind: command
+          argv: [go, vet, ./...]
+        - kind: command
+          argv: [go, test, ./...]
+      ci-parity:
+        - kind: command
+          argv: [task, verify]
+
+  - id: database
+    path: database
+    provider: gitlab
+    project: sanovy/database
+    scope: database
+    checks:
+      hook:
+        - kind: sql-format
+          argv: [pg_format]
+          include: ["**/*.sql"]
+          mutates_worktree: true
+      submit: []
+      ci-parity: []
+
+  - id: web
+    path: web-app
+    provider: gitlab
+    project: sanovy/web-app
+    scope: web
+    checks:
+      hook:
+        - kind: command
+          argv: [pnpm, lint]
+        - kind: command
+          argv: [pnpm, test]
+      ci-parity:
+        - kind: command
+          argv: [pnpm, lint]
+        - kind: command
+          argv: [pnpm, test]
+        - kind: command
+          argv: [pnpm, typecheck]
+
+  - id: infra
+    path: devops
+    provider: gitlab
+    project: sanovy/devops
+    scope: infra
+    checks:
+      submit: []
+      ci-parity: []

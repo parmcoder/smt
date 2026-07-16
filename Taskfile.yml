@@ -1,0 +1,50 @@
+version: '3'
+
+vars:
+  SMT_BIN: '{{.ROOT_DIR}}/bin/smt'
+
+tasks:
+  default:
+    desc: List available SMT development tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the repository-local SMT binary
+    cmds:
+      - mkdir -p "{{.ROOT_DIR}}/bin"
+      - go build -o "{{.SMT_BIN}}" ./cmd/smt
+
+  verify:
+    desc: Run the Go test suite
+    cmds:
+      - go test ./...
+
+  hooks:install:
+    desc: Install the Lefthook commit-msg hook
+    preconditions:
+      - sh: command -v lefthook
+        msg: lefthook is required; install it before running task setup
+      - sh: test -x "{{.SMT_BIN}}"
+        msg: bin/smt is missing; run task build before installing hooks
+    cmds:
+      - lefthook install
+
+  setup:
+    desc: Build prerequisites are checked, then install repository Git hooks
+    deps:
+      - hooks:install
+
+  commit:validate:
+    desc: Validate one complete commit-message file through SMT
+    vars:
+      MESSAGE_FILE: '{{.CLI_ARGS}}'
+    preconditions:
+      - sh: test -n "{{.MESSAGE_FILE}}"
+        msg: pass the commit-message file path after --
+      - sh: test -f "{{.MESSAGE_FILE}}"
+        msg: commit-message file does not exist
+      - sh: test -x "{{.SMT_BIN}}"
+        msg: bin/smt is missing; run task build before validating commits
+    cmds:
+      - '"{{.SMT_BIN}}" validate-message "{{.MESSAGE_FILE}}"'

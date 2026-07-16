@@ -1,0 +1,5 @@
+commit-msg:
+  commands:
+    conventional-commit:
+      run: task commit:validate -- {1}
+      fail_text: "Commit rejected: use a valid scoped Conventional Commit message"
