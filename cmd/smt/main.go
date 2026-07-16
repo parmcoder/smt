@@ -20,6 +20,7 @@ import (
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
 	"github.com/parmcoder/smt/internal/operations"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -34,6 +35,40 @@ func main() {
 }
 
 func run(args []string, out, errOut io.Writer) int {
+	verbose := len(args) > 0 && args[0] == "--verbose"
+	if verbose {
+		args = args[1:]
+	}
+	command := ""
+	if len(args) > 0 {
+		command = args[0]
+	}
+	logger := newRunLogger(verbose, errOut)
+	code := runCommand(args, out, errOut)
+	if verbose {
+		logger.WithFields(logrus.Fields{
+			"command":   command,
+			"exit_code": code,
+		}).Debug("command finished")
+	}
+	return code
+}
+
+func newRunLogger(verbose bool, errOut io.Writer) *logrus.Logger {
+	logger := logrus.New()
+	logger.SetOutput(errOut)
+	logger.SetFormatter(&logrus.TextFormatter{
+		DisableColors:    true,
+		DisableTimestamp: true,
+		DisableQuote:     true,
+	})
+	if verbose {
+		logger.SetLevel(logrus.DebugLevel)
+	}
+	return logger
+}
+
+func runCommand(args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
 		printUsage(errOut)
 		return exitUsage

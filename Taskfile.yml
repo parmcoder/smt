@@ -15,6 +15,45 @@ tasks:
       - mkdir -p "{{.ROOT_DIR}}/bin"
       - go build -o "{{.SMT_BIN}}" ./cmd/smt
 
+  release:build:
+    desc: Build and package release archives without remote Git actions
+    preconditions:
+      - sh: test -n "{{.VERSION}}"
+        msg: VERSION is required; use task release:build VERSION=vX.Y.Z
+      - sh: printf '%s' "{{.VERSION}}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+        msg: VERSION must match strict vMAJOR.MINOR.PATCH
+      - sh: test "{{.RELEASE_TAG}}" != "true" || test -z "$(git status --porcelain --untracked-files=all)"
+        msg: release:tag requires a fully clean worktree before building release artifacts
+    cmds:
+      - mkdir -p "{{.ROOT_DIR}}/dist"
+      - |
+        set -eu
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+          OS="${target%/*}"
+          ARCH="${target#*/}"
+          CGO_ENABLED=0 GOOS="$OS" GOARCH="$ARCH" go build -trimpath -o "$tmp/smt" ./cmd/smt
+          tar -czf "{{.ROOT_DIR}}/dist/smt_{{.VERSION}}_${OS}_${ARCH}.tar.gz" -C "$tmp" smt
+        done
+        (cd "{{.ROOT_DIR}}/dist" && shasum -a 256 smt_{{.VERSION}}_*.tar.gz > checksums.txt)
+
+  release:tag:
+    desc: Build, tag, and push one release tag
+    deps:
+      - task: release:build
+        vars:
+          RELEASE_TAG: 'true'
+    preconditions:
+      - sh: test -n "{{.VERSION}}"
+        msg: VERSION is required; use task release:tag VERSION=vX.Y.Z
+      - sh: printf '%s' "{{.VERSION}}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+        msg: VERSION must match strict vMAJOR.MINOR.PATCH
+    cmds:
+      - task verify
+      - git tag -a "{{.VERSION}}" -m "Release {{.VERSION}}"
+      - git push origin "refs/tags/{{.VERSION}}"
+
   verify:
     desc: Run the Go test suite
     cmds:

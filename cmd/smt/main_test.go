@@ -44,6 +44,69 @@ func TestRunValidateMessageExitCodes(t *testing.T) {
 	}
 }
 
+func TestRunVerboseWritesDiagnosticsOnlyToStderr(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := writeTestConfig("smt.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "message")
+	if err := writeTestMessage(file, "feat(api): add a thing\n"); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"--verbose", "validate-message", file}, out, errOut); code != exitOK {
+		t.Fatalf("run() code = %d, stderr=%q", code, errOut.String())
+	}
+	if got, want := out.String(), "valid commit message\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := errOut.String(); got != "level=debug msg=command finished command=validate-message exit_code=0\n" {
+		t.Fatalf("stderr = %q, want deterministic debug diagnostic", got)
+	}
+	if strings.Contains(errOut.String(), file) {
+		t.Fatalf("stderr contains command argument: %q", errOut.String())
+	}
+}
+
+func TestRunNormalModeDoesNotWriteDebugDiagnostics(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := writeTestConfig("smt.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "message")
+	if err := writeTestMessage(file, "feat(api): add a thing\n"); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"validate-message", file}, out, errOut); code != exitOK {
+		t.Fatalf("run() code = %d, stderr=%q", code, errOut.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr = %q, want no diagnostics", errOut.String())
+	}
+}
+
+func TestRunVerboseInvalidCommandPreservesUsageAndExitCode(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := writeTestConfig("smt.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"--verbose", "unknown"}, out, errOut); code != exitUsage {
+		t.Fatalf("run() code = %d, want %d; stderr=%q", code, exitUsage, errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "usage: smt") {
+		t.Fatalf("stderr = %q, want usage", errOut.String())
+	}
+	if !strings.HasSuffix(errOut.String(), "level=debug msg=command finished command=unknown exit_code=1\n") {
+		t.Fatalf("stderr = %q, want trailing invalid-command diagnostic", errOut.String())
+	}
+}
+
 func writeTestConfig(path string) error {
 	return os.WriteFile(path, []byte("version: 1\ncommit:\n  types: [feat]\n  scopes: [api]\nrepositories:\n  - id: root\n    path: .\n    provider: gitlab\n    project: sanovy/root\n    scope: api\n"), 0o600)
 }

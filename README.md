@@ -1,47 +1,32 @@
 # smt
 
-Sanovy Mono Tool is a planned Go CLI for safe, repeatable work across a Git
-root repository and independent submodules.
+Sanovy Mono Tool is a small Go CLI for inspectable, repeatable work across a
+Git root repository and independent submodules. The v0.1 implementation is
+available locally, including status/diagnostics, check profiles, contract
+validation, CI contract auditing, guarded bumps, and release packaging.
 
-## Docs-first scaffold
+## Minimal onboarding
 
-The project contract and execution prompts are ready before implementation:
-
-- [Implementation spec](docs/00-project/SMT%20-%20Implementation%20Spec.md)
-- [Agent team contract](docs/00-project/SMT%20-%20Agent%20Team.md)
-- [Build prompt](prompts/smt-build.md)
-- [Repository agent agreement](AGENTS.md)
-
-The repository currently contains documentation, agent routing, and the
-committed workspace configuration. Go implementation is the next phase.
-
-## Planned bootstrap
-
-The repository uses Taskfile for repeatable development commands and Lefthook
-for the `commit-msg` hook. Lefthook delegates validation to the canonical SMT
-validator, so local hooks and CI share the same Conventional Commit policy.
-
-Prerequisites are `go`, `task`, and `lefthook`. Once the implementation phase
-begins:
+Prerequisites: Go, Task, and (for hook installation) Lefthook.
 
 ```sh
 task build
-task setup
-```
-
-Useful commands:
-
-```sh
 task verify
-task hooks:install
-task commit:validate -- .git/COMMIT_EDITMSG
+bin/smt status
+bin/smt doctor
 ```
 
-The hook receives Git's commit-message file as `{1}` and runs
-`bin/smt validate-message`. Until the Go CLI exists, `task setup` correctly
-refuses to install an incomplete hook. The future `smt hooks install` command
-will extend managed hooks across initialized submodules.
+For copyable command examples, configuration assumptions, and the safe release
+flow, see [SMT Command Recipes](docs/10-development/SMT%20-%20Command%20Recipes.md).
+The implementation contract remains [SMT Implementation Spec](docs/00-project/SMT%20-%20Implementation%20Spec.md).
 
-Submit operations use the provider configured per repository. GitLab requires
-`SMT_GITLAB_TOKEN`; GitHub requires `SMT_GITHUB_TOKEN`. Neither token may be
-stored in the repository or printed in command output.
+`task build` creates `bin/smt`; `task verify` runs the Go test suite. Release
+tagging is intentionally mutating: `task release:tag VERSION=vX.Y.Z` requires a
+fully clean worktree, verifies and builds, creates an annotated tag, and pushes
+it to `origin`. The pushed tag triggers GitHub Actions to publish the four
+archives and `checksums.txt` as a GitHub Release. It was not run during this
+implementation work.
+
+The repository uses `smt.yaml` for workspace configuration. Tokens, when
+needed by future provider integrations, must remain runtime-only and must
+never be printed or committed.
