@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -106,6 +107,9 @@ func ChangedFiles(ctx context.Context, runner Runner, repository Repository) ([]
 			return nil, repositoryError("list changed files", repository, commandError(result, err))
 		}
 		for _, file := range outputLines(result.Stdout) {
+			if harmlessUntrackedPath(file) {
+				continue
+			}
 			files[file] = struct{}{}
 		}
 	}
@@ -174,9 +178,22 @@ func porcelainFiles(output string) []string {
 		if len(line) < 4 {
 			continue
 		}
-		files = append(files, line[3:])
+		file := line[3:]
+		if line[:2] == "??" && harmlessUntrackedPath(file) {
+			continue
+		}
+		files = append(files, file)
 	}
 	return files
+}
+
+func harmlessUntrackedPath(path string) bool {
+	switch filepath.Base(path) {
+	case ".DS_Store", "Thumbs.db", "desktop.ini":
+		return true
+	default:
+		return false
+	}
 }
 
 func sortedFiles(files map[string]struct{}) []string {

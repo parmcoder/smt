@@ -108,6 +108,8 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 	switch args[0] {
 	case "status":
 		return runStatus(ctx, args[1:], cfg, root, runner, out, errOut)
+	case "push":
+		return runPush(ctx, args[1:], *cfg, runner, out, errOut)
 	case "doctor":
 		return runDoctor(ctx, args[1:], cfg, runner, out, errOut)
 	case "check":
@@ -124,6 +126,51 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 		printUsage(errOut)
 		return exitUsage
 	}
+}
+
+func runPush(ctx context.Context, args []string, cfg config.Config, runner git.Runner, out, errOut io.Writer) int {
+	flags := flag.NewFlagSet("push", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dryRun := flags.Bool("dry-run", false, "validate and print the push plan")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(errOut, "usage: smt push [--dry-run]")
+		return exitUsage
+	}
+	targets := make([]git.PushTarget, 0, len(cfg.Repositories))
+	for _, repository := range cfg.Repositories {
+		targets = append(targets, git.PushTarget{
+			Repository: git.Repository{
+				ID:     repository.ID,
+				Dir:    repository.Path,
+				IsRoot: filepath.Clean(repository.Path) == ".",
+			},
+			RemoteURL: repository.Remote.URL,
+		})
+	}
+	plan, err := git.PlanPush(ctx, runner, targets)
+	if err != nil {
+		fmt.Fprintf(errOut, "push: %v\n", err)
+		return exitValidation
+	}
+	report, err := git.ExecutePush(ctx, runner, plan, *dryRun)
+	if report.DryRun {
+		fmt.Fprintln(out, "push plan:")
+		for _, step := range report.Planned {
+			fmt.Fprintf(out, "%s: %s\n", step.Repository.ID, step.Branch)
+		}
+		return exitOK
+	}
+	for _, step := range report.Pushed {
+		fmt.Fprintf(out, "pushed %s: %s\n", step.Repository.ID, step.Branch)
+	}
+	if err == nil {
+		return exitOK
+	}
+	for _, step := range report.Pending {
+		fmt.Fprintf(out, "pending %s: %s\n", step.Repository.ID, step.Branch)
+	}
+	fmt.Fprintf(errOut, "push: %v\n", err)
+	return exitValidation
 }
 
 func runInit(args []string, in io.Reader, out, errOut io.Writer) int {
@@ -493,5 +540,5 @@ func checkResultMessage(err error) string {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "usage: smt init [PATH] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
+	fmt.Fprintln(out, "usage: smt init [PATH] | push [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
 }

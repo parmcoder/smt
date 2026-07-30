@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parmcoder/smt/internal/config"
+	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
 )
 
@@ -62,6 +65,25 @@ func TestRunInitCreatesWorkspaceWithoutExistingConfiguration(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "initialized workspace") {
 		t.Fatalf("stdout = %q, want initialization result", out.String())
+	}
+}
+
+func TestRunPushDryRunPrintsChildFirstPlanWithoutRemoteAccess(t *testing.T) {
+	root := t.TempDir()
+	initTestGit(t, root)
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commitTestFiles(t, root, "initial")
+	cfg := config.Config{Repositories: []config.Repository{{
+		ID: "repo", Path: root, Remote: config.Remote{URL: "https://example.invalid/root.git"},
+	}}}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runPush(context.Background(), []string{"--dry-run"}, cfg, git.ExecRunner{}, out, errOut); code != exitOK {
+		t.Fatalf("runPush() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "push plan") || !strings.Contains(out.String(), "repo: main") {
+		t.Fatalf("stdout = %q, want root push plan", out.String())
 	}
 }
 
@@ -495,5 +517,20 @@ func initTestGit(t *testing.T, dir string) {
 	}
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func commitTestFiles(t *testing.T, dir, message string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"config", "user.email", "smt@example.invalid"},
+		{"config", "user.name", "SMT Test"},
+		{"add", "-A"},
+		{"commit", "-m", message},
+	} {
+		command := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
 	}
 }

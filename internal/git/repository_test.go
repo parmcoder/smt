@@ -204,6 +204,39 @@ func TestTemporaryRepositoryInspection(t *testing.T) {
 	}
 }
 
+func TestInspectIgnoresOnlyUntrackedOSMetadata(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "smt@example.invalid")
+	runGit(t, dir, "config", "user.name", "SMT Test")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "tracked.txt")
+	runGit(t, dir, "commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte("metadata\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := Inspect(context.Background(), ExecRunner{}, Repository{ID: "repo", Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Dirty || len(state.ChangedFiles) != 0 {
+		t.Fatalf("state = %#v, want harmless untracked metadata ignored", state)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err = Inspect(context.Background(), ExecRunner{}, Repository{ID: "repo", Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Dirty || len(state.ChangedFiles) != 1 || state.ChangedFiles[0] != "tracked.txt" {
+		t.Fatalf("state = %#v, want tracked change to remain visible", state)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	command := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...)
