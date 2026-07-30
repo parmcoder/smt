@@ -13,6 +13,8 @@ import (
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
+	"github.com/parmcoder/smt/internal/scaffold"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRunValidateMessageExitCodes(t *testing.T) {
@@ -102,6 +104,47 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "worktree plan") || !strings.Contains(out.String(), destination) {
 		t.Fatalf("stdout = %q, want root worktree plan", out.String())
+	}
+}
+
+func TestRunPushUsesRemoteURLsConfiguredAfterInit(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "platform")
+	if _, err := scaffold.New(git.ExecRunner{}).Init(context.Background(), root, scaffold.Selection{Web: true, API: true, Codex: true}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	cfg, err := config.Load(filepath.Join(root, "smt.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteRoot := t.TempDir()
+	for index := range cfg.Repositories {
+		remote := filepath.Join(remoteRoot, cfg.Repositories[index].ID+".git")
+		result, err := (git.ExecRunner{}).Run(context.Background(), remoteRoot, "init", "--bare", remote)
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("initialize remote %s: result=%#v error=%v", cfg.Repositories[index].ID, result, err)
+		}
+		cfg.Repositories[index].Remote.URL = remote
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "smt.yaml"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commitTestFiles(t, root, "configure remotes")
+	t.Chdir(root)
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"push"}, out, errOut); code != exitOK {
+		t.Fatalf("run push code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	positions := []int{
+		strings.Index(out.String(), "pushed web"),
+		strings.Index(out.String(), "pushed api"),
+		strings.Index(out.String(), "pushed repo"),
+	}
+	if positions[0] < 0 || positions[1] < positions[0] || positions[2] < positions[1] {
+		t.Fatalf("stdout = %q, want web then api then repo", out.String())
 	}
 }
 
