@@ -106,6 +106,81 @@ repositories:
 	}
 }
 
+func TestLoadWorkspaceScaffoldConfiguration(t *testing.T) {
+	yaml := `version: 1
+workspace:
+  ai_assist: codex
+  stack:
+    web: nextjs
+    api: go
+    database: postgresql
+    devops: [docker, opentofu]
+commit:
+  types: [chore]
+  scopes: [repo, web]
+repositories:
+  - id: repo
+    path: .
+    scope: repo
+    remote:
+      url: ""
+  - id: web
+    path: web-app
+    component: web
+    technology: nextjs
+    scope: web
+    remote:
+      url: git@github.com:example/web-app.git
+`
+
+	cfg, err := Load(writeConfig(t, yaml))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Workspace.AIAssist; got != "codex" {
+		t.Fatalf("AIAssist = %q, want codex", got)
+	}
+	if got := cfg.Workspace.Stack.Database; got != "postgresql" {
+		t.Fatalf("database stack = %q, want postgresql", got)
+	}
+	if got := cfg.Repositories[1].Remote.URL; got != "git@github.com:example/web-app.git" {
+		t.Fatalf("remote URL = %q", got)
+	}
+}
+
+func TestLoadRejectsInvalidWorkspaceScaffoldConfiguration(t *testing.T) {
+	base := `version: 1
+workspace:
+  ai_assist: codex
+  stack:
+    web: nextjs
+commit:
+  types: [chore]
+  scopes: [repo]
+repositories:
+  - id: repo
+    path: .
+    scope: repo
+`
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "unknown assistant", yaml: strings.Replace(base, "ai_assist: codex", "ai_assist: cursor", 1), want: "workspace.ai_assist"},
+		{name: "unknown web stack", yaml: strings.Replace(base, "web: nextjs", "web: react", 1), want: "workspace.stack.web"},
+		{name: "remote credentials", yaml: base + "    remote: {url: https://user:token@example.com/repo.git}\n", want: "remote.url must not contain credentials"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tt.yaml))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadNamedProfilesAndContracts(t *testing.T) {
 	yaml := `version: 1
 commit:

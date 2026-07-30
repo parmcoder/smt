@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,10 +17,26 @@ import (
 // Config is the typed SMT configuration file.
 type Config struct {
 	Version      int          `yaml:"version"`
-	Providers    Providers    `yaml:"providers"`
+	Workspace    Workspace    `yaml:"workspace,omitempty"`
+	Providers    Providers    `yaml:"providers,omitempty"`
 	Commit       CommitConfig `yaml:"commit"`
 	Repositories []Repository `yaml:"repositories"`
-	Contracts    Contracts    `yaml:"contracts"`
+	Contracts    Contracts    `yaml:"contracts,omitempty"`
+}
+
+// Workspace records the initialized platform choices without prescribing
+// dependency versions or application implementation details.
+type Workspace struct {
+	AIAssist string         `yaml:"ai_assist,omitempty"`
+	Stack    WorkspaceStack `yaml:"stack,omitempty"`
+}
+
+// WorkspaceStack contains the fixed first-release component profiles.
+type WorkspaceStack struct {
+	Web      string   `yaml:"web,omitempty"`
+	API      string   `yaml:"api,omitempty"`
+	Database string   `yaml:"database,omitempty"`
+	DevOps   []string `yaml:"devops,omitempty"`
 }
 
 // Providers contains optional provider settings.
@@ -43,13 +60,21 @@ type CommitConfig struct {
 
 // Repository describes one root repository or independent submodule.
 type Repository struct {
-	ID       string        `yaml:"id"`
-	Path     string        `yaml:"path"`
-	Provider string        `yaml:"provider"`
-	Project  string        `yaml:"project"`
-	Scope    string        `yaml:"scope"`
-	Checks   []Check       `yaml:"-"`
-	Profiles CheckProfiles `yaml:"-"`
+	ID         string        `yaml:"id"`
+	Path       string        `yaml:"path"`
+	Component  string        `yaml:"component,omitempty"`
+	Technology string        `yaml:"technology,omitempty"`
+	Remote     Remote        `yaml:"remote"`
+	Provider   string        `yaml:"provider,omitempty"`
+	Project    string        `yaml:"project,omitempty"`
+	Scope      string        `yaml:"scope"`
+	Checks     []Check       `yaml:"-"`
+	Profiles   CheckProfiles `yaml:"-"`
+}
+
+// Remote holds a credential-free Git destination configured after init.
+type Remote struct {
+	URL string `yaml:"url"`
 }
 
 // Check is a configured preflight check.
@@ -84,18 +109,23 @@ type Contract struct {
 // UnmarshalYAML accepts both the legacy check list and named check profiles.
 func (r *Repository) UnmarshalYAML(value *yaml.Node) error {
 	type repositoryFields struct {
-		ID       string    `yaml:"id"`
-		Path     string    `yaml:"path"`
-		Provider string    `yaml:"provider"`
-		Project  string    `yaml:"project"`
-		Scope    string    `yaml:"scope"`
-		Checks   yaml.Node `yaml:"checks"`
+		ID         string    `yaml:"id"`
+		Path       string    `yaml:"path"`
+		Component  string    `yaml:"component"`
+		Technology string    `yaml:"technology"`
+		Remote     Remote    `yaml:"remote"`
+		Provider   string    `yaml:"provider"`
+		Project    string    `yaml:"project"`
+		Scope      string    `yaml:"scope"`
+		Checks     yaml.Node `yaml:"checks"`
 	}
 	var raw repositoryFields
 	if err := value.Decode(&raw); err != nil {
 		return err
 	}
-	r.ID, r.Path, r.Provider, r.Project, r.Scope = raw.ID, raw.Path, raw.Provider, raw.Project, raw.Scope
+	r.ID, r.Path = raw.ID, raw.Path
+	r.Component, r.Technology, r.Remote = raw.Component, raw.Technology, raw.Remote
+	r.Provider, r.Project, r.Scope = raw.Provider, raw.Project, raw.Scope
 	if raw.Checks.Kind == 0 {
 		return nil
 	}
@@ -157,6 +187,9 @@ func (c *Config) Validate(workspaceRoot string) error {
 		}
 		commitScopes[scope] = struct{}{}
 	}
+	if err := c.Workspace.validate(); err != nil {
+		return err
+	}
 
 	seen := map[string]map[string]struct{}{
 		"id": {}, "path": {}, "project": {}, "scope": {},
@@ -169,7 +202,7 @@ func (c *Config) Validate(workspaceRoot string) error {
 	for i, repo := range c.Repositories {
 		normalizedPath := filepath.Clean(repo.Path)
 		for field, value := range map[string]string{
-			"id": repo.ID, "path": normalizedPath, "project": repo.Project, "scope": repo.Scope,
+			"id": repo.ID, "path": normalizedPath, "scope": repo.Scope,
 		} {
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf("repository %d %s is required", i, field)
@@ -179,8 +212,26 @@ func (c *Config) Validate(workspaceRoot string) error {
 			}
 			seen[field][value] = struct{}{}
 		}
-		if repo.Provider != "gitlab" && repo.Provider != "github" {
+		if repo.Project != "" {
+			if _, exists := seen["project"][repo.Project]; exists {
+				return fmt.Errorf("duplicate repository project %q", repo.Project)
+			}
+			seen["project"][repo.Project] = struct{}{}
+		}
+		if repo.Provider != "" && repo.Provider != "gitlab" && repo.Provider != "github" {
 			return fmt.Errorf("provider must be gitlab or github")
+		}
+		if repo.Provider == "" && repo.Project != "" {
+			return fmt.Errorf("repository %q project requires provider", repo.ID)
+		}
+		if repo.Provider != "" && repo.Project == "" {
+			return fmt.Errorf("repository %q provider requires project", repo.ID)
+		}
+		if err := validateComponent(repo); err != nil {
+			return fmt.Errorf("repository %q: %w", repo.ID, err)
+		}
+		if err := validateRemoteURL(repo.Remote.URL); err != nil {
+			return fmt.Errorf("repository %q: %w", repo.ID, err)
 		}
 		if normalizedPath == "." {
 			rootCount++
@@ -207,6 +258,84 @@ func (c *Config) Validate(workspaceRoot string) error {
 		return fmt.Errorf("exactly one root repository with path . is required")
 	}
 	return c.validateContracts(root, seenRepositoryIDs(c.Repositories))
+}
+
+func (w Workspace) validate() error {
+	if w.AIAssist != "" && w.AIAssist != "codex" {
+		return fmt.Errorf("workspace.ai_assist must be codex when set")
+	}
+	for _, stack := range []struct {
+		field string
+		value string
+		want  string
+	}{
+		{field: "web", value: w.Stack.Web, want: "nextjs"},
+		{field: "api", value: w.Stack.API, want: "go"},
+		{field: "database", value: w.Stack.Database, want: "postgresql"},
+	} {
+		if stack.value != "" && stack.value != stack.want {
+			return fmt.Errorf("workspace.stack.%s must be %s when set", stack.field, stack.want)
+		}
+	}
+	seen := make(map[string]struct{}, len(w.Stack.DevOps))
+	for _, tool := range w.Stack.DevOps {
+		if tool != "docker" && tool != "opentofu" {
+			return fmt.Errorf("workspace.stack.devops contains unsupported tool %q", tool)
+		}
+		if _, ok := seen[tool]; ok {
+			return fmt.Errorf("workspace.stack.devops contains duplicate tool %q", tool)
+		}
+		seen[tool] = struct{}{}
+	}
+	return nil
+}
+
+func validateComponent(repository Repository) error {
+	if repository.Component == "" && repository.Technology == "" {
+		return nil
+	}
+	expected := map[string]string{
+		"web":      "nextjs",
+		"api":      "go",
+		"database": "postgresql",
+		"devops":   "docker-opentofu",
+	}
+	want, ok := expected[repository.Component]
+	if !ok {
+		return fmt.Errorf("component must be web, api, database, or devops")
+	}
+	if repository.Technology != want {
+		return fmt.Errorf("technology for component %q must be %q", repository.Component, want)
+	}
+	return nil
+}
+
+func validateRemoteURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	if !strings.Contains(raw, "://") {
+		// Git also accepts scp-like SSH URLs such as git@host:group/repo.git.
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("remote.url is invalid: %w", err)
+	}
+	if parsed.User != nil && parsed.Scheme != "ssh" {
+		return fmt.Errorf("remote.url must not contain credentials")
+	}
+	if parsed.User != nil {
+		if _, hasPassword := parsed.User.Password(); hasPassword {
+			return fmt.Errorf("remote.url must not contain credentials")
+		}
+	}
+	for _, key := range []string{"access_token", "token", "password"} {
+		if parsed.Query().Get(key) != "" {
+			return fmt.Errorf("remote.url must not contain credentials")
+		}
+	}
+	return nil
 }
 
 func (r Repository) profiles() CheckProfiles {

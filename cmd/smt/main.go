@@ -21,6 +21,7 @@ import (
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
 	"github.com/parmcoder/smt/internal/operations"
+	"github.com/parmcoder/smt/internal/scaffold"
 	"github.com/sirupsen/logrus"
 )
 
@@ -36,6 +37,10 @@ func main() {
 }
 
 func run(args []string, out, errOut io.Writer) int {
+	return runWithInput(args, os.Stdin, out, errOut)
+}
+
+func runWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 	verbose := len(args) > 0 && args[0] == "--verbose"
 	if verbose {
 		args = args[1:]
@@ -46,7 +51,7 @@ func run(args []string, out, errOut io.Writer) int {
 	}
 	logger := newRunLogger(verbose, errOut)
 	started := time.Now()
-	code := runCommand(args, out, errOut, logger)
+	code := runCommand(args, in, out, errOut, logger)
 	if verbose {
 		logger.WithFields(logrus.Fields{
 			"command":     command,
@@ -81,10 +86,13 @@ func newRunLogger(verbose bool, errOut io.Writer) *logrus.Logger {
 	return logger
 }
 
-func runCommand(args []string, out, errOut io.Writer, logger *logrus.Logger) int {
+func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logrus.Logger) int {
 	if len(args) == 0 {
 		printUsage(errOut)
 		return exitUsage
+	}
+	if args[0] == "init" {
+		return runInit(args[1:], in, out, errOut)
 	}
 	if args[0] == "validate-message" {
 		return runValidateMessage(args[1:], out, errOut)
@@ -116,6 +124,29 @@ func runCommand(args []string, out, errOut io.Writer, logger *logrus.Logger) int
 		printUsage(errOut)
 		return exitUsage
 	}
+}
+
+func runInit(args []string, in io.Reader, out, errOut io.Writer) int {
+	if len(args) > 1 {
+		fmt.Fprintln(errOut, "usage: smt init [PATH]")
+		return exitUsage
+	}
+	destination := "."
+	if len(args) == 1 {
+		destination = args[0]
+	}
+	selection, err := scaffold.Prompt(in, out)
+	if err != nil {
+		fmt.Fprintf(errOut, "init: %v\n", err)
+		return exitUsage
+	}
+	result, err := scaffold.New(git.ExecRunner{}).Init(context.Background(), destination, selection)
+	if err != nil {
+		fmt.Fprintf(errOut, "init: %v\n", err)
+		return exitValidation
+	}
+	fmt.Fprintf(out, "initialized workspace %s (%s)\n", result.Destination, strings.Join(result.Repositories, ", "))
+	return exitOK
 }
 
 func runValidateMessage(args []string, out, errOut io.Writer) int {
@@ -462,5 +493,5 @@ func checkResultMessage(err error) string {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "usage: smt validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
+	fmt.Fprintln(out, "usage: smt init [PATH] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
 }

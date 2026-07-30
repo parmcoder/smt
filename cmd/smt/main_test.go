@@ -44,6 +44,27 @@ func TestRunValidateMessageExitCodes(t *testing.T) {
 	}
 }
 
+func TestRunInitCreatesWorkspaceWithoutExistingConfiguration(t *testing.T) {
+	t.Chdir(t.TempDir())
+	destination := filepath.Join(t.TempDir(), "platform")
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	code := runWithInput(
+		[]string{"init", destination},
+		strings.NewReader("y\nn\nn\nn\ny\n"),
+		out,
+		errOut,
+	)
+	if code != exitOK {
+		t.Fatalf("run init code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(destination, "smt.yaml")); err != nil {
+		t.Fatalf("generated smt.yaml: %v", err)
+	}
+	if !strings.Contains(out.String(), "initialized workspace") {
+		t.Fatalf("stdout = %q, want initialization result", out.String())
+	}
+}
+
 func TestRunVerboseWritesDiagnosticsOnlyToStderr(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
