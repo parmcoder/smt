@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -141,6 +142,51 @@ func TestInitializedWorkspaceCreatesSynchronizedNestedWorktrees(t *testing.T) {
 		}
 		if !state.Initialized || state.Detached || state.Branch != "feature/demo" {
 			t.Fatalf("%s state = %#v, want linked feature/demo worktree", repository.ID, state)
+		}
+	}
+}
+
+func TestInitializedWorkspacePushesChildrenThenRootToConfiguredRemotes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "platform")
+	if _, err := New(git.ExecRunner{}).Init(context.Background(), root, Selection{Web: true, API: true, Codex: true}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	cfg, err := config.Load(filepath.Join(root, "smt.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteRoot := t.TempDir()
+	targets := make([]git.PushTarget, 0, len(cfg.Repositories))
+	for _, repository := range cfg.Repositories {
+		remote := filepath.Join(remoteRoot, repository.ID+".git")
+		result, err := (git.ExecRunner{}).Run(context.Background(), remoteRoot, "init", "--bare", remote)
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("initialize remote %s: result=%#v error=%v", repository.ID, result, err)
+		}
+		dir := root
+		if repository.Path != "." {
+			dir = filepath.Join(root, repository.Path)
+		}
+		targets = append(targets, git.PushTarget{
+			Repository: git.Repository{ID: repository.ID, Dir: dir, IsRoot: repository.Path == "."},
+			RemoteURL:  remote,
+		})
+	}
+	plan, err := git.PlanPush(context.Background(), git.ExecRunner{}, targets)
+	if err != nil {
+		t.Fatalf("PlanPush() error = %v", err)
+	}
+	report, err := git.ExecutePush(context.Background(), git.ExecRunner{}, plan, false)
+	if err != nil {
+		t.Fatalf("ExecutePush() error = %v", err)
+	}
+	if got := []string{report.Pushed[0].Repository.ID, report.Pushed[1].Repository.ID, report.Pushed[2].Repository.ID}; !reflect.DeepEqual(got, []string{"web", "api", "repo"}) {
+		t.Fatalf("push order = %v, want web, api, repo", got)
+	}
+	for _, target := range targets {
+		result, err := (git.ExecRunner{}).Run(context.Background(), target.RemoteURL, "show-ref", "--verify", "--quiet", "refs/heads/main")
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("remote %s has no pushed main branch: result=%#v error=%v", target.Repository.ID, result, err)
 		}
 	}
 }

@@ -8,13 +8,65 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-30
 ---
 # SMT — Command Recipes
 
 These examples assume commands run from the repository root, `smt.yaml` is
 present and valid, and Go plus Task are installed. Build first when using
 `bin/smt`.
+
+## Create a platform workspace
+
+```sh
+bin/smt init ../platform
+```
+
+`init` interactively selects the fixed Next.js, Go, PostgreSQL, Docker/OpenTofu,
+and Codex profiles. It creates a root repository, one local submodule per
+selected component, `smt.yaml`, ignore files, and a repository-local Codex
+manager/worker/documentation workflow. It does not install dependencies or
+create remote repositories.
+
+Add credential-free remote URLs after initialization:
+
+```yaml
+repositories:
+  - id: web
+    path: web-app
+    remote:
+      url: git@github.com:example/web-app.git
+```
+
+The generated `.gitmodules` records local bootstrap URLs. SMT pushes through
+`remote.url` but does not yet synchronize those values into `.gitmodules` for
+fresh external clones.
+
+## Push configured repositories
+
+```sh
+bin/smt push --dry-run
+bin/smt push
+```
+
+The dry run validates every root/submodule worktree and prints each current
+branch in execution order without contacting a remote. A real push rejects
+missing remote URLs, dirty or detached repositories, and uninitialized paths;
+it pushes child repositories first and the root last. SMT never stages,
+commits, force-pushes, or rolls back a successful child push.
+
+## Create a synchronized linked worktree
+
+```sh
+bin/smt worktree add ../platform-feature --branch feature/demo --dry-run
+bin/smt worktree add ../platform-feature --branch feature/demo
+```
+
+The branch must be new in every configured repository. SMT verifies clean,
+attached, initialized root/submodule state plus matching root gitlinks before
+creating the root worktree and then nested child worktrees. If an unexpected
+child creation fails, SMT reports the created and pending paths for manual
+recovery; it does not delete worktrees automatically.
 
 ## Build and validate
 

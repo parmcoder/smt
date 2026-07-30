@@ -2,8 +2,10 @@
 
 Sanovy Mono Tool is a small Go CLI for inspectable, repeatable work across a
 Git root repository and independent submodules. The v0.1 implementation is
-available locally, including status/diagnostics, check profiles, contract
-validation, CI contract auditing, guarded bumps, and release packaging.
+available locally, including interactive workspace scaffolding, configured
+repository pushes, synchronized linked worktrees, status/diagnostics, check
+profiles, contract validation, CI contract auditing, guarded bumps, and release
+packaging.
 
 ## Minimal onboarding
 
@@ -15,6 +17,13 @@ task verify
 bin/smt status
 bin/smt doctor
 ```
+
+To create a new local platform workspace, run `bin/smt init PATH`. It prompts
+for the fixed Next.js, Go, PostgreSQL, Docker/OpenTofu, and Codex profiles,
+then creates a root repository and selected local submodules. Add credential-
+free `remote.url` values to its generated `smt.yaml` before using
+`bin/smt push [--dry-run]`. Create a matching root-plus-submodule workspace
+with `bin/smt worktree add PATH --branch NAME [--dry-run]`.
 
 For copyable command examples, configuration assumptions, and the safe release
 flow, see [SMT Command Recipes](docs/10-development/SMT%20-%20Command%20Recipes.md).
