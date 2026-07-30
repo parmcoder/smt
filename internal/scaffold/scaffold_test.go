@@ -101,3 +101,46 @@ func TestInitRequiresAtLeastOneComponent(t *testing.T) {
 		t.Fatalf("Init() error = %v, want component selection refusal", err)
 	}
 }
+
+func TestInitializedWorkspaceCreatesSynchronizedNestedWorktrees(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "platform")
+	if _, err := New(git.ExecRunner{}).Init(context.Background(), root, Selection{Web: true, API: true, Codex: true}); err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	cfg, err := config.Load(filepath.Join(root, "smt.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := make([]git.WorktreeTarget, 0, len(cfg.Repositories))
+	for _, repository := range cfg.Repositories {
+		dir := root
+		if repository.Path != "." {
+			dir = filepath.Join(root, repository.Path)
+		}
+		targets = append(targets, git.WorktreeTarget{
+			Repository: git.Repository{ID: repository.ID, Dir: dir, IsRoot: repository.Path == "."},
+			Path:       repository.Path,
+		})
+	}
+	destination := filepath.Join(t.TempDir(), "feature-platform")
+	plan, err := git.PlanWorktree(context.Background(), git.ExecRunner{}, targets, destination, "feature/demo")
+	if err != nil {
+		t.Fatalf("PlanWorktree() error = %v", err)
+	}
+	if _, err := git.ExecuteWorktree(context.Background(), git.ExecRunner{}, plan, false); err != nil {
+		t.Fatalf("ExecuteWorktree() error = %v", err)
+	}
+	for _, repository := range cfg.Repositories {
+		dir := destination
+		if repository.Path != "." {
+			dir = filepath.Join(destination, repository.Path)
+		}
+		state, err := git.Inspect(context.Background(), git.ExecRunner{}, git.Repository{ID: repository.ID, Dir: dir, IsRoot: repository.Path == "."})
+		if err != nil {
+			t.Fatalf("inspect %s worktree: %v", repository.ID, err)
+		}
+		if !state.Initialized || state.Detached || state.Branch != "feature/demo" {
+			t.Fatalf("%s state = %#v, want linked feature/demo worktree", repository.ID, state)
+		}
+	}
+}

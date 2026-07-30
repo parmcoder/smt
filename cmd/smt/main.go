@@ -110,6 +110,8 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 		return runStatus(ctx, args[1:], cfg, root, runner, out, errOut)
 	case "push":
 		return runPush(ctx, args[1:], *cfg, runner, out, errOut)
+	case "worktree":
+		return runWorktree(ctx, args[1:], *cfg, root, runner, out, errOut)
 	case "doctor":
 		return runDoctor(ctx, args[1:], cfg, runner, out, errOut)
 	case "check":
@@ -171,6 +173,77 @@ func runPush(ctx context.Context, args []string, cfg config.Config, runner git.R
 	}
 	fmt.Fprintf(errOut, "push: %v\n", err)
 	return exitValidation
+}
+
+func runWorktree(ctx context.Context, args []string, cfg config.Config, root string, runner git.Runner, out, errOut io.Writer) int {
+	destination, branch, dryRun, ok := parseWorktreeArgs(args)
+	if !ok {
+		fmt.Fprintln(errOut, "usage: smt worktree add PATH --branch NAME [--dry-run]")
+		return exitUsage
+	}
+	targets := make([]git.WorktreeTarget, 0, len(cfg.Repositories))
+	for _, repository := range cfg.Repositories {
+		dir := root
+		if filepath.Clean(repository.Path) != "." {
+			dir = filepath.Join(root, repository.Path)
+		}
+		targets = append(targets, git.WorktreeTarget{
+			Repository: git.Repository{
+				ID:     repository.ID,
+				Dir:    dir,
+				IsRoot: filepath.Clean(repository.Path) == ".",
+			},
+			Path: repository.Path,
+		})
+	}
+	plan, err := git.PlanWorktree(ctx, runner, targets, destination, branch)
+	if err != nil {
+		fmt.Fprintf(errOut, "worktree: %v\n", err)
+		return exitValidation
+	}
+	report, err := git.ExecuteWorktree(ctx, runner, plan, dryRun)
+	if report.DryRun {
+		fmt.Fprintln(out, "worktree plan:")
+		for _, step := range report.Planned {
+			fmt.Fprintf(out, "%s: %s\n", step.Repository.ID, step.Destination)
+		}
+		return exitOK
+	}
+	for _, step := range report.Created {
+		fmt.Fprintf(out, "created %s: %s\n", step.Repository.ID, step.Destination)
+	}
+	if err == nil {
+		return exitOK
+	}
+	for _, step := range report.Pending {
+		fmt.Fprintf(out, "pending %s: %s\n", step.Repository.ID, step.Destination)
+	}
+	fmt.Fprintf(errOut, "worktree: %v\n", err)
+	return exitValidation
+}
+
+func parseWorktreeArgs(args []string) (destination, branch string, dryRun, ok bool) {
+	if len(args) == 0 || args[0] != "add" {
+		return "", "", false, false
+	}
+	for index := 1; index < len(args); index++ {
+		switch args[index] {
+		case "--dry-run":
+			dryRun = true
+		case "--branch":
+			if index+1 >= len(args) || args[index+1] == "" {
+				return "", "", false, false
+			}
+			branch = args[index+1]
+			index++
+		default:
+			if strings.HasPrefix(args[index], "-") || destination != "" {
+				return "", "", false, false
+			}
+			destination = args[index]
+		}
+	}
+	return destination, branch, dryRun, destination != "" && branch != ""
 }
 
 func runInit(args []string, in io.Reader, out, errOut io.Writer) int {
@@ -540,5 +613,5 @@ func checkResultMessage(err error) string {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "usage: smt init [PATH] | push [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
+	fmt.Fprintln(out, "usage: smt init [PATH] | push [--dry-run] | worktree add PATH --branch NAME [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
 }

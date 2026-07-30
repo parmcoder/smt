@@ -87,6 +87,24 @@ func TestRunPushDryRunPrintsChildFirstPlanWithoutRemoteAccess(t *testing.T) {
 	}
 }
 
+func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
+	root := t.TempDir()
+	initTestGit(t, root)
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commitTestFiles(t, root, "initial")
+	destination := filepath.Join(t.TempDir(), "feature")
+	cfg := config.Config{Repositories: []config.Repository{{ID: "repo", Path: ".", Scope: "repo"}}}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWorktree(context.Background(), []string{"add", destination, "--branch", "feature/demo", "--dry-run"}, cfg, root, git.ExecRunner{}, out, errOut); code != exitOK {
+		t.Fatalf("runWorktree() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "worktree plan") || !strings.Contains(out.String(), destination) {
+		t.Fatalf("stdout = %q, want root worktree plan", out.String())
+	}
+}
+
 func TestRunVerboseWritesDiagnosticsOnlyToStderr(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
