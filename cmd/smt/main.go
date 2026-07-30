@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/parmcoder/smt/internal/checks"
 	"github.com/parmcoder/smt/internal/commit"
@@ -44,11 +45,14 @@ func run(args []string, out, errOut io.Writer) int {
 		command = args[0]
 	}
 	logger := newRunLogger(verbose, errOut)
-	code := runCommand(args, out, errOut)
+	started := time.Now()
+	code := runCommand(args, out, errOut, logger)
 	if verbose {
 		logger.WithFields(logrus.Fields{
-			"command":   command,
-			"exit_code": code,
+			"command":     command,
+			"status":      commandStatus(code),
+			"exit_code":   code,
+			"duration_ms": time.Since(started).Milliseconds(),
 		}).Debug("command finished")
 	}
 	return code
@@ -57,18 +61,27 @@ func run(args []string, out, errOut io.Writer) int {
 func newRunLogger(verbose bool, errOut io.Writer) *logrus.Logger {
 	logger := logrus.New()
 	logger.SetOutput(errOut)
-	logger.SetFormatter(&logrus.TextFormatter{
-		DisableColors:    true,
-		DisableTimestamp: true,
-		DisableQuote:     true,
-	})
+	formatter := &logrus.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: time.RFC3339,
+		PadLevelText:    true,
+		DisableQuote:    true,
+	}
+	if os.Getenv("CLICOLOR_FORCE") == "1" {
+		formatter.ForceColors = true
+	}
+	if os.Getenv("NO_COLOR") != "" {
+		formatter.DisableColors = true
+		formatter.ForceColors = false
+	}
+	logger.SetFormatter(formatter)
 	if verbose {
 		logger.SetLevel(logrus.DebugLevel)
 	}
 	return logger
 }
 
-func runCommand(args []string, out, errOut io.Writer) int {
+func runCommand(args []string, out, errOut io.Writer, logger *logrus.Logger) int {
 	if len(args) == 0 {
 		printUsage(errOut)
 		return exitUsage
@@ -90,7 +103,7 @@ func runCommand(args []string, out, errOut io.Writer) int {
 	case "doctor":
 		return runDoctor(ctx, args[1:], cfg, runner, out, errOut)
 	case "check":
-		return runCheck(ctx, args[1:], *cfg, runner, out, errOut)
+		return runCheck(ctx, args[1:], *cfg, runner, out, errOut, logger)
 	case "contracts":
 		if len(args) != 2 || args[1] != "validate" {
 			fmt.Fprintln(errOut, "usage: smt contracts validate")
@@ -235,7 +248,7 @@ func runDoctor(ctx context.Context, args []string, cfg *config.Config, runner gi
 	return exitOK
 }
 
-func runCheck(ctx context.Context, args []string, cfg config.Config, runner git.Runner, out, errOut io.Writer) int {
+func runCheck(ctx context.Context, args []string, cfg config.Config, runner git.Runner, out, errOut io.Writer, logger *logrus.Logger) int {
 	flags := flag.NewFlagSet("check", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	profile := flags.String("profile", "", "check profile")
@@ -259,7 +272,7 @@ func runCheck(ctx context.Context, args []string, cfg config.Config, runner git.
 			return exitUsage
 		}
 	}
-	executor := commandExecutor{}
+	executor := commandExecutor{logger: logger.WithField("profile", *profile)}
 	for _, repository := range selected {
 		if _, ok := repository.Profiles[*profile]; !ok {
 			fmt.Fprintf(errOut, "repository %q has no check profile %q\n", repository.ID, *profile)
@@ -385,17 +398,46 @@ func printFindings(out io.Writer, report contracts.Report) {
 	}
 }
 
-type commandExecutor struct{}
+type commandExecutor struct {
+	logger *logrus.Entry
+}
 
-func (commandExecutor) Run(ctx context.Context, dir string, argv []string, repositoryID string) error {
+func (e commandExecutor) Run(ctx context.Context, dir string, argv []string, repositoryID string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("repository %s: empty command", repositoryID)
 	}
+	program := filepath.Base(argv[0])
+	entry := e.logger
+	if entry != nil {
+		entry = entry.WithFields(logrus.Fields{
+			"repository": repositoryID,
+			"program":    program,
+		})
+		entry.Debug("check started")
+	}
+	started := time.Now()
 	command := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	command.Dir = dir
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
+	err := command.Run()
+	exitCode := -1
+	if command.ProcessState != nil {
+		exitCode = command.ProcessState.ExitCode()
+	}
+	status := "success"
+	if err != nil {
+		status = "failed"
+	}
+	if entry != nil {
+		entry.WithFields(logrus.Fields{
+			"status":       status,
+			"exit_code":    exitCode,
+			"duration_ms":  time.Since(started).Milliseconds(),
+			"stderr_bytes": len(stderr.Bytes()),
+		}).Debug(checkResultMessage(err))
+	}
+	if err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message != "" {
 			return fmt.Errorf("%w: %s", err, message)
@@ -403,6 +445,20 @@ func (commandExecutor) Run(ctx context.Context, dir string, argv []string, repos
 		return err
 	}
 	return nil
+}
+
+func commandStatus(code int) string {
+	if code == exitOK {
+		return "success"
+	}
+	return "failed"
+}
+
+func checkResultMessage(err error) string {
+	if err == nil {
+		return "check completed"
+	}
+	return "check failed"
 }
 
 func printUsage(out io.Writer) {

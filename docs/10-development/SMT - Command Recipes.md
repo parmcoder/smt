@@ -69,6 +69,21 @@ bin/smt --verbose status --json > status.json
 
 JSON remains on stdout in `status.json`; Logrus diagnostics go only to stderr.
 
+Verbose check commands include timestamped, structured results for each
+configured command, including the repository, profile, program, status, exit
+code, duration, and captured stderr byte count. Arguments and command output
+are not copied into Logrus fields.
+
+Colors are enabled automatically for interactive terminals. Use `NO_COLOR` to
+disable ANSI colors, or `CLICOLOR_FORCE=1` to force them when output is being
+redirected; `NO_COLOR` takes precedence.
+
+```sh
+bin/smt --verbose check --profile hook
+NO_COLOR=1 bin/smt --verbose check --profile hook
+CLICOLOR_FORCE=1 bin/smt --verbose check --profile hook 2> verbose.log
+```
+
 ## Release flow
 
 ```sh

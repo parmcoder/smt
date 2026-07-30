@@ -61,11 +61,41 @@ func TestRunVerboseWritesDiagnosticsOnlyToStderr(t *testing.T) {
 	if got, want := out.String(), "valid commit message\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-	if got := errOut.String(); got != "level=debug msg=command finished command=validate-message exit_code=0\n" {
-		t.Fatalf("stderr = %q, want deterministic debug diagnostic", got)
+	for _, want := range []string{
+		"level=debug",
+		"msg=command finished",
+		"command=validate-message",
+		"status=success",
+		"exit_code=0",
+		"duration_ms=",
+		"time=",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want field %q", errOut.String(), want)
+		}
+	}
+	if strings.Contains(errOut.String(), "\x1b[") {
+		t.Fatalf("stderr = %q, want no ANSI colors for a buffered writer", errOut.String())
 	}
 	if strings.Contains(errOut.String(), file) {
 		t.Fatalf("stderr contains command argument: %q", errOut.String())
+	}
+}
+
+func TestNewRunLoggerColorEnvironment(t *testing.T) {
+	t.Setenv("CLICOLOR_FORCE", "1")
+	t.Setenv("NO_COLOR", "")
+	forced := new(strings.Builder)
+	newRunLogger(true, forced).Debug("forced colors")
+	if !strings.Contains(forced.String(), "\x1b[") {
+		t.Fatalf("forced output = %q, want ANSI colors", forced.String())
+	}
+
+	t.Setenv("NO_COLOR", "1")
+	disabled := new(strings.Builder)
+	newRunLogger(true, disabled).Debug("disabled colors")
+	if strings.Contains(disabled.String(), "\x1b[") {
+		t.Fatalf("disabled output = %q, want NO_COLOR to suppress ANSI colors", disabled.String())
 	}
 }
 
@@ -102,8 +132,93 @@ func TestRunVerboseInvalidCommandPreservesUsageAndExitCode(t *testing.T) {
 	if !strings.Contains(errOut.String(), "usage: smt") {
 		t.Fatalf("stderr = %q, want usage", errOut.String())
 	}
-	if !strings.HasSuffix(errOut.String(), "level=debug msg=command finished command=unknown exit_code=1\n") {
-		t.Fatalf("stderr = %q, want trailing invalid-command diagnostic", errOut.String())
+	if !strings.Contains(errOut.String(), "level=debug") ||
+		!strings.Contains(errOut.String(), "msg=command finished") ||
+		!strings.Contains(errOut.String(), "command=unknown") ||
+		!strings.Contains(errOut.String(), "status=failed") ||
+		!strings.Contains(errOut.String(), "exit_code=1") {
+		t.Fatalf("stderr = %q, want invalid-command diagnostic fields", errOut.String())
+	}
+}
+
+func TestRunVerboseCheckIncludesCommandResultDetails(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	initTestGit(t, root)
+	if err := os.WriteFile("smt.yaml", []byte(`version: 1
+commit:
+  types: [feat]
+  scopes: [repo]
+repositories:
+  - id: repo
+    path: .
+    provider: gitlab
+    project: sanovy/root
+    scope: repo
+    checks:
+      hook:
+        - kind: command
+          argv: [go, version]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"--verbose", "check", "--profile", "hook"}, out, errOut); code != exitOK {
+		t.Fatalf("run() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{
+		"repository=repo",
+		"profile=hook",
+		"program=go",
+		"status=success",
+		"exit_code=0",
+		"duration_ms=",
+		"stderr_bytes=0",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want field %q", errOut.String(), want)
+		}
+	}
+}
+
+func TestRunVerboseCheckFailureLogsSafeMetadata(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	initTestGit(t, root)
+	if err := os.WriteFile("smt.yaml", []byte(`version: 1
+commit:
+  types: [feat]
+  scopes: [repo]
+repositories:
+  - id: repo
+    path: .
+    provider: gitlab
+    project: sanovy/root
+    scope: repo
+    checks:
+      hook:
+        - kind: command
+          argv: [go, command-that-does-not-exist]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"--verbose", "check", "--profile", "hook"}, out, errOut); code != exitValidation {
+		t.Fatalf("run() code = %d, want %d, stdout=%q, stderr=%q", code, exitValidation, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "status=failed") ||
+		!strings.Contains(errOut.String(), "repository=repo") ||
+		!strings.Contains(errOut.String(), "profile=hook") ||
+		!strings.Contains(errOut.String(), "program=go") ||
+		!strings.Contains(errOut.String(), "stderr_bytes=") {
+		t.Fatalf("stderr = %q, want safe failure fields", errOut.String())
+	}
+	for _, line := range strings.Split(errOut.String(), "\n") {
+		if strings.Contains(line, "level=debug") && strings.Contains(line, "command-that-does-not-exist") {
+			t.Fatalf("debug log contains full command arguments: %q", line)
+		}
 	}
 }
 
@@ -143,7 +258,7 @@ contracts:
 		t.Fatal(err)
 	}
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := run([]string{"status", "--json"}, out, errOut); code != 0 {
+	if code := run([]string{"--verbose", "status", "--json"}, out, errOut); code != 0 {
 		t.Fatalf("run() code = %d, stderr=%q", code, errOut.String())
 	}
 	var got struct {
@@ -159,6 +274,9 @@ contracts:
 	}
 	if len(got.Repositories) != 1 || got.Profiles[0] != "hook" || got.Contracts.Errors != 1 {
 		t.Fatalf("status JSON = %#v, want repository, hook profile, and one contract error", got)
+	}
+	if !strings.Contains(errOut.String(), "command=status") || !strings.Contains(errOut.String(), "status=success") {
+		t.Fatalf("verbose stderr = %q, want final command result", errOut.String())
 	}
 }
 
