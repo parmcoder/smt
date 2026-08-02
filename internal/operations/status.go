@@ -3,8 +3,6 @@ package operations
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
@@ -30,21 +28,20 @@ type HookInspector func(string) (hooks.HookStatus, error)
 // Service reports configured repository state without changing the workspace.
 type Service struct {
 	config config.Config
-	runner git.Runner
 	hooks  HookInspector
 }
 
 // New creates a read-only status service for cfg using runner for Git commands.
-func New(cfg config.Config, runner git.Runner) *Service {
-	return NewWithHookInspector(cfg, runner, hooks.InspectCommitMsg)
+func New(cfg config.Config) *Service {
+	return NewWithHookInspector(cfg, hooks.InspectCommitMsg)
 }
 
 // NewWithHookInspector creates a status service with an injected local hook inspector.
-func NewWithHookInspector(cfg config.Config, runner git.Runner, inspector HookInspector) *Service {
+func NewWithHookInspector(cfg config.Config, inspector HookInspector) *Service {
 	if inspector == nil {
 		inspector = hooks.InspectCommitMsg
 	}
-	return &Service{config: cfg, runner: runner, hooks: inspector}
+	return &Service{config: cfg, hooks: inspector}
 }
 
 // Status inspects repositories in their configured order and records each
@@ -60,7 +57,7 @@ func (s *Service) Status(ctx context.Context) ([]Entry, error) {
 				appendDiagnostic(&entry, hookErr)
 			}
 		}
-		state, err := git.Inspect(ctx, s.runner, git.Repository{
+		state, err := git.Inspect(ctx, git.Repository{
 			ID:  repository.ID,
 			Dir: repository.Path,
 		})
@@ -75,11 +72,11 @@ func (s *Service) Status(ctx context.Context) ([]Entry, error) {
 		}
 
 		if state.Initialized && !state.Detached {
-			result, runErr := s.runner.Run(ctx, repository.Path, "rev-parse", "HEAD")
-			if runErr != nil || result.ExitCode > 0 {
-				appendDiagnostic(&entry, fmt.Errorf("%s", gitDiagnostic(result, runErr)))
+			head, headErr := git.HeadSHA(ctx, git.Repository{ID: repository.ID, Dir: repository.Path})
+			if headErr != nil {
+				appendDiagnostic(&entry, headErr)
 			} else {
-				entry.HeadSHA = strings.TrimSpace(result.Stdout)
+				entry.HeadSHA = head
 			}
 		}
 		entries = append(entries, entry)
@@ -96,14 +93,4 @@ func appendDiagnostic(entry *Entry, err error) {
 		return
 	}
 	entry.Error += "; " + err.Error()
-}
-
-func gitDiagnostic(result git.Result, err error) string {
-	if err != nil {
-		return err.Error()
-	}
-	if diagnostic := strings.TrimSpace(result.Stderr); diagnostic != "" {
-		return diagnostic
-	}
-	return fmt.Sprintf("git exited with status %d", result.ExitCode)
 }

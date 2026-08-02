@@ -55,8 +55,6 @@ func NewDoctorWithHookInspector(cfg config.Config, lookup ExecutableLookup, envi
 // Run returns all checks in a stable order and does not mutate the workspace.
 func (d *Doctor) Run(ctx context.Context) (Result, error) {
 	result := Result{Checks: make([]Check, 0)}
-	result.Checks = append(result.Checks, d.executableCheck("git"))
-
 	for _, repository := range d.config.Repositories {
 		result.Checks = append(result.Checks, d.repositoryCheck(ctx, repository))
 	}
@@ -117,12 +115,7 @@ func (d *Doctor) executableCheck(name string) Check {
 	return Check{ID: executableID(name), Status: "ok", Message: name + " executable is available"}
 }
 
-func executableID(name string) string {
-	if name == "git" {
-		return "git"
-	}
-	return "tool:" + name
-}
+func executableID(name string) string { return "tool:" + name }
 
 func (d *Doctor) repositoryCheck(ctx context.Context, repository config.Repository) Check {
 	check := Check{ID: "repo:" + repository.ID + ":worktree"}

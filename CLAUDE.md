@@ -2,6 +2,9 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
+The SMT operating agreement is canonical in `AGENTS.md`; follow it for the
+current runtime, delivery, and human-review contract.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
 

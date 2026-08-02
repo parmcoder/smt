@@ -10,14 +10,17 @@ is the source of truth for behavior and acceptance criteria.
 ## Working agreements
 
 - Read the relevant note in `docs/` before planning or editing code.
-- Keep the first release small: standard-library CLI and Git execution,
-  argument arrays, no shell-string execution, and no credential store.
+- The next release uses Bubble Tea for the interactive TTY workflow and
+  go-git for every compiled SMT Git operation. Keep explicit headless
+  subcommands deterministic; never shell out to a system `git` executable,
+  execute shell-string commands, or create a credential store.
 - Never log or persist `SMT_GITLAB_TOKEN`, authorization headers, credentials,
   or sensitive payloads.
 - Preserve existing user changes and inspect root/submodule status before Git
   operations.
-- Make checkout all-or-nothing after preflight; never rewrite history or run
-  destructive remote rollback after a partial submit failure.
+- Preserve complete push preflight and child-before-root ordering. Never
+  rewrite history or run destructive remote rollback after a partial push
+  failure. Linked-worktree creation is removed from the next-release scope.
 - Add focused tests for each new behavior and report exact verification
   commands, assumptions, risks, and unverified behavior.
 - Keep documentation Obsidian-friendly: frontmatter, stable titles, wikilinks,
@@ -57,6 +60,13 @@ findings return only to the same worker. The manager never writes Go; it
 serializes integration and owns final acceptance. `doc_writer` is coordinated
 after accepted behavior to keep durable documentation and prompts aligned, but
 does not alter Go behavior. No agent in this loop delegates further.
+
+Every accepted feature then queues a human-owned E2E review in Beads. The
+feature remains open until a human records pass evidence and closes the review.
+A failed review must create and block on a child bug; closing that bug requeues
+the same human review for retest. Related ready work may continue, but release
+readiness is blocked by any open human review or related bug. Agents must never
+approve or close human-owned reviews.
 
 Every worker handoff and manager review must list changed paths, checks and
 results, assumptions, unresolved risks, and unverified behavior. A worker may
