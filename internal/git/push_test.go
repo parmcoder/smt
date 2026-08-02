@@ -2,90 +2,160 @@ package git
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	ggit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
-func TestPlanPushPreflightsEveryRepositoryBeforeChildFirstOrder(t *testing.T) {
-	root := PushTarget{Repository: Repository{ID: "repo", Dir: "/workspace/root", IsRoot: true}, RemoteURL: "git@example:root.git"}
-	web := PushTarget{Repository: Repository{ID: "web", Dir: "/workspace/root/web-app"}, RemoteURL: "git@example:web.git"}
-	runner := &recordingRunner{results: []Result{
-		{Stdout: "true\n"}, {}, {Stdout: "main\n"},
-		{Stdout: "true\n"}, {}, {Stdout: "feature/demo\n"},
-	}}
+func TestPlanPushPreflightsAllBeforeAnyRemoteMutation(t *testing.T) {
+	root := newCommittedRepository(t, "root")
+	dirty := newCommittedRepository(t, "dirty")
+	if err := os.WriteFile(filepath.Join(dirty, "dirty"), []byte("dirty"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := PlanPush(context.Background(), []PushTarget{{Repository: Repository{ID: "child", Dir: root}, RemoteURL: "file:///unused-child"}, {Repository: Repository{ID: "root", Dir: dirty, IsRoot: true}, RemoteURL: "file:///unused-root"}})
+	if err == nil || !contains(err.Error(), "repository is dirty") {
+		t.Fatalf("error=%v", err)
+	}
+}
 
-	plan, err := PlanPush(context.Background(), runner, []PushTarget{root, web})
+func TestPlanPushRejectsDetachedBeforeExecution(t *testing.T) {
+	dir := newCommittedRepository(t, "detached")
+	repository, err := ggit.PlainOpen(dir)
 	if err != nil {
-		t.Fatalf("PlanPush() error = %v", err)
+		t.Fatal(err)
 	}
-	wantSteps := []PushStep{
-		{Repository: web.Repository, Branch: "feature/demo", RemoteURL: web.RemoteURL},
-		{Repository: root.Repository, Branch: "main", RemoteURL: root.RemoteURL},
+	head, err := repository.Head()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(plan.Steps, wantSteps) {
-		t.Fatalf("steps = %#v, want %#v", plan.Steps, wantSteps)
+	if err := repository.Storer.SetReference(plumbing.NewHashReference(plumbing.HEAD, head.Hash())); err != nil {
+		t.Fatal(err)
 	}
-	for _, call := range runner.calls {
-		if len(call.args) > 0 && call.args[0] == "push" {
-			t.Fatalf("PlanPush() performed push before plan was complete: %#v", runner.calls)
+	_, err = PlanPush(context.Background(), []PushTarget{{Repository: Repository{ID: "repo", Dir: dir, IsRoot: true}, RemoteURL: "file:///unused"}})
+	if err == nil || !contains(err.Error(), "detached") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestExecutePushOrdersChildrenReportsPartialFailureAndDryRunIsImmutable(t *testing.T) {
+	root := newCommittedRepository(t, "root")
+	web := newCommittedRepository(t, "web")
+	api := newCommittedRepository(t, "api")
+	plan, err := PlanPush(context.Background(), []PushTarget{{Repository: Repository{ID: "repo", Dir: root, IsRoot: true}, RemoteURL: "file:///root"}, {Repository: Repository{ID: "web", Dir: web}, RemoteURL: "file:///web"}, {Repository: Repository{ID: "api", Dir: api}, RemoteURL: "file:///api"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(plan.Steps); !reflect.DeepEqual(got, []string{"web", "api", "repo"}) {
+		t.Fatalf("plan order=%v", got)
+	}
+	original := pushStep
+	defer func() { pushStep = original }()
+	var calls []string
+	pushStep = func(_ context.Context, step PushStep) error {
+		calls = append(calls, step.Repository.ID)
+		if step.Repository.ID == "api" {
+			return errors.New("remote rejected")
+		}
+		return nil
+	}
+	report, err := ExecutePush(context.Background(), plan, false)
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !reflect.DeepEqual(calls, []string{"web", "api"}) {
+		t.Fatalf("calls=%v", calls)
+	}
+	if got := ids(report.Pushed); !reflect.DeepEqual(got, []string{"web"}) {
+		t.Fatalf("pushed=%v", got)
+	}
+	if got := ids(report.Pending); !reflect.DeepEqual(got, []string{"repo"}) {
+		t.Fatalf("pending=%v", got)
+	}
+	calls = nil
+	report, err = ExecutePush(context.Background(), plan, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 0 || !report.DryRun || len(report.Pushed) != 0 {
+		t.Fatalf("dry report=%#v calls=%v", report, calls)
+	}
+}
+
+func TestExecutePushUsesConfiguredFileRemotesInChildFirstOrder(t *testing.T) {
+	root := newCommittedRepository(t, "root")
+	web := newCommittedRepository(t, "web")
+	api := newCommittedRepository(t, "api")
+	remoteRoot := t.TempDir()
+	targets := []PushTarget{
+		{Repository: Repository{ID: "repo", Dir: root, IsRoot: true}, RemoteURL: newBareRemote(t, remoteRoot, "repo")},
+		{Repository: Repository{ID: "web", Dir: web}, RemoteURL: newBareRemote(t, remoteRoot, "web")},
+		{Repository: Repository{ID: "api", Dir: api}, RemoteURL: newBareRemote(t, remoteRoot, "api")},
+	}
+	plan, err := PlanPush(context.Background(), targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := ExecutePush(context.Background(), plan, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(report.Pushed); !reflect.DeepEqual(got, []string{"web", "api", "repo"}) {
+		t.Fatalf("pushed=%v", got)
+	}
+	for _, target := range targets {
+		remote, err := ggit.PlainOpen(target.RemoteURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := remote.Reference(plumbing.NewBranchReferenceName("master"), true); err != nil {
+			t.Fatalf("remote %s missing pushed branch: %v", target.Repository.ID, err)
 		}
 	}
 }
 
-func TestPlanPushRefusesDirtyRepositoryBeforeAnyPush(t *testing.T) {
-	runner := &recordingRunner{results: []Result{
-		{Stdout: "true\n"}, {Stdout: " M README.md\n"}, {Stdout: "main\n"},
-	}}
-	_, err := PlanPush(context.Background(), runner, []PushTarget{{
-		Repository: Repository{ID: "repo", Dir: "/workspace/root", IsRoot: true}, RemoteURL: "git@example:root.git",
-	}})
-	if err == nil || !strings.Contains(err.Error(), "dirty") {
-		t.Fatalf("PlanPush() error = %v, want dirty worktree refusal", err)
-	}
-	for _, call := range runner.calls {
-		if len(call.args) > 0 && call.args[0] == "push" {
-			t.Fatalf("push call = %#v, want no remote action", call)
-		}
-	}
-}
-
-func TestExecutePushStopsAfterPartialFailureWithoutRollback(t *testing.T) {
-	web := PushStep{Repository: Repository{ID: "web", Dir: "/workspace/web"}, Branch: "feature/demo", RemoteURL: "git@example:web.git"}
-	api := PushStep{Repository: Repository{ID: "api", Dir: "/workspace/api"}, Branch: "feature/demo", RemoteURL: "git@example:api.git"}
-	root := PushStep{Repository: Repository{ID: "repo", Dir: "/workspace/root", IsRoot: true}, Branch: "feature/demo", RemoteURL: "git@example:root.git"}
-	runner := &recordingRunner{results: []Result{{}, {ExitCode: 1, Stderr: "remote rejected"}}}
-
-	report, err := ExecutePush(context.Background(), runner, PushPlan{Steps: []PushStep{web, api, root}}, false)
-	if err == nil || !strings.Contains(err.Error(), "api") || strings.Contains(err.Error(), api.RemoteURL) {
-		t.Fatalf("ExecutePush() error = %v, want safe api failure", err)
-	}
-	if !reflect.DeepEqual(report.Pushed, []PushStep{web}) {
-		t.Fatalf("pushed = %#v, want web only", report.Pushed)
-	}
-	if !reflect.DeepEqual(report.Pending, []PushStep{root}) {
-		t.Fatalf("pending = %#v, want root only", report.Pending)
-	}
-	wantCalls := []recordedCall{
-		{dir: web.Repository.Dir, args: []string{"push", web.RemoteURL, "HEAD:refs/heads/feature/demo"}},
-		{dir: api.Repository.Dir, args: []string{"push", api.RemoteURL, "HEAD:refs/heads/feature/demo"}},
-	}
-	if !reflect.DeepEqual(runner.calls, wantCalls) {
-		t.Fatalf("calls = %#v, want %#v", runner.calls, wantCalls)
-	}
-}
-
-func TestExecutePushDryRunDoesNotInvokeGit(t *testing.T) {
-	step := PushStep{Repository: Repository{ID: "repo", Dir: "/workspace/root", IsRoot: true}, Branch: "main", RemoteURL: "git@example:root.git"}
-	runner := &recordingRunner{}
-	report, err := ExecutePush(context.Background(), runner, PushPlan{Steps: []PushStep{step}}, true)
+func newCommittedRepository(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	repository, err := ggit.PlainInit(dir, false)
 	if err != nil {
-		t.Fatalf("ExecutePush() error = %v", err)
+		t.Fatal(err)
 	}
-	if !report.DryRun || !reflect.DeepEqual(report.Planned, []PushStep{step}) {
-		t.Fatalf("report = %#v, want dry-run plan", report)
+	if err := os.WriteFile(filepath.Join(dir, "file"), []byte(name), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("calls = %#v, want no Git invocation", runner.calls)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := worktree.Add("file"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Commit("initial", signature()); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
+
+func newBareRemote(t *testing.T, root, name string) string {
+	t.Helper()
+	dir := filepath.Join(root, name+".git")
+	if _, err := ggit.PlainInit(dir, true); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+func ids(steps []PushStep) []string {
+	result := make([]string, len(steps))
+	for i, step := range steps {
+		result[i] = step.Repository.ID
+	}
+	return result
+}
+func contains(value, part string) bool { return strings.Contains(value, part) }
