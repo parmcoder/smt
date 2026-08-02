@@ -22,6 +22,7 @@ type Config struct {
 	Commit       CommitConfig `yaml:"commit"`
 	Repositories []Repository `yaml:"repositories"`
 	Contracts    Contracts    `yaml:"contracts,omitempty"`
+	Workflow     *Workflow    `yaml:"workflow,omitempty"`
 }
 
 // Workspace records the initialized platform choices without prescribing
@@ -37,6 +38,22 @@ type WorkspaceStack struct {
 	API      string   `yaml:"api,omitempty"`
 	Database string   `yaml:"database,omitempty"`
 	DevOps   []string `yaml:"devops,omitempty"`
+}
+
+// Workflow records the optional human-review workflow required by newly
+// scaffolded Codex workspaces. Older version-1 workspaces may omit it.
+type Workflow struct {
+	IssueTracker    string           `yaml:"issue_tracker"`
+	DocsPath        string           `yaml:"docs_path"`
+	ReviewPolicy    string           `yaml:"review_policy"`
+	RequiredPlugins []RequiredPlugin `yaml:"required_plugins"`
+}
+
+// RequiredPlugin identifies one Codex plugin without carrying credentials or
+// installer instructions.
+type RequiredPlugin struct {
+	Source   string `yaml:"source"`
+	Selector string `yaml:"selector"`
 }
 
 // Providers contains optional provider settings.
@@ -190,6 +207,11 @@ func (c *Config) Validate(workspaceRoot string) error {
 	if err := c.Workspace.validate(); err != nil {
 		return err
 	}
+	if c.Workflow != nil {
+		if err := c.Workflow.validate(); err != nil {
+			return err
+		}
+	}
 
 	seen := map[string]map[string]struct{}{
 		"id": {}, "path": {}, "project": {}, "scope": {},
@@ -258,6 +280,36 @@ func (c *Config) Validate(workspaceRoot string) error {
 		return fmt.Errorf("exactly one root repository with path . is required")
 	}
 	return c.validateContracts(root, seenRepositoryIDs(c.Repositories))
+}
+
+func (w Workflow) validate() error {
+	if w.IssueTracker != "beads" {
+		return fmt.Errorf("workflow.issue_tracker must be beads")
+	}
+	if w.DocsPath != "docs" {
+		return fmt.Errorf("workflow.docs_path must be docs")
+	}
+	if w.ReviewPolicy != "release-gate" {
+		return fmt.Errorf("workflow.review_policy must be release-gate")
+	}
+	required := map[RequiredPlugin]struct{}{
+		{Source: "parmcoder/codex-obsidian", Selector: "codex-obsidian@codex-obsidian"}: {},
+		{Source: "parmcoder/godex", Selector: "godex@godex"}:                            {},
+	}
+	if len(w.RequiredPlugins) != len(required) {
+		return fmt.Errorf("workflow.required_plugins must contain exactly %d plugins", len(required))
+	}
+	seen := make(map[RequiredPlugin]struct{}, len(w.RequiredPlugins))
+	for _, plugin := range w.RequiredPlugins {
+		if _, duplicate := seen[plugin]; duplicate {
+			return fmt.Errorf("duplicate workflow required plugin %q", plugin.Selector)
+		}
+		seen[plugin] = struct{}{}
+		if _, ok := required[plugin]; !ok {
+			return fmt.Errorf("workflow required plugin %q from %q is not supported", plugin.Selector, plugin.Source)
+		}
+	}
+	return nil
 }
 
 func (w Workspace) validate() error {

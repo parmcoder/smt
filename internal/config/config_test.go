@@ -286,6 +286,59 @@ repositories:
 	}
 }
 
+func TestLoadWorkflowContractIsOptionalForExistingVersionOneWorkspace(t *testing.T) {
+	legacy := `version: 1
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo}
+`
+	if cfg, err := Load(writeConfig(t, legacy)); err != nil || cfg.Workflow != nil {
+		t.Fatalf("legacy Load() cfg=%#v err=%v", cfg, err)
+	}
+}
+
+func TestLoadWorkflowContractRequiresExactPluginPairs(t *testing.T) {
+	base := `version: 1
+workflow:
+  issue_tracker: beads
+  docs_path: docs
+  review_policy: release-gate
+  required_plugins:
+    - source: parmcoder/codex-obsidian
+      selector: codex-obsidian@codex-obsidian
+    - source: parmcoder/godex
+      selector: godex@godex
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo}
+`
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "exact", yaml: base},
+		{name: "wrong selector", yaml: strings.Replace(base, "godex@godex", "godex@other", 1), want: "workflow required plugin"},
+		{name: "missing plugin", yaml: strings.Replace(base, "    - source: parmcoder/godex\n      selector: godex@godex\n", "", 1), want: "exactly 2 plugins"},
+		{name: "duplicate plugin", yaml: strings.Replace(base, "source: parmcoder/godex\n      selector: godex@godex", "source: parmcoder/codex-obsidian\n      selector: codex-obsidian@codex-obsidian", 1), want: "duplicate workflow required plugin"},
+		{name: "unknown workflow field", yaml: strings.Replace(base, "  docs_path: docs\n", "  docs_path: docs\n  extra: nope\n", 1), want: "field extra not found"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, test.yaml))
+			if test.want == "" {
+				if err != nil || cfg.Workflow == nil || len(cfg.Workflow.RequiredPlugins) != 2 {
+					t.Fatalf("Load() cfg=%#v err=%v", cfg, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load() error=%v want=%q", err, test.want)
+			}
+		})
+	}
+}
+
 func writeConfig(t *testing.T, contents string) string {
 	t.Helper()
 	dir := t.TempDir()
