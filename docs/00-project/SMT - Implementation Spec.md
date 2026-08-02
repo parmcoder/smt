@@ -5,63 +5,48 @@ owner: platform
 tags:
   - go
   - git
-  - gitlab
-  - github
   - monorepo
   - developer-experience
+  - human-review
+  - obsidian
 created: 2026-07-15
-updated: 2026-07-30
+updated: 2026-08-01
 ---
 # SMT — Sanovy Mono Tool
 
 ## Summary
 
-`smt` is a small, standard-library Go CLI for a Git root plus independent
-submodules. Configuration is committed in `smt.yaml`, remains at `version: 1`,
-and contains no credentials. The accepted implementation includes local
-workspace scaffolding, guarded Git lifecycle operations, diagnostics, checks,
-and contract inspection.
+SMT is a Go program for safe, human-reviewable work across a Git root and its
+independent submodules. This document is the source of truth for the next
+release. It supersedes earlier linked-worktree and system-Git execution
+contracts.
 
-Implemented commands are:
+In a TTY, running `smt` starts a Bubble Tea v2.0.8 full-screen application in
+the alternate screen. Its top-level workflows are **Setup**, **Work**,
+**Human Review**, and **Workspace Health**. Models own UI state; asynchronous
+operations run as Bubble Tea commands and return results to the model update
+loop. `NO_COLOR`, cancellation, terminal resize, keyboard navigation, and
+accessible rendering are supported. No-argument execution outside a TTY does
+not emit terminal control sequences: it exits with concise guidance to use an
+explicit subcommand.
 
-- `smt init [PATH]` — interactively select fixed Next.js, Go, PostgreSQL,
-  Docker/OpenTofu, and Codex profiles; create a root Git repository, selected
-  local bootstrap submodules, `smt.yaml`, ignore files, and repository-local
-  agent workflow files. It does not install dependencies, create remote
-  repositories, or call provider APIs.
-- `smt push [--dry-run]` — preflight every configured repository, then push
-  each child repository's current branch before the root. Remote URLs come from
-  `repositories[].remote.url`; dry-run validates and prints the order without
-  contacting remotes.
-- `smt worktree add PATH --branch NAME [--dry-run]` — preflight the root and
-  every configured submodule, then create one new linked worktree branch per
-  repository at the same destination layout. It rejects dirty, detached,
-  uninitialized, branch-colliding, gitlink-mismatched, or existing-destination
-  state.
-- `smt validate-message FILE` — validate one complete conventional commit
-  message against the configured types and scopes.
-- `smt status [--json]` — inspect configured repositories and summarize
-  available profiles and contract findings.
-- `smt doctor` — report repository, executable, provider-token, and profile
-  readiness without printing secret values.
-- `smt check --profile hook|submit|ci-parity [--repo ID]
-  [--allow-worktree-mutation] [--dry-run]` — run one named profile. A check
-  with `mutates_worktree: true` is refused unless the explicit
-  `--allow-worktree-mutation` flag is supplied.
-- `smt contracts validate` — evaluate reusable configured contracts and report
-  all findings. Severity defaults to `error`; `severity: warn` is explicit.
-- `smt ci audit` — run the CI-parity contract/profile audit and return a
-  validation failure when error-severity findings exist.
-- `smt ci contracts bump --id ID [--apply]` — plan a reference-literal bump by
-  default; write only with explicit `--apply`. Stale, absent, or ambiguous
-  literals are guarded failures.
+Explicit subcommands remain the deterministic, plain-output interface for
+agents, scripts, and JSON consumers. `smt init [PATH]` opens Setup when
+interactive. Existing explicit headless command contracts and exit codes stay
+stable except that `smt worktree add` is removed.
 
-These commands use argument arrays, never force-push or rewrite history, and
-never log or persist tokens, authorization headers, or sensitive payloads.
+Compiled SMT uses [go-git](https://github.com/go-git/go-git) v5.19.2 as its
+only Git runtime. It must not invoke a system `git` executable. The library
+provides pure-Go repository operations; SMT still preserves its own safety
+rules for preflight, credentials, ordering, and error reporting.
 
-## Configuration contract
+Configuration is committed in `smt.yaml`, remains at `version: 1`, and never
+contains credentials, authorization headers, or tokens.
 
-The root `smt.yaml` uses this shape (the existing file is canonical):
+## Workspace configuration
+
+Existing valid version-1 workspaces remain readable. SMT does not migrate
+them automatically. New workspaces include the optional workflow contract:
 
 ```yaml
 version: 1
@@ -73,99 +58,138 @@ workspace:
     database: postgresql
     devops: [docker, opentofu]
 
-repositories:
-  - id: repo
-    path: .
-    scope: repo
-    remote:
-      url: ""
-  - id: web
-    path: web-app
-    component: web
-    technology: nextjs
-    scope: web
-    remote:
-      url: git@github.com:example/web-app.git
-
-contracts:
-  reference:
-    - id: ci-pin
-      repository: repo
-      file: .gitlab-ci.yml
-      expected: old
-      replacement: new
-      severity: warn
-  migration-coverage:
-    - id: migration
-      repository: database
-      file: migrations/001.sql
-      source: docs/migration.md
-      expected: delivered
-  artifact:
-    - id: bundle
-      repository: web
-      file: dist/app.js
-      expected: present
+workflow:
+  issue_tracker: beads
+  docs_path: docs
+  review_policy: release-gate
+  required_plugins:
+    - source: parmcoder/codex-obsidian
+      selector: codex-obsidian@codex-obsidian
+    - source: parmcoder/godex
+      selector: godex@godex
 ```
 
-The fixed workspace stack values are `nextjs`, `go`, `postgresql`, and the
-DevOps tools `docker` plus `opentofu`; `ai_assist` is either absent or `codex`.
-`remote.url` is optional at initialization but required by `smt push`; it may
-not contain embedded credentials. Existing `provider` and `project` metadata
-remain supported and are optional when both are absent.
+`issue_tracker` is `beads`, `docs_path` is `docs`, and `review_policy` is
+`release-gate`. The two plugin source/selector pairs are required for new
+Codex-assisted workspaces. They are identifiers for prerequisite verification,
+not credentials or installer commands.
 
-Repositories may define `hook`, `submit`, and `ci-parity` profiles. A legacy
-check list is accepted for compatibility, but new configuration should use
-named profiles. Each check declares `kind`, non-empty `argv`, and, when
-applicable, `mutates_worktree`; mutation is never inferred from the command.
-Supported reusable contracts are literal `reference`, `migration-coverage`,
-and `artifact` contracts. Paths must remain inside the workspace, IDs must be
-unique, and contract severity is `error` unless explicitly set to `warn`.
+The fixed stack values remain `nextjs`, `go`, `postgresql`, and `docker` plus
+`opentofu`. New scaffolds write `.tool-versions` with these release-owned pins:
 
-`init` uses local bootstrap URLs in `.gitmodules` because no remote URL is
-required during initialization. `push` uses `remote.url` directly and does not
-rewrite `.gitmodules`; replacing bootstrap URLs for fresh external clones is a
-separate future capability.
+| Selected scope | asdf runtime pins |
+| --- | --- |
+| Every workspace | `task 3.52.0`, `lefthook 2.1.10` |
+| Go API | `golang 1.26.5` |
+| Next.js web application | `nodejs 24.18.0` |
+| Docker/OpenTofu DevOps | `opentofu 1.12.3` |
 
-Reference bumps replace exactly one current literal. The default is a plan;
-`--apply` is required to write, and the command refuses stale, missing, or
-ambiguous matches.
+Pins are intentionally not selected dynamically at initialization. A later
+SMT release changes them through the normal release process.
 
-## Explicitly planned, not implemented
+## Setup and prerequisite gate
 
-The following remain approved future behavior and must not be represented as
-implemented by the CLI or this release:
+Before SMT writes a destination, Setup detects `codex`, `asdf`, and `bd`; it
+inspects Codex marketplace/plugin state using machine-readable output and
+checks the selected asdf plugins and runtimes. Missing prerequisites produce
+official, copyable installation guidance plus a **Re-check** action.
 
-- changesets, release plan, and release run;
-- cloud or database actions, deployment, rollback, or provider-native job
-  execution;
-- YAML selector rewrites or automatic CI configuration edits;
-- GitLab/GitHub provider calls, MR/PR creation, credential use, and mixed
-  provider submit orchestration;
-- `checkout`, remote-URL synchronization into `.gitmodules`, `hooks install`,
-  `validate-range`, and `submit` workflows from the earlier design.
+The human runs every global install action. SMT never runs a package manager,
+a remote installation script, or a plugin installer on the human's behalf.
+Setup verifies the exact Codex Obsidian and Godex selectors above, and asks
+the human to start a fresh Codex task after installation so the skills load.
 
-Git lifecycle operations preflight all configured repositories before a remote
-push or worktree creation. Pushes are child-first and stop after a failure with
-the successful and pending repository IDs reported; no remote rollback occurs.
-Worktree creation is root-first and stops with its created and pending paths
-reported if a later child fails. Fixed untracked OS metadata (`.DS_Store`,
-`Thumbs.db`, and `desktop.ini`) is ignored, while tracked changes remain
-blocking. Provider projects and runtime tokens remain explicit
-configuration/environment inputs.
+After prerequisites pass, SMT builds the full workspace in a staging
+directory. It initializes the Git root and local bootstrap submodules,
+initializes Beads with its non-interactive project flow while preserving SMT's
+agent instructions, writes configuration and collaboration artifacts, then
+publishes the requested destination only after every step succeeds. A failure
+leaves no partial destination publication.
 
-## Local requirements and verification
+## Generated collaboration workspace
 
-Go 1.26.4 or newer and `git` are required. The root `Taskfile.yml` is the
-repeatable entrypoint: `task build` creates `bin/smt` and `task verify` runs
-the Go tests. The implementation must keep focused tests for configuration,
-scaffolded Git submodules, push/worktree preflight and recovery reporting,
-harmless metadata, profiles and mutation guards, status/doctor output, contract
-severity and path validation, CI audit, and guarded bump planning/apply behavior.
+New workspaces contain an Obsidian-compatible `docs/` workspace for humans and
+agents:
+
+- `docs/README.md` with workflow and review-queue orientation;
+- project, decision, feature, and review folders;
+- review and bug-report templates that require evidence;
+- `docs/Review Queue.base`, a view of review-note metadata rather than a
+  second issue tracker;
+- generated agent instructions and build prompts routing Go work through
+  `$godex:godex-go-backend` and durable documentation through the installed
+  Codex Obsidian skills.
+
+Beads is the canonical source of issue state. Markdown notes preserve human
+instructions and durable review evidence; the Base only displays that evidence.
+
+## Human E2E review release gate
+
+Every completed feature enters a human-owned E2E review queue. The agent
+records changed paths, checks and results, assumptions, unresolved risks,
+unverified behavior, and executable review instructions; then it creates a
+child `human-review,e2e` review item and makes the feature depend on it.
+
+On pass, a human records reviewer evidence, closes the review, and allows the
+unblocked feature to close. On fail, a human supplies a title, reproduction,
+expected and actual behavior, and evidence. SMT creates a child bug linked as
+`discovered-from`; that bug blocks the review. Once the bug is closed, the
+same review returns to the human queue for retest. Agents may continue work
+that is otherwise ready, but release readiness remains blocked by every open
+human review or its related bug. Agents must never approve or close a
+human-owned review.
+
+```mermaid
+flowchart LR
+    F[Agent completes feature] --> R[Human E2E review queued]
+    R -->|Pass with evidence| C[Feature can close]
+    R -->|Fail with required evidence| B[Child bug]
+    B --> X[Agent fixes bug]
+    X --> T[Same review re-queued]
+    T --> R
+    R -->|Open| G[Release blocked]
+    B -->|Open| G
+```
+
+## Git and safety contract
+
+SMT initializes, inspects, commits, follows standard submodule gitlinks, and
+pushes through go-git. Push preflight remains complete before any remote push;
+children push before the root. A failed push reports successful and pending
+repositories, stops remaining work, and never force-pushes, rewrites history,
+or rolls back a successful child push.
+
+HTTPS authentication is runtime-only through `SMT_GITHUB_TOKEN` or
+`SMT_GITLAB_TOKEN`; SSH requires an SSH agent and verified `known_hosts`.
+Credentials must never be written to configuration, documentation, logs, or
+errors. Remote URLs remain credential-free and may be configured after init.
+The `doctor` Git-executable prerequisite is removed.
+
+## Verification requirements
+
+Tests cover TUI model navigation, resize, cancellation, prerequisite re-check,
+pass/fail forms, recovery rendering, and deterministic views without a real
+terminal. Adapter tests use fake `asdf`, `bd`, and `codex` responses and prove
+SMT does not execute displayed installer commands. Git tests cover clean,
+dirty, and detached state; commits; normal submodule gitlinks; authentication
+selection; child-before-root push; partial failure reporting; and redaction.
+Scaffold tests prove conditional pins, workflow configuration, generated docs,
+staging cleanup, and no partial publication. Review tests cover pass,
+fail-to-bug, fix-to-retest, and release gating.
+
+The final acceptance lane runs the full TTY workflow on macOS and Linux and
+uses a runtime path without system Git. It also requires human E2E acceptance
+of the complete feature-to-review-to-bug-to-retest loop.
+
+## Out of scope
+
+This release does not automatically install prerequisites, migrate existing
+workspaces, create provider PRs/MRs, deploy, execute human E2E tests, or
+dynamically choose asdf versions. It removes linked-worktree creation rather
+than replacing it with another worktree feature.
 
 ## Related
 
 - [[SMT - Product Concept]] — compact product framing.
-- [[SMT - Agent Team]] — ownership and documentation workflow.
-- [[../../prompts/smt-build|SMT build prompt]] — execution handoff.
+- [[SMT - Agent Team]] — delivery ownership and review queue gate.
 - [[../../AGENTS|Repository operating agreement]].
