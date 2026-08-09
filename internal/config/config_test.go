@@ -177,6 +177,13 @@ workflow:
 	}
 }
 
+func TestLoadBytesPreservesValidationContract(t *testing.T) {
+	raw := []byte("version: 1\ncommit: {types: [feat], scopes: [repo]}\nrepositories:\n  - {id: repo, path: ., scope: repo, remote: {url: \"\"}}\n")
+	if _, err := LoadBytes(raw, "/tmp/smt.yaml"); err != nil {
+		t.Fatalf("LoadBytes() error = %v", err)
+	}
+}
+
 func TestLoadRejectsInvalidWorkflowConfiguration(t *testing.T) {
 	base := `version: 1
 commit: {types: [feat], scopes: [repo]}

@@ -82,16 +82,18 @@ type CommitConfig struct {
 
 // Repository describes one root repository or independent submodule.
 type Repository struct {
-	ID         string        `yaml:"id"`
-	Path       string        `yaml:"path"`
-	Component  string        `yaml:"component,omitempty"`
-	Technology string        `yaml:"technology,omitempty"`
-	Remote     Remote        `yaml:"remote"`
-	Provider   string        `yaml:"provider,omitempty"`
-	Project    string        `yaml:"project,omitempty"`
-	Scope      string        `yaml:"scope"`
-	Checks     []Check       `yaml:"-"`
-	Profiles   CheckProfiles `yaml:"-"`
+	ID            string        `yaml:"id"`
+	Path          string        `yaml:"path"`
+	Component     string        `yaml:"component,omitempty"`
+	Technology    string        `yaml:"technology,omitempty"`
+	Remote        Remote        `yaml:"remote"`
+	Provider      string        `yaml:"provider,omitempty"`
+	Project       string        `yaml:"project,omitempty"`
+	Scope         string        `yaml:"scope"`
+	Checks        []Check       `yaml:"-"`
+	Profiles      CheckProfiles `yaml:"-"`
+	HasChecks     bool          `yaml:"-"`
+	UnknownFields []string      `yaml:"-"`
 }
 
 // Remote holds a credential-free Git destination configured after init.
@@ -148,9 +150,16 @@ func (r *Repository) UnmarshalYAML(value *yaml.Node) error {
 	r.ID, r.Path = raw.ID, raw.Path
 	r.Component, r.Technology, r.Remote = raw.Component, raw.Technology, raw.Remote
 	r.Provider, r.Project, r.Scope = raw.Provider, raw.Project, raw.Scope
+	allowed := map[string]bool{"id": true, "path": true, "component": true, "technology": true, "remote": true, "provider": true, "project": true, "scope": true, "checks": true}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if !allowed[value.Content[i].Value] {
+			r.UnknownFields = append(r.UnknownFields, value.Content[i].Value)
+		}
+	}
 	if raw.Checks.Kind == 0 {
 		return nil
 	}
+	r.HasChecks = true
 	switch raw.Checks.Kind {
 	case yaml.SequenceNode:
 		return raw.Checks.Decode(&r.Checks)
@@ -163,14 +172,18 @@ func (r *Repository) UnmarshalYAML(value *yaml.Node) error {
 
 // Load decodes and validates an SMT YAML file.
 func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("open config: %w", err)
 	}
-	defer f.Close()
+	return LoadBytes(raw, path)
+}
 
+// LoadBytes decodes and validates exact configuration bytes using sourcePath
+// only to establish the workspace root for path validation.
+func LoadBytes(raw []byte, sourcePath string) (*Config, error) {
 	var cfg Config
-	decoder := yaml.NewDecoder(f)
+	decoder := yaml.NewDecoder(strings.NewReader(string(raw)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
@@ -182,7 +195,7 @@ func Load(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
-	if err := cfg.Validate(filepath.Dir(path)); err != nil {
+	if err := cfg.Validate(filepath.Dir(sourcePath)); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
