@@ -148,6 +148,68 @@ repositories:
 	}
 }
 
+func TestLoadWorkflowConfiguration(t *testing.T) {
+	yaml := `version: 1
+workspace:
+  ai_assist: codex
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+workflow:
+  policy:
+    manager: work_manager
+    implementation: backend_worker
+    documentation: doc_writer
+    review_required: true
+  plugins:
+    - source: parmcoder/codex-obsidian
+      selectors: [codex-obsidian-writer, codex-obsidian-markdown]
+    - source: parmcoder/godex
+      selectors: [godex-go-backend]
+`
+
+	cfg, err := Load(writeConfig(t, yaml))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Workflow.Policy.Manager; got != "work_manager" {
+		t.Fatalf("workflow manager = %q, want work_manager", got)
+	}
+}
+
+func TestLoadRejectsInvalidWorkflowConfiguration(t *testing.T) {
+	base := `version: 1
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`
+	for name, replacement := range map[string]string{
+		"wrong policy":        "manager: another_manager",
+		"mismatched selector": "selectors: [codex-obsidian-writer]",
+		"wrong source":        "source: another/plugin",
+		"reordered selectors": "selectors: [codex-obsidian-markdown, codex-obsidian-writer]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			yaml := base
+			if name == "wrong policy" {
+				yaml = strings.Replace(yaml, "manager: work_manager", replacement, 1)
+			} else if name == "mismatched selector" || name == "reordered selectors" {
+				yaml = strings.Replace(yaml, "selectors: [codex-obsidian-writer, codex-obsidian-markdown]", replacement, 1)
+			} else {
+				yaml = strings.Replace(yaml, "source: parmcoder/codex-obsidian", replacement, 1)
+			}
+			if _, err := Load(writeConfig(t, yaml)); err == nil || !strings.Contains(err.Error(), "workflow") {
+				t.Fatalf("Load() error = %v, want workflow validation failure", err)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsInvalidWorkspaceScaffoldConfiguration(t *testing.T) {
 	base := `version: 1
 workspace:

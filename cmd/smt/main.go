@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parmcoder/smt/internal/blueprint"
 	"github.com/parmcoder/smt/internal/checks"
 	"github.com/parmcoder/smt/internal/commit"
 	"github.com/parmcoder/smt/internal/config"
@@ -31,6 +32,15 @@ const (
 	exitValidation = 2
 	exitInternal   = 3
 )
+
+var newInputIsTerminal = func(in io.Reader) bool {
+	file, ok := in.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -94,6 +104,9 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 	if args[0] == "init" {
 		return runInit(args[1:], in, out, errOut)
 	}
+	if args[0] == "new" {
+		return runNew(args[1:], in, out, errOut)
+	}
 	if args[0] == "validate-message" {
 		return runValidateMessage(args[1:], out, errOut)
 	}
@@ -128,6 +141,27 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 		printUsage(errOut)
 		return exitUsage
 	}
+}
+
+func runNew(args []string, in io.Reader, out, errOut io.Writer) int {
+	if len(args) > 1 {
+		fmt.Fprintln(errOut, "usage: smt new [FILE]")
+		return exitUsage
+	}
+	destination := "./smt.yaml"
+	if len(args) == 1 {
+		destination = args[0]
+	}
+	if !newInputIsTerminal(in) {
+		fmt.Fprintln(errOut, "new: interactive terminal input is required")
+		return exitUsage
+	}
+	_, err := blueprint.Create(in, out, destination)
+	if err != nil {
+		fmt.Fprintf(errOut, "new: %v\n", err)
+		return exitValidation
+	}
+	return exitOK
 }
 
 func runPush(ctx context.Context, args []string, cfg config.Config, runner git.Runner, out, errOut io.Writer) int {
