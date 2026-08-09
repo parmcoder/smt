@@ -14,10 +14,10 @@ import (
 
 	applypkg "github.com/parmcoder/smt/internal/apply"
 	"github.com/parmcoder/smt/internal/beads"
+	"github.com/parmcoder/smt/internal/blueprint"
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
-	"github.com/parmcoder/smt/internal/scaffold"
 	"gopkg.in/yaml.v3"
 )
 
@@ -116,22 +116,14 @@ func TestRunValidateMessageExitCodes(t *testing.T) {
 	}
 }
 
-func TestRunInitPrintsWriteFreeMigrationGuidance(t *testing.T) {
+func TestRunInitIsUnknownCommand(t *testing.T) {
 	t.Chdir(t.TempDir())
-	destination := filepath.Join(t.TempDir(), "platform")
-	for _, args := range [][]string{{"init"}, {"init", destination}} {
+	for _, args := range [][]string{{"init"}, {"init", "--help"}} {
 		out, errOut := new(strings.Builder), new(strings.Builder)
 		code := runWithInput(args, noReadReader{}, out, errOut)
-		if code != exitOK || out.String() != "smt init no longer creates a workspace; run smt new [FILE], review smt.yaml, then run smt apply [--config FILE] PATH\n" || errOut.Len() != 0 {
+		if code != exitUsage || out.Len() != 0 || !strings.Contains(errOut.String(), "unknown command \"init\"") {
 			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
 		}
-	}
-	if _, err := os.Stat(destination); !os.IsNotExist(err) {
-		t.Fatalf("destination=%v", err)
-	}
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"init", "one", "two"}, noReadReader{}, out, errOut); code != exitUsage || errOut.String() != "usage: smt init [PATH]\n" {
-		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
 
@@ -314,7 +306,6 @@ Usage:
 
 Getting Started
   apply            Apply a workspace blueprint
-  init             Show workspace initialization guidance
   new              Create a workspace blueprint
 
 Workspace
@@ -459,12 +450,12 @@ func TestCobraMigratedLeafHelpAndValidOutput(t *testing.T) {
 	}
 }
 
-func TestCobraPersistentVerbosePreservesLeafSuccess(t *testing.T) {
+func TestCobraPersistentVerbosePreservesUnknownInitExit(t *testing.T) {
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"init", "--verbose"}, strings.NewReader(""), out, errOut); code != exitOK {
+	if code := runWithInput([]string{"init", "--verbose"}, strings.NewReader(""), out, errOut); code != exitUsage {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
-	if !strings.Contains(out.String(), "smt init no longer creates a workspace") || !strings.Contains(errOut.String(), "command finished") {
+	if out.Len() != 0 || !strings.Contains(errOut.String(), "unknown command \"init\"") || !strings.Contains(errOut.String(), "command finished") {
 		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 	}
 }
@@ -570,12 +561,13 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 	}
 }
 
-func TestRunPushUsesRemoteURLsConfiguredAfterInit(t *testing.T) {
+func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "platform")
-	if _, err := scaffold.New(git.ExecRunner{}).Init(context.Background(), root, scaffold.Selection{Web: true, API: true, Codex: true}); err != nil {
-		t.Fatalf("Init() error = %v", err)
+	blueprintPath := filepath.Join(t.TempDir(), "smt.yaml")
+	if _, err := blueprint.Create(strings.NewReader("y\ny\nn\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
-	cfg, err := config.Load(filepath.Join(root, "smt.yaml"))
+	cfg, err := config.Load(blueprintPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,10 +584,14 @@ func TestRunPushUsesRemoteURLsConfiguredAfterInit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "smt.yaml"), data, 0o600); err != nil {
-		t.Fatal(err)
+	service := applypkg.Service{
+		Config:        *cfg,
+		Prerequisites: applyPrereq(func(context.Context) error { return nil }),
+		Beads:         applyInit(func(context.Context, string) error { return nil }),
 	}
-	commitTestFiles(t, root, "configure remotes")
+	if err := service.Apply(context.Background(), root, data); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 	t.Chdir(root)
 	out, errOut := new(strings.Builder), new(strings.Builder)
 	if code := run([]string{"push"}, out, errOut); code != exitOK {

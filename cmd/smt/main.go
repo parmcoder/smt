@@ -194,7 +194,6 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	})
 	applyCommand.Flags().StringVar(&applyConfig, "config", "./smt.yaml", "configuration file")
 
-	initCommand := legacyLeaf("init [PATH]", "Show workspace initialization guidance", "getting-started", "init")
 	var pushDryRun bool
 	pushCommand := nativeLeaf("push", "Push configured repositories", "workspace", "push", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
 		cfg, _, code := loadConfig(errOut)
@@ -353,7 +352,7 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	})
 	releaseCheckCommand.Flags().BoolVar(&releaseCheckJSON, "json", false, "write JSON output")
 	releaseCommand.AddCommand(releaseCheckCommand)
-	root.AddCommand(newCommand, applyCommand, initCommand, pushCommand, worktreeCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
+	root.AddCommand(newCommand, applyCommand, pushCommand, worktreeCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
 	return root
 }
 
@@ -421,9 +420,6 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 	if len(args) == 0 {
 		printUsage(out)
 		return exitOK
-	}
-	if args[0] == "init" {
-		return runInit(args[1:], in, out, errOut)
 	}
 	printUsage(errOut)
 	return exitUsage
@@ -545,15 +541,6 @@ func runWorktree(ctx context.Context, cfg config.Config, root string, runner git
 	}
 	fmt.Fprintf(errOut, "worktree: %v\n", err)
 	return exitValidation
-}
-
-func runInit(args []string, in io.Reader, out, errOut io.Writer) int {
-	if len(args) > 1 {
-		fmt.Fprintln(errOut, "usage: smt init [PATH]")
-		return exitUsage
-	}
-	fmt.Fprintln(out, "smt init no longer creates a workspace; run smt new [FILE], review smt.yaml, then run smt apply [--config FILE] PATH")
-	return exitOK
 }
 
 func runReview(in io.Reader, out, errOut io.Writer) int {
@@ -989,5 +976,5 @@ func checkResultMessage(err error) string {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "usage: smt new [FILE] | apply [--config FILE] PATH | init [PATH] | push [--dry-run] | worktree add PATH --branch NAME [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply] | work ready [--json] | review | review list [--json] | review queue FEATURE --handoff PATH --evidence PATH [--json] | review requeue REVIEW [--json] | release check [--json]")
+	fmt.Fprintln(out, "usage: smt new [FILE] | apply [--config FILE] PATH | push [--dry-run] | worktree add PATH --branch NAME [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply] | work ready [--json] | review | review list [--json] | review queue FEATURE --handoff PATH --evidence PATH [--json] | review requeue REVIEW [--json] | release check [--json]")
 }
