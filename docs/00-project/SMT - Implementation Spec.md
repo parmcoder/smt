@@ -10,25 +10,29 @@ tags:
   - monorepo
   - developer-experience
 created: 2026-07-15
-updated: 2026-07-30
+updated: 2026-08-09
 ---
 # SMT — Sanovy Mono Tool
 
 ## Summary
 
-`smt` is a small, standard-library Go CLI for a Git root plus independent
-submodules. Configuration is committed in `smt.yaml`, remains at `version: 1`,
-and contains no credentials. The accepted implementation includes local
-workspace scaffolding, guarded Git lifecycle operations, diagnostics, checks,
-and contract inspection.
+`smt` is a small Go CLI for a Git root plus independent submodules.
+Configuration is committed in `smt.yaml`, remains at `version: 1`, and contains
+no credentials. The accepted implementation includes local workspace
+scaffolding, guarded Git lifecycle operations, diagnostics, checks, and
+contract inspection.
 
-Implemented commands are:
+The Cobra root help groups commands as Getting Started, Workspace, Review
+Workflow, and Developer Tools. Implemented commands are:
 
-- `smt init [PATH]` — interactively select fixed Next.js, Go, PostgreSQL,
-  Docker/OpenTofu, and Codex profiles; create a root Git repository, selected
-  local bootstrap submodules, `smt.yaml`, ignore files, and repository-local
-  agent workflow files. It does not install dependencies, create remote
-  repositories, or call provider APIs.
+- `smt new [FILE]` — interactively select fixed Next.js, Go, PostgreSQL, and
+  Docker/OpenTofu components and write a validated `smt.yaml` blueprint only
+  after confirmation. It does not create a repository or workspace.
+- `smt apply [--config FILE] PATH` — validate the supplied workspace
+  blueprint/configuration, then create the root Git repository, selected local
+  bootstrap submodules, ignore files, Beads metadata, and repository-local
+  agent workflow files at a new destination. It does not install dependencies,
+  create remote repositories, or call provider APIs.
 - `smt push [--dry-run]` — preflight every configured repository, then push
   each child repository's current branch before the root. Remote URLs come from
   `repositories[].remote.url`; dry-run validates and prints the order without
@@ -55,6 +59,13 @@ Implemented commands are:
 - `smt ci contracts bump --id ID [--apply]` — plan a reference-literal bump by
   default; write only with explicit `--apply`. Stale, absent, or ambiguous
   literals are guarded failures.
+- `smt work ready [--json]`, `smt review`, `smt review list [--json]`,
+  `smt review queue FEATURE --handoff PATH --evidence PATH [--json]`, and
+  `smt review requeue REVIEW [--json]` — expose the retained local
+  work/review workflow.
+- `smt release check [--json]` — report release readiness.
+- `smt completion bash|fish|powershell|zsh` — generate static shell
+  completion; this command and `smt --help` do not require `smt.yaml`.
 
 These commands use argument arrays, never force-push or rewrite history, and
 never log or persist tokens, authorization headers, or sensitive payloads.
@@ -122,10 +133,10 @@ Supported reusable contracts are literal `reference`, `migration-coverage`,
 and `artifact` contracts. Paths must remain inside the workspace, IDs must be
 unique, and contract severity is `error` unless explicitly set to `warn`.
 
-`init` uses local bootstrap URLs in `.gitmodules` because no remote URL is
-required during initialization. `push` uses `remote.url` directly and does not
-rewrite `.gitmodules`; replacing bootstrap URLs for fresh external clones is a
-separate future capability.
+Applied workspaces use local bootstrap URLs in `.gitmodules` because no remote
+URL is required during blueprint application. `push` uses `remote.url` directly
+and does not rewrite `.gitmodules`; replacing bootstrap URLs for fresh external
+clones is a separate future capability.
 
 Reference bumps replace exactly one current literal. The default is a plan;
 `--apply` is required to write, and the command refuses stale, missing, or
