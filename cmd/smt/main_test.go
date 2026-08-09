@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,12 +12,72 @@ import (
 	"strings"
 	"testing"
 
+	applypkg "github.com/parmcoder/smt/internal/apply"
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
 	"github.com/parmcoder/smt/internal/scaffold"
 	"gopkg.in/yaml.v3"
 )
+
+func TestRunApplyParsesConfigWithoutPrompting(t *testing.T) {
+	original := newApplyService
+	t.Cleanup(func() { newApplyService = original })
+	called := 0
+	newApplyService = func() applypkg.Service {
+		return applypkg.Service{Prerequisites: applyPrereq(func(context.Context) error { called++; return errors.New("stop") }), Beads: applyInit(func(context.Context, string) error { return nil })}
+	}
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.WriteFile("smt.yaml", applyBlueprint(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"apply", filepath.Join(root, "workspace")}, strings.NewReader("should not be read"), out, errOut); code != exitValidation || called != 1 {
+		t.Fatalf("code=%d called=%d stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+	}
+}
+
+func TestRunApplyUsesCustomConfigAndUsageIsExact(t *testing.T) {
+	for name, args := range map[string][]string{"missing path": {"apply"}, "extra path": {"apply", "a", "b"}, "bad flag": {"apply", "--unknown", "a"}} {
+		t.Run(name, func(t *testing.T) {
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := run(args, out, errOut); code != exitUsage || errOut.String() != "usage: smt apply [--config FILE] PATH\n" {
+				t.Fatalf("code=%d stderr=%q", code, errOut.String())
+			}
+		})
+	}
+	original := newApplyService
+	t.Cleanup(func() { newApplyService = original })
+	newApplyService = func() applypkg.Service {
+		return applypkg.Service{Prerequisites: applyPrereq(func(context.Context) error { return errors.New("stop") }), Beads: applyInit(func(context.Context, string) error { return nil })}
+	}
+	root := t.TempDir()
+	custom := filepath.Join(root, "custom.yaml")
+	if err := os.WriteFile(custom, applyBlueprint(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"apply", "--config", custom, filepath.Join(root, "workspace")}, out, errOut); code != exitValidation || !strings.Contains(errOut.String(), "apply prerequisites") {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+type applyPrereq func(context.Context) error
+
+func (f applyPrereq) Check(ctx context.Context) error { return f(ctx) }
+
+type applyInit func(context.Context, string) error
+
+func (f applyInit) Initialize(ctx context.Context, path string) error { return f(ctx, path) }
+func applyBlueprint() []byte {
+	return []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
+repositories: [{id: repo, path: ., scope: repo, remote: {url: ""}}, {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}]
+workflow: {policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}, plugins: [{source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}, {source: parmcoder/godex, selectors: [godex-go-backend]}]}
+`)
+}
 
 func TestRunValidateMessageExitCodes(t *testing.T) {
 	tests := []struct {

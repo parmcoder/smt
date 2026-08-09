@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	applypkg "github.com/parmcoder/smt/internal/apply"
 	"github.com/parmcoder/smt/internal/blueprint"
 	"github.com/parmcoder/smt/internal/checks"
 	"github.com/parmcoder/smt/internal/commit"
@@ -41,6 +42,8 @@ var newInputIsTerminal = func(in io.Reader) bool {
 	info, err := file.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
+
+var newApplyService = func() applypkg.Service { return applypkg.New() }
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -107,6 +110,9 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 	if args[0] == "new" {
 		return runNew(args[1:], in, out, errOut)
 	}
+	if args[0] == "apply" {
+		return runApply(args[1:], out, errOut)
+	}
 	if args[0] == "validate-message" {
 		return runValidateMessage(args[1:], out, errOut)
 	}
@@ -141,6 +147,38 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 		printUsage(errOut)
 		return exitUsage
 	}
+}
+
+func runApply(args []string, out, errOut io.Writer) int {
+	flags := flag.NewFlagSet("apply", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", "./smt.yaml", "configuration file")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 1 {
+		fmt.Fprintln(errOut, "usage: smt apply [--config FILE] PATH")
+		return exitUsage
+	}
+	raw, err := os.ReadFile(*configPath)
+	if err != nil {
+		fmt.Fprintf(errOut, "apply: read config: %v\n", err)
+		return exitValidation
+	}
+	cfg, err := config.LoadBytes(raw, *configPath)
+	if err != nil {
+		fmt.Fprintf(errOut, "apply: %v\n", err)
+		return exitValidation
+	}
+	if err := applypkg.ValidateBlueprint(*cfg); err != nil {
+		fmt.Fprintf(errOut, "apply: %v\n", err)
+		return exitValidation
+	}
+	service := newApplyService()
+	service.Config = *cfg
+	if err := service.Apply(context.Background(), flags.Arg(0), raw); err != nil {
+		fmt.Fprintf(errOut, "apply: %v\n", err)
+		return exitValidation
+	}
+	fmt.Fprintln(out, "applied blueprint")
+	return exitOK
 }
 
 func runNew(args []string, in io.Reader, out, errOut io.Writer) int {
@@ -647,5 +685,5 @@ func checkResultMessage(err error) string {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "usage: smt init [PATH] | push [--dry-run] | worktree add PATH --branch NAME [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
+	fmt.Fprintln(out, "usage: smt new [FILE] | apply [--config FILE] PATH | init [PATH] | push [--dry-run] | worktree add PATH --branch NAME [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
 }
