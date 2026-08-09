@@ -158,7 +158,7 @@ func (f fakeAgentService) ReleaseReadiness(context.Context) (beads.ReleaseReadin
 	return f.release, f.err
 }
 
-func TestAgentRoutesUseSafeDeterministicDTOsAndExactUsage(t *testing.T) {
+func TestCobraReviewWorkflowUsesSafeDTOsAndPreservesBusinessExits(t *testing.T) {
 	original := newBeadsService
 	t.Cleanup(func() { newBeadsService = original })
 	fake := fakeAgentService{ready: []beads.Issue{{ID: "feat-1", Title: "Feature", Status: "open", Type: "feature", Labels: []string{"internal"}}}, reviews: []beads.Issue{{ID: "review-1", Title: "Review", Status: "open", Type: "task", ReviewState: "queued"}}, queue: beads.QueueResult{FeatureID: "feat-1", ReviewID: "review-1"}, requeue: beads.Recovery{ReviewID: "review-1", BugID: "bug-1", Recovery: "retry"}, release: beads.ReleaseReadiness{Ready: false, Blocking: []beads.Issue{{ID: "review-1", Status: "open"}}}}
@@ -174,33 +174,95 @@ func TestAgentRoutesUseSafeDeterministicDTOsAndExactUsage(t *testing.T) {
 		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, exitOK, `{"review_id":"review-1"}` + "\n", ""},
 		{[]string{"review", "requeue", "review-1", "--json"}, exitOK, `{"review_id":"review-1","bug_id":"bug-1","recovery":"retry"}` + "\n", ""},
 		{[]string{"release", "check", "--json"}, exitValidation, `{"ready":false,"blocking":[{"id":"review-1","title":"","status":"open","type":"","labels":null}]}` + "\n", ""},
-		{[]string{"review", "requeue", "review-1", "extra"}, exitUsage, "", "usage: smt review requeue REVIEW [--json]\n"},
-		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "unexpected"}, exitUsage, "", "usage: smt review queue FEATURE --handoff PATH --evidence PATH [--json]\n"},
 	} {
 		out, errOut := new(strings.Builder), new(strings.Builder)
-		code := runAgentRoute(context.Background(), tc.args, "/unused", out, errOut)
+		code := runWithInput(tc.args, strings.NewReader(""), out, errOut)
 		if code != tc.code || out.String() != tc.out || errOut.String() != tc.err {
 			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
 		}
 	}
-	called := 0
-	newBeadsService = func(string) agentService { called++; return fake }
-	for _, args := range [][]string{{"review", "pass"}, {"review", "pass", "x"}, {"review", "fail"}, {"review", "fail", "x"}, {"review", "close"}, {"review", "close", "x"}} {
-		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "human review decisions") {
-			t.Fatalf("args=%v code=%d stderr=%q", args, code, errOut.String())
-		}
-	}
-	if called != 0 {
-		t.Fatalf("review mutations reached Beads service %d times", called)
-	}
-	for _, args := range [][]string{{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, {"review", "requeue", "review-1", "--json"}, {"release", "check", "--json"}} {
+	for _, args := range [][]string{{"work", "ready", "--json"}, {"review", "list", "--json"}, {"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, {"review", "requeue", "review-1", "--json"}, {"release", "check", "--json"}} {
 		newBeadsService = func(string) agentService {
 			return fakeAgentService{queue: beads.QueueResult{ReviewID: "review-1", Recovery: "safe retry"}, requeue: beads.Recovery{ReviewID: "review-1", Recovery: "safe retry"}, release: beads.ReleaseReadiness{}, err: errors.New("token=secret")}
 		}
 		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runAgentRoute(context.Background(), args, "/unused", out, errOut); code != exitValidation || strings.Contains(out.String()+errOut.String(), "secret") || !strings.Contains(errOut.String(), "operation failed") {
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitValidation || strings.Contains(out.String()+errOut.String(), "secret") || !strings.Contains(errOut.String(), "operation failed") {
 			t.Fatalf("failure args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+}
+
+func TestCobraReviewWorkflowRejectsInvalidInputBeforeBeads(t *testing.T) {
+	original := newBeadsService
+	t.Cleanup(func() { newBeadsService = original })
+	called := 0
+	newBeadsService = func(string) agentService {
+		called++
+		return fakeAgentService{}
+	}
+	for _, tc := range []struct {
+		args []string
+		use  string
+	}{
+		{[]string{"work", "ready", "extra"}, "work ready"},
+		{[]string{"review", "list", "extra"}, "review list"},
+		{[]string{"review", "queue"}, "review queue FEATURE"},
+		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md"}, "review queue FEATURE"},
+		{[]string{"review", "queue", "feat-1", "--handoff", " ", "--evidence", "docs/e.md"}, "review queue FEATURE"},
+		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", " "}, "review queue FEATURE"},
+		{[]string{"review", "requeue"}, "review requeue REVIEW"},
+		{[]string{"review", "requeue", "review-1", "extra"}, "review requeue REVIEW"},
+		{[]string{"release", "check", "extra"}, "release check"},
+	} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitUsage {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
+		}
+		if out.Len() != 0 || !strings.Contains(errOut.String(), "Usage:\n  smt "+tc.use) {
+			t.Fatalf("args=%v stdout=%q stderr=%q", tc.args, out.String(), errOut.String())
+		}
+	}
+	if called != 0 {
+		t.Fatalf("invalid syntax instantiated Beads service %d times", called)
+	}
+}
+
+func TestCobraReviewDecisionCommandsAreUnknownWithoutBeads(t *testing.T) {
+	original := newBeadsService
+	t.Cleanup(func() { newBeadsService = original })
+	called := 0
+	newBeadsService = func(string) agentService {
+		called++
+		return fakeAgentService{}
+	}
+	for _, args := range [][]string{{"review", "pass"}, {"review", "fail"}, {"review", "close"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "unknown command") {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+	if called != 0 {
+		t.Fatalf("unknown decision commands instantiated Beads service %d times", called)
+	}
+}
+
+func TestCobraReviewWorkflowLeafHelp(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"work", "ready", "--help"}, []string{"Usage:\n  smt work ready", "--json"}},
+		{[]string{"review", "queue", "--help"}, []string{"Usage:\n  smt review queue FEATURE", "--handoff string", "--evidence string", "--json"}},
+		{[]string{"release", "check", "--help"}, []string{"Usage:\n  smt release check", "--json"}},
+	} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("args=%v stdout=%q, want %q", tc.args, out.String(), want)
+			}
 		}
 	}
 }

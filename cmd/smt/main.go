@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -290,19 +289,70 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	ciContractsCommand.AddCommand(ciContractsBumpCommand)
 	ciCommand.AddCommand(ciAuditCommand, ciContractsCommand)
 
-	workCommand := legacyLeaf("work", "Manage work items", "review-workflow", "work")
-	workCommand.AddCommand(legacyLeaf("ready [--json]", "List ready work", "", "work", "ready"))
-	reviewCommand := legacyLeaf("review", "Open the review terminal interface", "review-workflow", "review")
-	reviewCommand.AddCommand(
-		legacyLeaf("list [--json]", "List queued reviews", "", "review", "list"),
-		legacyLeaf("queue FEATURE --handoff PATH --evidence PATH [--json]", "Queue a review", "", "review", "queue"),
-		legacyLeaf("requeue REVIEW [--json]", "Requeue a review", "", "review", "requeue"),
-		legacyLeaf("pass", "Reserved for the review TUI", "", "review", "pass"),
-		legacyLeaf("fail", "Reserved for the review TUI", "", "review", "fail"),
-		legacyLeaf("close", "Reserved for the review TUI", "", "review", "close"),
-	)
-	releaseCommand := legacyLeaf("release", "Check release readiness", "review-workflow", "release")
-	releaseCommand.AddCommand(legacyLeaf("check [--json]", "Check release readiness", "", "release", "check"))
+	workCommand := &cobra.Command{
+		Use:     "work",
+		Short:   "Manage work items",
+		GroupID: "review-workflow",
+		Args:    cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
+	}
+	var workReadyJSON bool
+	workReadyCommand := nativeLeaf("ready", "List ready work", "", "work ready", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		return runWorkReady(context.Background(), ".", workReadyJSON, out, errOut)
+	})
+	workReadyCommand.Flags().BoolVar(&workReadyJSON, "json", false, "write JSON output")
+	workCommand.AddCommand(workReadyCommand)
+
+	reviewCommand := &cobra.Command{
+		Use:     "review",
+		Short:   "Open the review terminal interface",
+		GroupID: "review-workflow",
+		Args:    cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runNativeCommandWithVerbose("review", errOut, verbose, func(_ *logrus.Logger) int {
+				return runReview(in, out, errOut)
+			})
+		},
+	}
+	var reviewListJSON bool
+	reviewListCommand := nativeLeaf("list", "List queued reviews", "", "review list", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		return runReviewList(context.Background(), ".", reviewListJSON, out, errOut)
+	})
+	reviewListCommand.Flags().BoolVar(&reviewListJSON, "json", false, "write JSON output")
+	var reviewQueueHandoff, reviewQueueEvidence string
+	var reviewQueueJSON bool
+	reviewQueueCommand := nativeLeaf("queue FEATURE", "Queue a review", "", "review queue", cobra.MatchAll(cobra.ExactArgs(1), requireNonEmptyFlag("handoff", &reviewQueueHandoff), requireNonEmptyFlag("evidence", &reviewQueueEvidence)), func(args []string, _ *logrus.Logger) int {
+		return runReviewQueue(context.Background(), ".", args[0], reviewQueueHandoff, reviewQueueEvidence, reviewQueueJSON, out, errOut)
+	})
+	reviewQueueCommand.Flags().StringVar(&reviewQueueHandoff, "handoff", "", "handoff path")
+	reviewQueueCommand.Flags().StringVar(&reviewQueueEvidence, "evidence", "", "evidence path")
+	reviewQueueCommand.Flags().BoolVar(&reviewQueueJSON, "json", false, "write JSON output")
+	_ = reviewQueueCommand.MarkFlagRequired("handoff")
+	_ = reviewQueueCommand.MarkFlagRequired("evidence")
+	var reviewRequeueJSON bool
+	reviewRequeueCommand := nativeLeaf("requeue REVIEW", "Requeue a review", "", "review requeue", cobra.ExactArgs(1), func(args []string, _ *logrus.Logger) int {
+		return runReviewRequeue(context.Background(), ".", args[0], reviewRequeueJSON, out, errOut)
+	})
+	reviewRequeueCommand.Flags().BoolVar(&reviewRequeueJSON, "json", false, "write JSON output")
+	reviewCommand.AddCommand(reviewListCommand, reviewQueueCommand, reviewRequeueCommand)
+
+	releaseCommand := &cobra.Command{
+		Use:     "release",
+		Short:   "Check release readiness",
+		GroupID: "review-workflow",
+		Args:    cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
+	}
+	var releaseCheckJSON bool
+	releaseCheckCommand := nativeLeaf("check", "Check release readiness", "", "release check", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		return runReleaseCheck(context.Background(), ".", releaseCheckJSON, out, errOut)
+	})
+	releaseCheckCommand.Flags().BoolVar(&releaseCheckJSON, "json", false, "write JSON output")
+	releaseCommand.AddCommand(releaseCheckCommand)
 	root.AddCommand(newCommand, applyCommand, initCommand, pushCommand, worktreeCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
 	return root
 }
@@ -374,30 +424,6 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 	}
 	if args[0] == "init" {
 		return runInit(args[1:], in, out, errOut)
-	}
-	if args[0] == "review" && len(args) == 1 {
-		if !reviewIsInteractive(in, out) {
-			fmt.Fprintln(errOut, "review: interactive terminal input and output are required")
-			return exitUsage
-		}
-		root, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(errOut, "review: resolve working directory: %v\n", err)
-			return exitInternal
-		}
-		if err := runReviewTUI(context.Background(), os.Getenv("NO_COLOR") != "", root); err != nil {
-			fmt.Fprintln(errOut, "review: terminal interface failed")
-			return exitInternal
-		}
-		return exitOK
-	}
-	if args[0] == "review" && len(args) >= 2 && (args[1] == "pass" || args[1] == "fail" || args[1] == "close") {
-		fmt.Fprintln(errOut, "human review decisions are available only in the SMT TUI")
-		printUsage(errOut)
-		return exitUsage
-	}
-	if args[0] == "work" || args[0] == "review" || args[0] == "release" {
-		return runAgentRoute(context.Background(), args, ".", out, errOut)
 	}
 	printUsage(errOut)
 	return exitUsage
@@ -530,113 +556,102 @@ func runInit(args []string, in io.Reader, out, errOut io.Writer) int {
 	return exitOK
 }
 
-func runAgentRoute(ctx context.Context, args []string, root string, out, errOut io.Writer) int {
-	s := newBeadsService(root)
-	write := func(value any, jsonMode bool) int {
-		if jsonMode {
-			data, err := json.Marshal(value)
-			if err != nil {
-				fmt.Fprintln(errOut, "agent route: encode failed")
-				return exitInternal
-			}
-			fmt.Fprintln(out, string(data))
-			return exitOK
+func runReview(in io.Reader, out, errOut io.Writer) int {
+	if !reviewIsInteractive(in, out) {
+		fmt.Fprintln(errOut, "review: interactive terminal input and output are required")
+		return exitUsage
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(errOut, "review: resolve working directory: %v\n", err)
+		return exitInternal
+	}
+	if err := runReviewTUI(context.Background(), os.Getenv("NO_COLOR") != "", root); err != nil {
+		fmt.Fprintln(errOut, "review: terminal interface failed")
+		return exitInternal
+	}
+	return exitOK
+}
+
+func writeAgentRoute(value any, jsonMode bool, out, errOut io.Writer) int {
+	if jsonMode {
+		data, err := json.Marshal(value)
+		if err != nil {
+			fmt.Fprintln(errOut, "agent route: encode failed")
+			return exitInternal
 		}
-		switch x := value.(type) {
-		case []safeIssue:
-			for _, issue := range x {
-				fmt.Fprintf(out, "%s %s %s state=%s %s\n", issue.ID, issue.Status, issue.Type, issue.ReviewState, issue.Title)
-			}
-		case safeRecovery:
-			fmt.Fprintf(out, "review=%s bug=%s recovery=%s\n", x.ReviewID, x.BugID, x.Recovery)
-		case safeReleaseResult:
-			fmt.Fprintf(out, "release ready=%t blockers=%d\n", x.Ready, len(x.Blocking))
-			for _, blocker := range x.Blocking {
-				fmt.Fprintf(out, "blocker %s %s\n", blocker.ID, blocker.Status)
-			}
-		default:
-			fmt.Fprintln(out, "operation complete")
-		}
+		fmt.Fprintln(out, string(data))
 		return exitOK
 	}
-	if len(args) >= 2 && args[0] == "work" && args[1] == "ready" {
-		if len(args) > 3 || (len(args) == 3 && args[2] != "--json") {
-			fmt.Fprintln(errOut, "usage: smt work ready [--json]")
-			return exitUsage
+	switch x := value.(type) {
+	case []safeIssue:
+		for _, issue := range x {
+			fmt.Fprintf(out, "%s %s %s state=%s %s\n", issue.ID, issue.Status, issue.Type, issue.ReviewState, issue.Title)
 		}
-		xs, e := s.ReadyWork(ctx)
-		if e != nil {
-			fmt.Fprintln(errOut, "work ready: operation failed")
-			return exitValidation
+	case safeRecovery:
+		fmt.Fprintf(out, "review=%s bug=%s recovery=%s\n", x.ReviewID, x.BugID, x.Recovery)
+	case safeReleaseResult:
+		fmt.Fprintf(out, "release ready=%t blockers=%d\n", x.Ready, len(x.Blocking))
+		for _, blocker := range x.Blocking {
+			fmt.Fprintf(out, "blocker %s %s\n", blocker.ID, blocker.Status)
 		}
-		return write(safeIssues(xs), len(args) == 3)
+	default:
+		fmt.Fprintln(out, "operation complete")
 	}
-	if len(args) >= 2 && args[0] == "review" && args[1] == "list" {
-		if len(args) > 3 || (len(args) == 3 && args[2] != "--json") {
-			fmt.Fprintln(errOut, "usage: smt review list [--json]")
-			return exitUsage
-		}
-		xs, e := s.ListReviews(ctx)
-		if e != nil {
-			fmt.Fprintln(errOut, "review list: operation failed")
-			return exitValidation
-		}
-		return write(safeIssues(xs), len(args) == 3)
+	return exitOK
+}
+
+func runWorkReady(ctx context.Context, root string, jsonMode bool, out, errOut io.Writer) int {
+	xs, err := newBeadsService(root).ReadyWork(ctx)
+	if err != nil {
+		fmt.Fprintln(errOut, "work ready: operation failed")
+		return exitValidation
 	}
-	if len(args) >= 2 && args[0] == "release" && args[1] == "check" {
-		if len(args) > 3 || (len(args) == 3 && args[2] != "--json") {
-			fmt.Fprintln(errOut, "usage: smt release check [--json]")
-			return exitUsage
-		}
-		r, e := s.ReleaseReadiness(ctx)
-		if e != nil {
-			fmt.Fprintln(errOut, "release check: operation failed")
-			return exitValidation
-		}
-		if code := write(safeRelease(r), len(args) == 3); code != exitOK {
-			return code
-		}
-		if !r.Ready {
-			return exitValidation
-		}
-		return exitOK
+	return writeAgentRoute(safeIssues(xs), jsonMode, out, errOut)
+}
+
+func runReviewList(ctx context.Context, root string, jsonMode bool, out, errOut io.Writer) int {
+	xs, err := newBeadsService(root).ListReviews(ctx)
+	if err != nil {
+		fmt.Fprintln(errOut, "review list: operation failed")
+		return exitValidation
 	}
-	if len(args) >= 3 && args[0] == "review" && args[1] == "requeue" {
-		jsonMode := false
-		if len(args) == 4 && args[3] == "--json" {
-			jsonMode = true
-		} else if len(args) != 3 {
-			fmt.Fprintln(errOut, "usage: smt review requeue REVIEW [--json]")
-			return exitUsage
-		}
-		r, e := s.RequeueAfterFix(ctx, args[2])
-		if e != nil {
-			write(safeRecovery{r.ReviewID, r.BugID, r.Recovery}, jsonMode)
-			fmt.Fprintln(errOut, "review requeue: operation failed")
-			return exitValidation
-		}
-		return write(safeRecovery{r.ReviewID, r.BugID, r.Recovery}, jsonMode)
+	return writeAgentRoute(safeIssues(xs), jsonMode, out, errOut)
+}
+
+func runReviewQueue(ctx context.Context, root, featureID, handoff, evidence string, jsonMode bool, out, errOut io.Writer) int {
+	result, err := newBeadsService(root).QueueReview(ctx, featureID, handoff, evidence)
+	if err != nil {
+		writeAgentRoute(safeQueue(result), jsonMode, out, errOut)
+		fmt.Fprintln(errOut, "review queue: operation failed")
+		return exitValidation
 	}
-	if len(args) >= 3 && args[0] == "review" && args[1] == "queue" {
-		f := flag.NewFlagSet("review queue", flag.ContinueOnError)
-		f.SetOutput(io.Discard)
-		h := f.String("handoff", "", "")
-		e := f.String("evidence", "", "")
-		jsonMode := f.Bool("json", false, "")
-		if f.Parse(args[3:]) != nil || f.NArg() != 0 {
-			fmt.Fprintln(errOut, "usage: smt review queue FEATURE --handoff PATH --evidence PATH [--json]")
-			return exitUsage
-		}
-		r, x := s.QueueReview(ctx, args[2], *h, *e)
-		if x != nil {
-			write(safeQueue(r), *jsonMode)
-			fmt.Fprintln(errOut, "review queue: operation failed")
-			return exitValidation
-		}
-		return write(safeQueue(r), *jsonMode)
+	return writeAgentRoute(safeQueue(result), jsonMode, out, errOut)
+}
+
+func runReviewRequeue(ctx context.Context, root, reviewID string, jsonMode bool, out, errOut io.Writer) int {
+	result, err := newBeadsService(root).RequeueAfterFix(ctx, reviewID)
+	if err != nil {
+		writeAgentRoute(safeRecovery{result.ReviewID, result.BugID, result.Recovery}, jsonMode, out, errOut)
+		fmt.Fprintln(errOut, "review requeue: operation failed")
+		return exitValidation
 	}
-	printUsage(errOut)
-	return exitUsage
+	return writeAgentRoute(safeRecovery{result.ReviewID, result.BugID, result.Recovery}, jsonMode, out, errOut)
+}
+
+func runReleaseCheck(ctx context.Context, root string, jsonMode bool, out, errOut io.Writer) int {
+	result, err := newBeadsService(root).ReleaseReadiness(ctx)
+	if err != nil {
+		fmt.Fprintln(errOut, "release check: operation failed")
+		return exitValidation
+	}
+	if code := writeAgentRoute(safeRelease(result), jsonMode, out, errOut); code != exitOK {
+		return code
+	}
+	if !result.Ready {
+		return exitValidation
+	}
+	return exitOK
 }
 
 type safeIssue struct {
