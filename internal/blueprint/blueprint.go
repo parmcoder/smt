@@ -17,6 +17,7 @@ import (
 // Selection holds the fixed component choices for a new configuration.
 type Selection struct {
 	Web      bool
+	Mobile   bool
 	API      bool
 	Database bool
 	DevOps   bool
@@ -40,7 +41,7 @@ func Create(in io.Reader, out io.Writer, destination string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if !selection.Web && !selection.API && !selection.Database && !selection.DevOps {
+	if !selection.Web && !selection.Mobile && !selection.API && !selection.Database && !selection.DevOps {
 		return Result{}, errors.New("select at least one component")
 	}
 	data, err := marshal(selection)
@@ -92,6 +93,10 @@ func promptSelection(reader *bufio.Reader, out io.Writer) (Selection, error) {
 	if err != nil {
 		return Selection{}, err
 	}
+	mobile, err := askComponent(reader, out, "Flutter mobile application")
+	if err != nil {
+		return Selection{}, err
+	}
 	api, err := askComponent(reader, out, "API")
 	if err != nil {
 		return Selection{}, err
@@ -104,7 +109,7 @@ func promptSelection(reader *bufio.Reader, out io.Writer) (Selection, error) {
 	if err != nil {
 		return Selection{}, err
 	}
-	return Selection{Web: web, API: api, Database: database, DevOps: devops}, nil
+	return Selection{Web: web, Mobile: mobile, API: api, Database: database, DevOps: devops}, nil
 }
 
 func askComponent(reader *bufio.Reader, out io.Writer, label string) (bool, error) {
@@ -160,9 +165,12 @@ func readAnswer(reader *bufio.Reader) (answer string, ended bool, err error) {
 }
 
 func (s Selection) labels() []string {
-	labels := make([]string, 0, 4)
+	labels := make([]string, 0, 5)
 	if s.Web {
 		labels = append(labels, "Web")
+	}
+	if s.Mobile {
+		labels = append(labels, "Flutter mobile application")
 	}
 	if s.API {
 		labels = append(labels, "API")
@@ -184,6 +192,11 @@ func marshal(selection Selection) ([]byte, error) {
 		stack.Web = "nextjs"
 		repos = append(repos, config.Repository{ID: "web", Path: "web-app", Component: "web", Technology: "nextjs", Scope: "web", Remote: config.Remote{}})
 		scopes = append(scopes, "web")
+	}
+	if selection.Mobile {
+		stack.Mobile = "flutter"
+		repos = append(repos, config.Repository{ID: "mobile", Path: "mobile-app", Component: "mobile", Technology: "flutter", Scope: "mobile", Remote: config.Remote{}})
+		scopes = append(scopes, "mobile")
 	}
 	if selection.API {
 		stack.API = "go"

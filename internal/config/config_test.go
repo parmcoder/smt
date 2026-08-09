@@ -148,6 +148,79 @@ repositories:
 	}
 }
 
+func TestLoadMobileWorkspaceScaffoldConfiguration(t *testing.T) {
+	yaml := `version: 1
+workspace:
+  ai_assist: codex
+  stack:
+    mobile: flutter
+commit:
+  types: [chore]
+  scopes: [repo, mobile]
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
+`
+	cfg, err := Load(writeConfig(t, yaml))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Workspace.Stack.Mobile; got != "flutter" {
+		t.Fatalf("mobile stack = %q, want flutter", got)
+	}
+}
+
+func TestLoadVersionOneWithoutMobileRemainsValid(t *testing.T) {
+	yaml := `version: 1
+workspace:
+  stack:
+    web: nextjs
+commit:
+  types: [chore]
+  scopes: [repo, web]
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+`
+	if _, err := Load(writeConfig(t, yaml)); err != nil {
+		t.Fatalf("Load() error = %v, want version-1 Mobile-absent configuration to remain valid", err)
+	}
+}
+
+func TestLoadRejectsInvalidMobileWorkspaceConfiguration(t *testing.T) {
+	base := `version: 1
+workspace:
+  stack:
+    mobile: flutter
+commit:
+  types: [chore]
+  scopes: [repo, mobile]
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
+`
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "unsupported stack", yaml: strings.Replace(base, "mobile: flutter", "mobile: react-native", 1), want: "workspace.stack.mobile"},
+		{name: "wrong repository ID", yaml: strings.Replace(base, "id: mobile", "id: handheld", 1), want: "mobile repository"},
+		{name: "wrong repository path", yaml: strings.Replace(base, "path: mobile-app", "path: apps/mobile", 1), want: "mobile repository"},
+		{name: "wrong repository component", yaml: strings.Replace(base, "component: mobile", "component: web", 1), want: "mobile repository"},
+		{name: "wrong repository technology", yaml: strings.Replace(base, "technology: flutter", "technology: kotlin", 1), want: "mobile repository"},
+		{name: "wrong repository scope", yaml: strings.Replace(base, "scope: mobile", "scope: app", 1), want: "mobile repository"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tt.yaml))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadWorkflowConfiguration(t *testing.T) {
 	yaml := `version: 1
 workspace:

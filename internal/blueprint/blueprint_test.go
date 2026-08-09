@@ -13,24 +13,33 @@ import (
 func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("\n\n\n\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("\n\n\n\n\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	if result.Cancelled {
 		t.Fatal("Create() cancelled, want published blueprint")
 	}
+	webPrompt := strings.Index(out.String(), "Include Web? [Y/n]")
+	mobilePrompt := strings.Index(out.String(), "Include Flutter mobile application? [Y/n]")
+	afterWeb := ""
+	if webPrompt != -1 {
+		afterWeb = out.String()[webPrompt+len("Include Web? [Y/n] "):]
+	}
+	if webPrompt == -1 || mobilePrompt == -1 || !strings.HasPrefix(afterWeb, "Include Flutter mobile application? [Y/n] ") {
+		t.Fatalf("prompts = %q, want literal Mobile prompt immediately after Web", out.String())
+	}
 	cfg, err := config.Load(destination)
 	if err != nil {
 		t.Fatalf("config.Load() error = %v", err)
 	}
-	if cfg.Workspace.AIAssist != "codex" || cfg.Workspace.Stack.Web != "nextjs" || cfg.Workspace.Stack.API != "go" || cfg.Workspace.Stack.Database != "postgresql" {
+	if cfg.Workspace.AIAssist != "codex" || cfg.Workspace.Stack.Web != "nextjs" || cfg.Workspace.Stack.Mobile != "flutter" || cfg.Workspace.Stack.API != "go" || cfg.Workspace.Stack.Database != "postgresql" {
 		t.Fatalf("workspace = %#v, want default selected fixed stack", cfg.Workspace)
 	}
 	if got, want := strings.Join(cfg.Workspace.Stack.DevOps, ","), "docker,opentofu"; got != want {
 		t.Fatalf("devops = %q, want %q", got, want)
 	}
-	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,web,api,database,infra"; got != want {
+	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,web,mobile,api,database,infra"; got != want {
 		t.Fatalf("scopes = %q, want %q", got, want)
 	}
 	if got, want := strings.Join(cfg.Commit.Types, ","), "feat,fix,refactor,perf,test,docs,build,ci,chore,revert"; got != want {
@@ -41,6 +50,7 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	}{
 		{"repo", ".", "", "", "repo"},
 		{"web", "web-app", "web", "nextjs", "web"},
+		{"mobile", "mobile-app", "mobile", "flutter", "mobile"},
 		{"api", "apis", "api", "go", "api"},
 		{"database", "database", "database", "postgresql", "database"},
 		{"infra", "devops", "devops", "docker-opentofu", "infra"},
@@ -72,7 +82,7 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	var out bytes.Buffer
-	_, err := Create(strings.NewReader("maybe\ny\nn\nyes\nn\nperhaps\nyes\n"), &out, destination)
+	_, err := Create(strings.NewReader("y\nperhaps\nn\nn\ny\nn\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -88,8 +98,26 @@ func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 	}
 }
 
+func TestCreateAllowsExplicitMobileOptOut(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	_, err := Create(strings.NewReader("y\nn\ny\nn\nn\ny\n"), &bytes.Buffer{}, destination)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	cfg, err := config.Load(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Workspace.Stack.Mobile != "" {
+		t.Fatalf("mobile stack = %q, want omitted", cfg.Workspace.Stack.Mobile)
+	}
+	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,web,api"; got != want {
+		t.Fatalf("scopes = %q, want %q", got, want)
+	}
+}
+
 func TestCreateAllNoAndInputEndDoNotWrite(t *testing.T) {
-	for name, input := range map[string]string{"all no": "n\nn\nn\nn\n", "component eof": "y\n"} {
+	for name, input := range map[string]string{"all no": "n\nn\nn\nn\nn\n", "component eof": "y\n"} {
 		t.Run(name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "smt.yaml")
 			result, err := Create(strings.NewReader(input), &bytes.Buffer{}, destination)
@@ -133,7 +161,7 @@ func TestCreateRejectsMissingParentAndPreservesExistingSymlink(t *testing.T) {
 }
 
 func TestCreateDeclineAndConfirmationEOFAreNoWriteCancellations(t *testing.T) {
-	for name, input := range map[string]string{"decline": "y\ny\ny\ny\nn\n", "confirmation eof": "y\ny\ny\ny\n"} {
+	for name, input := range map[string]string{"decline": "y\ny\ny\ny\ny\nn\n", "confirmation eof": "y\ny\ny\ny\ny\n"} {
 		t.Run(name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "smt.yaml")
 			result, err := Create(strings.NewReader(input), &bytes.Buffer{}, destination)

@@ -10,25 +10,32 @@ tags:
   - monorepo
   - developer-experience
 created: 2026-07-15
-updated: 2026-07-30
+updated: 2026-08-09
 ---
 # SMT — Sanovy Mono Tool
 
 ## Summary
 
-`smt` is a small, standard-library Go CLI for a Git root plus independent
-submodules. Configuration is committed in `smt.yaml`, remains at `version: 1`,
-and contains no credentials. The accepted implementation includes local
-workspace scaffolding, guarded Git lifecycle operations, diagnostics, checks,
-and contract inspection.
+`smt` is a small Go CLI for a Git root plus independent submodules.
+Configuration is committed in `smt.yaml`, remains at `version: 1`, and contains
+no credentials. The accepted implementation includes local workspace
+scaffolding, guarded Git lifecycle operations, diagnostics, checks, and
+contract inspection.
 
-Implemented commands are:
+The Cobra root help groups commands as Getting Started, Workspace, Review
+Workflow, and Developer Tools. Implemented commands are:
 
-- `smt init [PATH]` — interactively select fixed Next.js, Go, PostgreSQL,
-  Docker/OpenTofu, and Codex profiles; create a root Git repository, selected
-  local bootstrap submodules, `smt.yaml`, ignore files, and repository-local
-  agent workflow files. It does not install dependencies, create remote
-  repositories, or call provider APIs.
+- `smt new [FILE]` — interactively select fixed Next.js, Go, PostgreSQL, and
+  Docker/OpenTofu components; immediately after the Web selection it asks
+  `Include Flutter mobile application? [Y/n]`. Enter includes the Android/iOS
+  Flutter Mobile component and an explicit no excludes it. It writes a
+  validated `smt.yaml` blueprint only after confirmation and does not create a
+  repository or workspace.
+- `smt apply [--config FILE] PATH` — validate the supplied workspace
+  blueprint/configuration, then create the root Git repository, selected local
+  bootstrap submodules, ignore files, Beads metadata, and repository-local
+  agent workflow files at a new destination. It does not install dependencies,
+  create remote repositories, or call provider APIs.
 - `smt push [--dry-run]` — preflight every configured repository, then push
   each child repository's current branch before the root. Remote URLs come from
   `repositories[].remote.url`; dry-run validates and prints the order without
@@ -55,9 +62,60 @@ Implemented commands are:
 - `smt ci contracts bump --id ID [--apply]` — plan a reference-literal bump by
   default; write only with explicit `--apply`. Stale, absent, or ambiguous
   literals are guarded failures.
+- `smt work ready [--json]`, `smt review`, `smt review list [--json]`,
+  `smt review queue FEATURE --handoff PATH --evidence PATH [--json]`, and
+  `smt review requeue REVIEW [--json]` — expose the retained local
+  work/review workflow.
+- `smt release check [--json]` — report release readiness.
+- `smt completion bash|fish|powershell|zsh` — generate static shell
+  completion; this command and `smt --help` do not require `smt.yaml`.
 
 These commands use argument arrays, never force-push or rewrite history, and
 never log or persist tokens, authorization headers, or sensitive payloads.
+
+## Flutter Mobile component
+
+`smt new` asks the literal prompt `Include Flutter mobile application? [Y/n]`
+immediately after the Web selection. Enter means Yes and an explicit no
+excludes Mobile. When Mobile is selected, the component and repository order
+is repo, web, mobile, api, database, infra; an opt-out omits Mobile.
+
+Mobile extends, rather than changes, `version: 1`. Existing version-1
+blueprints/configurations that lack Mobile remain valid; applying one produces
+no Mobile output. When selected, `smt new` emits and `smt apply` accepts
+exactly this stack entry and repository mapping:
+
+```yaml
+workspace:
+  stack:
+    mobile: flutter
+
+repositories:
+  - id: mobile
+    path: mobile-app
+    component: mobile
+    technology: flutter
+    scope: mobile
+```
+
+Only `flutter` is supported for the Mobile stack in version 1. Any unsupported
+Mobile stack or mismatched Mobile metadata is a validation failure before any
+destination mutation. Version 1 targets Android and iOS only; store signing,
+metadata, submission, and publication are outside this workspace-setup scope.
+
+Applying a selected Mobile blueprint creates the same Git-ready component
+basics as the existing stacks: an independent initialized local bootstrap
+submodule, a `mobile_worker` manifest, Flutter-oriented README and ignore
+rules, and `.tool-versions` containing the literal pin `flutter 3.44.9`.
+The Mobile component is strictly scaffold-only: SMT does not invoke `flutter
+create`, `flutter --version`, or any other Flutter SDK CLI. It does not require
+a Flutter executable or SDK, install dependencies, access the network, produce
+Flutter application source, sign an app, or publish an app.
+
+`smt apply` validates first and remains atomic/all-or-nothing. Any
+prerequisite, staging, Beads, or publish failure leaves no partial destination.
+Existing all-or-nothing semantics remain, and SMT must never attempt remote
+rollback after a later submit failure.
 
 ## Configuration contract
 
@@ -109,7 +167,9 @@ contracts:
 ```
 
 The fixed workspace stack values are `nextjs`, `go`, `postgresql`, and the
-DevOps tools `docker` plus `opentofu`; `ai_assist` is either absent or `codex`.
+DevOps tools `docker` plus `opentofu`; the implemented Mobile extension adds
+only `mobile: flutter` as described above. `ai_assist` is either absent or
+`codex`.
 `remote.url` is optional at initialization but required by `smt push`; it may
 not contain embedded credentials. Existing `provider` and `project` metadata
 remain supported and are optional when both are absent.
@@ -122,10 +182,10 @@ Supported reusable contracts are literal `reference`, `migration-coverage`,
 and `artifact` contracts. Paths must remain inside the workspace, IDs must be
 unique, and contract severity is `error` unless explicitly set to `warn`.
 
-`init` uses local bootstrap URLs in `.gitmodules` because no remote URL is
-required during initialization. `push` uses `remote.url` directly and does not
-rewrite `.gitmodules`; replacing bootstrap URLs for fresh external clones is a
-separate future capability.
+Applied workspaces use local bootstrap URLs in `.gitmodules` because no remote
+URL is required during blueprint application. `push` uses `remote.url` directly
+and does not rewrite `.gitmodules`; replacing bootstrap URLs for fresh external
+clones is a separate future capability.
 
 Reference bumps replace exactly one current literal. The default is a plan;
 `--apply` is required to write, and the command refuses stale, missing, or
@@ -162,6 +222,36 @@ the Go tests. The implementation must keep focused tests for configuration,
 scaffolded Git submodules, push/worktree preflight and recovery reporting,
 harmless metadata, profiles and mutation guards, status/doctor output, contract
 severity and path validation, CI audit, and guarded bump planning/apply behavior.
+
+The Mobile focused-test contract covers default inclusion, explicit
+opt-out, invalid-answer retry, EOF/decline no-write, exact YAML/repository
+mapping/scopes/order, invalid stack or metadata rejection before mutation,
+existing-version-1 compatibility, atomic cleanup for preflight and
+stage/publish failures, generated artifacts, and focused tests without Flutter.
+Human end-to-end confirmation is later human-owned work (`smt-3r2.5`), not
+completed runtime proof in this delivery.
+
+## Flutter Mobile delivery order
+
+The contract, blueprint, atomic apply, and documentation/release verification
+work are complete through `smt-3r2.4`. The human-owned E2E review remains
+`smt-3r2.5`.
+
+## Human E2E review handoff
+
+`smt-3r2.5` should run `smt new` twice in clean temporary locations: first
+press Enter at the Mobile prompt and confirm `mobile: flutter`, the Mobile
+repository entry, and the Mobile-selected `repo`, `web`, `mobile`, `api`,
+`database`, `infra` order; then explicitly answer no and confirm no Mobile
+configuration. Apply
+each reviewed blueprint to a new destination. For the default case, inspect
+the Git-ready `mobile-app` submodule, `agents/mobile_worker.toml`, Mobile
+README and ignore rules, and `.tool-versions` Flutter `3.44.9` pin. Do not
+expect or attempt Flutter source generation, SDK/CLI use, dependency install,
+network access, signing, or store publication; record the observed commands
+and artifacts as human-review evidence. At one additional fresh destination,
+exercise one safe prerequisite, staging, Beads, or publish failure and verify
+that no partial destination remains.
 
 ## Related
 

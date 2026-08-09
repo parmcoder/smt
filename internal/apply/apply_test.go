@@ -36,6 +36,73 @@ workflow:
 	}
 }
 
+func TestValidateBlueprintAcceptsOnlyExactSelectedMobileMappingInOrder(t *testing.T) {
+	cfg, err := config.LoadBytes(mobileBlueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateBlueprint(*cfg); err != nil {
+		t.Fatalf("ValidateBlueprint() error = %v", err)
+	}
+	for name, mutate := range map[string]func(*config.Config){
+		"unsupported stack": func(cfg *config.Config) { cfg.Workspace.Stack.Mobile = "react-native" },
+		"wrong id":          func(cfg *config.Config) { cfg.Repositories[2].ID = "app" },
+		"wrong path":        func(cfg *config.Config) { cfg.Repositories[2].Path = "mobile" },
+		"wrong component":   func(cfg *config.Config) { cfg.Repositories[2].Component = "web" },
+		"wrong technology":  func(cfg *config.Config) { cfg.Repositories[2].Technology = "dart" },
+		"wrong scope":       func(cfg *config.Config) { cfg.Repositories[2].Scope = "app" },
+		"wrong order": func(cfg *config.Config) {
+			cfg.Repositories[1], cfg.Repositories[2] = cfg.Repositories[2], cfg.Repositories[1]
+		},
+		"wrong commit order": func(cfg *config.Config) { cfg.Commit.Scopes = []string{"repo", "web", "api", "mobile"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			copy := *cfg
+			copy.Repositories = append([]config.Repository(nil), cfg.Repositories...)
+			copy.Commit.Scopes = append([]string(nil), cfg.Commit.Scopes...)
+			mutate(&copy)
+			if err := ValidateBlueprint(copy); err == nil {
+				t.Fatal("ValidateBlueprint() error=nil")
+			}
+		})
+	}
+}
+
+func TestValidateBlueprintAcceptsSelectedMobileDatabaseWithoutDevOps(t *testing.T) {
+	cfg, err := config.LoadBytes(mobileDatabaseBlueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateBlueprint(*cfg); err != nil {
+		t.Fatalf("ValidateBlueprint() error = %v", err)
+	}
+}
+
+func TestValidateBlueprintRejectsIncompleteDevOpsWithMobile(t *testing.T) {
+	cfg, err := config.LoadBytes(mobileDevOpsBlueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Workspace.Stack.DevOps = []string{"docker"}
+	if err := ValidateBlueprint(*cfg); err == nil {
+		t.Fatal("ValidateBlueprint() error=nil")
+	}
+}
+
+func TestValidateBlueprintAcceptsFullSelectedMobileOrdering(t *testing.T) {
+	cfg, err := config.LoadBytes(fullMobileBlueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateBlueprint(*cfg); err != nil {
+		t.Fatalf("ValidateBlueprint() error = %v", err)
+	}
+	cfg.Repositories[3], cfg.Repositories[4] = cfg.Repositories[4], cfg.Repositories[3]
+	if err := ValidateBlueprint(*cfg); err == nil {
+		t.Fatal("ValidateBlueprint() error=nil for adjacent-order mismatch")
+	}
+}
+
 func TestValidateBlueprintRejectsUnsupportedBlueprintExtensions(t *testing.T) {
 	for name, replacement := range map[string]string{
 		"provider":  "provider: github, project: example/web, ",
@@ -182,6 +249,95 @@ func TestServiceRegistersSubmodulesAsInitialized(t *testing.T) {
 	}
 }
 
+func TestServiceBuildsFlutterMobileSubmoduleAndArtifacts(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	cfg, err := config.LoadBytes(mobileBlueprintBytes(), filepath.Join(parent, "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Service{Config: *cfg, Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return nil })}
+	if err := s.Apply(context.Background(), destination, mobileBlueprintBytes()); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := ggit.PlainOpen(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := repo.CommitObject(mustHead(t, repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := tree.FindEntry("mobile-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Mode != filemode.Submodule {
+		t.Fatalf("mobile-app mode=%s, want submodule", entry.Mode)
+	}
+	child, err := ggit.PlainOpen(filepath.Join(destination, "mobile-app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := child.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Hash != head.Hash() {
+		t.Fatalf("gitlink=%s child=%s", entry.Hash, head.Hash())
+	}
+	remote, err := child.Remote(ggit.DefaultRemoteName)
+	if err != nil || remote.Config().URLs[0] != filepath.Join(destination, ".smt", "bootstrap", "mobile") {
+		t.Fatalf("published child origin=%v err=%v", remote, err)
+	}
+	readme, err := os.ReadFile(filepath.Join(destination, "mobile-app", "README.md"))
+	if err != nil || !strings.Contains(string(readme), "Flutter") {
+		t.Fatalf("mobile README=%q err=%v", readme, err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(destination, "mobile-app", ".gitignore"))
+	if err != nil || !strings.Contains(string(ignore), ".dart_tool/") || !strings.Contains(string(ignore), "build/") {
+		t.Fatalf("mobile ignore=%q err=%v", ignore, err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(destination, "agents", "mobile_worker.toml"))
+	if err != nil || !strings.Contains(string(manifest), "mobile_worker") {
+		t.Fatalf("mobile manifest=%q err=%v", manifest, err)
+	}
+	versions, err := os.ReadFile(filepath.Join(destination, ".tool-versions"))
+	if err != nil || !strings.Contains(string(versions), "flutter 3.44.9\n") {
+		t.Fatalf("tool versions=%q err=%v", versions, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(destination, "smt.yaml"))
+	if err != nil || string(raw) != string(mobileBlueprintBytes()) {
+		t.Fatalf("raw config=%q err=%v", raw, err)
+	}
+}
+
+func TestMobileAbsentLeavesExistingArtifactOutputUnchanged(t *testing.T) {
+	cfg, err := config.LoadBytes(blueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := toolVersions(components(*cfg)), "task 3.52.0\nlefthook 2.1.10\nnodejs 24.18.0\n"; got != want {
+		t.Fatalf("toolVersions()=%q, want %q", got, want)
+	}
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	s := Service{Config: *cfg, Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return nil })}
+	if err := s.Apply(context.Background(), destination, blueprintBytes()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(destination, "mobile-app")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected mobile app: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(destination, "agents", "mobile_worker.toml")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected mobile worker: %v", err)
+	}
+}
+
 func blueprintBytes() []byte {
 	return []byte(`version: 1
 workspace: {ai_assist: codex, stack: {web: nextjs}}
@@ -189,6 +345,75 @@ commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
   - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`)
+}
+
+func mobileBlueprintBytes() []byte {
+	return []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`)
+}
+
+func mobileDatabaseBlueprintBytes() []byte {
+	return []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter, database: postgresql}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile, database]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
+  - {id: database, path: database, component: database, technology: postgresql, scope: database, remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`)
+}
+
+func mobileDevOpsBlueprintBytes() []byte {
+	return []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter, devops: [docker, opentofu]}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile, infra]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
+  - {id: infra, path: devops, component: devops, technology: docker-opentofu, scope: infra, remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`)
+}
+
+func fullMobileBlueprintBytes() []byte {
+	return []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter, api: go, database: postgresql, devops: [docker, opentofu]}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile, api, database, infra]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
+  - {id: api, path: apis, component: api, technology: go, scope: api, remote: {url: ""}}
+  - {id: database, path: database, component: database, technology: postgresql, scope: database, remote: {url: ""}}
+  - {id: infra, path: devops, component: devops, technology: docker-opentofu, scope: infra, remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:
@@ -229,13 +454,62 @@ func TestServiceFailuresLeaveNoDestination(t *testing.T) {
 		"beads":         {Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Initialize: initializerFunc(func(context.Context, string) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return errors.New("beads") })},
 	} {
 		t.Run(name, func(t *testing.T) {
-			destination := filepath.Join(t.TempDir(), "workspace")
+			parent := t.TempDir()
+			destination := filepath.Join(parent, "workspace")
 			if err := service.Apply(context.Background(), destination, []byte("x")); err == nil {
 				t.Fatal("Apply error=nil")
 			}
 			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 				t.Fatalf("destination=%v", err)
 			}
+			assertNoStage(t, parent)
+		})
+	}
+}
+
+func TestServiceStagedConfigurationWriteFailureCleansStaging(t *testing.T) {
+	original := writeStagedConfig
+	t.Cleanup(func() { writeStagedConfig = original })
+	writeStagedConfig = func(string, []byte, os.FileMode) error { return errors.New("write") }
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	s := Service{Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Initialize: initializerFunc(func(context.Context, string) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return nil })}
+	if err := s.Apply(context.Background(), destination, []byte("raw")); err == nil {
+		t.Fatal("Apply error=nil")
+	}
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("destination=%v", err)
+	}
+	assertNoStage(t, parent)
+}
+
+func TestServiceMobileBeadsAndPublishFailuresCleanStaging(t *testing.T) {
+	for name, service := range map[string]Service{
+		"beads": {
+			Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+			Beads:         initializerFunc(func(context.Context, string) error { return errors.New("beads") }),
+		},
+		"publish": {
+			Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+			Beads:         initializerFunc(func(context.Context, string) error { return nil }),
+			Publish:       func(string, string) error { return errors.New("publish") },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			destination := filepath.Join(parent, "workspace")
+			cfg, err := config.LoadBytes(mobileBlueprintBytes(), filepath.Join(parent, "blueprint.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			service.Config = *cfg
+			if err := service.Apply(context.Background(), destination, mobileBlueprintBytes()); err == nil {
+				t.Fatal("Apply error=nil")
+			}
+			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+				t.Fatalf("destination=%v", err)
+			}
+			assertNoStage(t, parent)
 		})
 	}
 }

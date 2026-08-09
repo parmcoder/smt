@@ -14,10 +14,10 @@ import (
 
 	applypkg "github.com/parmcoder/smt/internal/apply"
 	"github.com/parmcoder/smt/internal/beads"
+	"github.com/parmcoder/smt/internal/blueprint"
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
-	"github.com/parmcoder/smt/internal/scaffold"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,12 +39,12 @@ func TestRunApplyParsesConfigWithoutPrompting(t *testing.T) {
 	}
 }
 
-func TestRunApplyUsesCustomConfigAndUsageIsExact(t *testing.T) {
+func TestRunApplyUsesCustomConfigAndLeafUsage(t *testing.T) {
 	for name, args := range map[string][]string{"missing path": {"apply"}, "extra path": {"apply", "a", "b"}, "bad flag": {"apply", "--unknown", "a"}} {
 		t.Run(name, func(t *testing.T) {
 			out, errOut := new(strings.Builder), new(strings.Builder)
-			if code := run(args, out, errOut); code != exitUsage || errOut.String() != "usage: smt apply [--config FILE] PATH\n" {
-				t.Fatalf("code=%d stderr=%q", code, errOut.String())
+			if code := run(args, out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "Usage:\n  smt apply PATH") || strings.Count(errOut.String(), "Usage:") != 1 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
 		})
 	}
@@ -61,6 +61,50 @@ func TestRunApplyUsesCustomConfigAndUsageIsExact(t *testing.T) {
 	out, errOut := new(strings.Builder), new(strings.Builder)
 	if code := run([]string{"apply", "--config", custom, filepath.Join(root, "workspace")}, out, errOut); code != exitValidation || !strings.Contains(errOut.String(), "apply prerequisites") {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+func TestRunApplyRejectsInvalidMobileBeforeServiceMutation(t *testing.T) {
+	original := newApplyService
+	t.Cleanup(func() { newApplyService = original })
+	called := 0
+	newApplyService = func() applypkg.Service {
+		called++
+		return applypkg.Service{}
+	}
+	base := `version: 1
+workspace: {stack: {mobile: react-native}}
+commit: {types: [feat], scopes: [repo, mobile]}
+repositories: [{id: repo, path: ., scope: repo, remote: {url: ""}}, {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}]
+`
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "unsupported stack", yaml: base, want: "workspace.stack.mobile"},
+		{name: "wrong ID", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "id: mobile", "id: handheld", 1), want: "mobile repository"},
+		{name: "wrong path", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "path: mobile-app", "path: apps/mobile", 1), want: "mobile repository"},
+		{name: "wrong component", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "component: mobile", "component: web", 1), want: "mobile repository"},
+		{name: "wrong technology", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "technology: flutter", "technology: kotlin", 1), want: "mobile repository"},
+		{name: "wrong scope", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "scope: mobile", "scope: app", 1), want: "mobile repository"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called = 0
+			root := t.TempDir()
+			configPath := filepath.Join(root, "invalid-mobile.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := runWithInput([]string{"apply", "--config", configPath, filepath.Join(root, "workspace")}, strings.NewReader(""), out, errOut); code != exitValidation || called != 0 || !strings.Contains(errOut.String(), tt.want) {
+				t.Fatalf("code=%d service calls=%d stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+			}
+			if _, err := os.Lstat(filepath.Join(root, "workspace")); !os.IsNotExist(err) {
+				t.Fatalf("destination stat=%v, want no mutation", err)
+			}
+		})
 	}
 }
 
@@ -116,22 +160,14 @@ func TestRunValidateMessageExitCodes(t *testing.T) {
 	}
 }
 
-func TestRunInitPrintsWriteFreeMigrationGuidance(t *testing.T) {
+func TestRunInitIsUnknownCommand(t *testing.T) {
 	t.Chdir(t.TempDir())
-	destination := filepath.Join(t.TempDir(), "platform")
-	for _, args := range [][]string{{"init"}, {"init", destination}} {
+	for _, args := range [][]string{{"init"}, {"init", "--help"}} {
 		out, errOut := new(strings.Builder), new(strings.Builder)
 		code := runWithInput(args, noReadReader{}, out, errOut)
-		if code != exitOK || out.String() != "smt init no longer creates a workspace; run smt new [FILE], review smt.yaml, then run smt apply [--config FILE] PATH\n" || errOut.Len() != 0 {
+		if code != exitUsage || out.Len() != 0 || !strings.Contains(errOut.String(), "unknown command \"init\"") {
 			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
 		}
-	}
-	if _, err := os.Stat(destination); !os.IsNotExist(err) {
-		t.Fatalf("destination=%v", err)
-	}
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"init", "one", "two"}, noReadReader{}, out, errOut); code != exitUsage || errOut.String() != "usage: smt init [PATH]\n" {
-		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
 
@@ -158,7 +194,7 @@ func (f fakeAgentService) ReleaseReadiness(context.Context) (beads.ReleaseReadin
 	return f.release, f.err
 }
 
-func TestAgentRoutesUseSafeDeterministicDTOsAndExactUsage(t *testing.T) {
+func TestCobraReviewWorkflowUsesSafeDTOsAndPreservesBusinessExits(t *testing.T) {
 	original := newBeadsService
 	t.Cleanup(func() { newBeadsService = original })
 	fake := fakeAgentService{ready: []beads.Issue{{ID: "feat-1", Title: "Feature", Status: "open", Type: "feature", Labels: []string{"internal"}}}, reviews: []beads.Issue{{ID: "review-1", Title: "Review", Status: "open", Type: "task", ReviewState: "queued"}}, queue: beads.QueueResult{FeatureID: "feat-1", ReviewID: "review-1"}, requeue: beads.Recovery{ReviewID: "review-1", BugID: "bug-1", Recovery: "retry"}, release: beads.ReleaseReadiness{Ready: false, Blocking: []beads.Issue{{ID: "review-1", Status: "open"}}}}
@@ -174,39 +210,101 @@ func TestAgentRoutesUseSafeDeterministicDTOsAndExactUsage(t *testing.T) {
 		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, exitOK, `{"review_id":"review-1"}` + "\n", ""},
 		{[]string{"review", "requeue", "review-1", "--json"}, exitOK, `{"review_id":"review-1","bug_id":"bug-1","recovery":"retry"}` + "\n", ""},
 		{[]string{"release", "check", "--json"}, exitValidation, `{"ready":false,"blocking":[{"id":"review-1","title":"","status":"open","type":"","labels":null}]}` + "\n", ""},
-		{[]string{"review", "requeue", "review-1", "extra"}, exitUsage, "", "usage: smt review requeue REVIEW [--json]\n"},
-		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "unexpected"}, exitUsage, "", "usage: smt review queue FEATURE --handoff PATH --evidence PATH [--json]\n"},
 	} {
 		out, errOut := new(strings.Builder), new(strings.Builder)
-		code := runAgentRoute(context.Background(), tc.args, "/unused", out, errOut)
+		code := runWithInput(tc.args, strings.NewReader(""), out, errOut)
 		if code != tc.code || out.String() != tc.out || errOut.String() != tc.err {
 			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
 		}
 	}
-	called := 0
-	newBeadsService = func(string) agentService { called++; return fake }
-	for _, args := range [][]string{{"review", "pass"}, {"review", "pass", "x"}, {"review", "fail"}, {"review", "fail", "x"}, {"review", "close"}, {"review", "close", "x"}} {
-		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "human review decisions") {
-			t.Fatalf("args=%v code=%d stderr=%q", args, code, errOut.String())
-		}
-	}
-	if called != 0 {
-		t.Fatalf("review mutations reached Beads service %d times", called)
-	}
-	for _, args := range [][]string{{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, {"review", "requeue", "review-1", "--json"}, {"release", "check", "--json"}} {
+	for _, args := range [][]string{{"work", "ready", "--json"}, {"review", "list", "--json"}, {"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, {"review", "requeue", "review-1", "--json"}, {"release", "check", "--json"}} {
 		newBeadsService = func(string) agentService {
 			return fakeAgentService{queue: beads.QueueResult{ReviewID: "review-1", Recovery: "safe retry"}, requeue: beads.Recovery{ReviewID: "review-1", Recovery: "safe retry"}, release: beads.ReleaseReadiness{}, err: errors.New("token=secret")}
 		}
 		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runAgentRoute(context.Background(), args, "/unused", out, errOut); code != exitValidation || strings.Contains(out.String()+errOut.String(), "secret") || !strings.Contains(errOut.String(), "operation failed") {
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitValidation || strings.Contains(out.String()+errOut.String(), "secret") || !strings.Contains(errOut.String(), "operation failed") {
 			t.Fatalf("failure args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+}
+
+func TestCobraReviewWorkflowRejectsInvalidInputBeforeBeads(t *testing.T) {
+	original := newBeadsService
+	t.Cleanup(func() { newBeadsService = original })
+	called := 0
+	newBeadsService = func(string) agentService {
+		called++
+		return fakeAgentService{}
+	}
+	for _, tc := range []struct {
+		args []string
+		use  string
+	}{
+		{[]string{"work", "ready", "extra"}, "work ready"},
+		{[]string{"review", "list", "extra"}, "review list"},
+		{[]string{"review", "queue"}, "review queue FEATURE"},
+		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md"}, "review queue FEATURE"},
+		{[]string{"review", "queue", "feat-1", "--handoff", " ", "--evidence", "docs/e.md"}, "review queue FEATURE"},
+		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", " "}, "review queue FEATURE"},
+		{[]string{"review", "requeue"}, "review requeue REVIEW"},
+		{[]string{"review", "requeue", "review-1", "extra"}, "review requeue REVIEW"},
+		{[]string{"release", "check", "extra"}, "release check"},
+	} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitUsage {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
+		}
+		if out.Len() != 0 || !strings.Contains(errOut.String(), "Usage:\n  smt "+tc.use) {
+			t.Fatalf("args=%v stdout=%q stderr=%q", tc.args, out.String(), errOut.String())
+		}
+	}
+	if called != 0 {
+		t.Fatalf("invalid syntax instantiated Beads service %d times", called)
+	}
+}
+
+func TestCobraReviewDecisionCommandsAreUnknownWithoutBeads(t *testing.T) {
+	original := newBeadsService
+	t.Cleanup(func() { newBeadsService = original })
+	called := 0
+	newBeadsService = func(string) agentService {
+		called++
+		return fakeAgentService{}
+	}
+	for _, args := range [][]string{{"review", "pass"}, {"review", "fail"}, {"review", "close"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "unknown command") {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+	if called != 0 {
+		t.Fatalf("unknown decision commands instantiated Beads service %d times", called)
+	}
+}
+
+func TestCobraReviewWorkflowLeafHelp(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"work", "ready", "--help"}, []string{"Usage:\n  smt work ready", "--json"}},
+		{[]string{"review", "queue", "--help"}, []string{"Usage:\n  smt review queue FEATURE", "--handoff string", "--evidence string", "--json"}},
+		{[]string{"release", "check", "--help"}, []string{"Usage:\n  smt release check", "--json"}},
+	} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("args=%v stdout=%q, want %q", tc.args, out.String(), want)
+			}
 		}
 	}
 }
 func TestRunBareHelpAndReviewTTYRouting(t *testing.T) {
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 || !strings.HasPrefix(out.String(), "usage: smt new [FILE]") {
+	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 || !strings.Contains(out.String(), "Getting Started") {
 		t.Fatalf("bare code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
 	oldTTY, oldTUI := reviewIsInteractive, runReviewTUI
@@ -244,11 +342,173 @@ func TestRunBareHelpAndReviewTTYRouting(t *testing.T) {
 	}
 }
 
+const cobraRootHelpGolden = `Sanovy Mono Tool
+
+Usage:
+  smt [flags]
+  smt [command]
+
+Getting Started
+  apply            Apply a workspace blueprint
+  new              Create a workspace blueprint
+
+Workspace
+  doctor           Check local readiness
+  push             Push configured repositories
+  status           Show workspace status
+  worktree         Manage linked worktrees
+
+Review Workflow
+  release          Check release readiness
+  review           Open the review terminal interface
+  work             Manage work items
+
+Developer Tools
+  check            Run a check profile
+  ci               Run CI-parity tools
+  completion       Generate the autocompletion script for the specified shell
+  contracts        Inspect reusable contracts
+  help             Help about any command
+  validate-message Validate a commit message
+
+Flags:
+  -h, --help      help for smt
+      --verbose   write diagnostic command details to stderr
+
+Use "smt [command] --help" for more information about a command.
+`
+
+func TestCobraRootHelpMatchesGoldenWithoutConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.String() != cobraRootHelpGolden || errOut.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestCobraHelpAliasesWriteStdoutWithoutConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, args := range [][]string{{"help"}, {"--help"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitOK {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+		if out.Len() == 0 || errOut.Len() != 0 {
+			t.Fatalf("args=%q stdout=%q stderr=%q", args, out.String(), errOut.String())
+		}
+	}
+}
+
+func TestCobraCompletionDoesNotLoadConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"completion", "zsh"}, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "#compdef smt") || errOut.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestCobraSyntaxErrorsAreConciseAndUseStderr(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, args := range [][]string{{"stattus"}, {"init", "one", "two"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+		usageCount := strings.Count(errOut.String(), "Usage:") + strings.Count(errOut.String(), "usage: smt")
+		if out.Len() != 0 || usageCount != 1 {
+			t.Fatalf("args=%q stdout=%q stderr=%q", args, out.String(), errOut.String())
+		}
+	}
+}
+
+func TestCobraMigratedLeavesRejectInvalidSyntaxBeforeConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, tc := range []struct {
+		name string
+		args []string
+		use  string
+	}{
+		{name: "new has at most one path", args: []string{"new", "one", "two"}, use: "new [FILE]"},
+		{name: "apply needs path", args: []string{"apply"}, use: "apply PATH"},
+		{name: "status has no args", args: []string{"status", "extra"}, use: "status"},
+		{name: "doctor has no args", args: []string{"doctor", "extra"}, use: "doctor"},
+		{name: "check needs profile", args: []string{"check"}, use: "check"},
+		{name: "check profile is non-empty", args: []string{"check", "--profile", ""}, use: "check"},
+		{name: "push has no args", args: []string{"push", "extra"}, use: "push"},
+		{name: "status rejects unknown flags", args: []string{"status", "--unknown"}, use: "status"},
+		{name: "worktree add needs branch", args: []string{"worktree", "add", "destination"}, use: "worktree add PATH"},
+		{name: "worktree branch is non-empty", args: []string{"worktree", "add", "destination", "--branch", ""}, use: "worktree add PATH"},
+		{name: "contracts validate has no args", args: []string{"contracts", "validate", "extra"}, use: "contracts validate"},
+		{name: "ci audit has no args", args: []string{"ci", "audit", "extra"}, use: "ci audit"},
+		{name: "ci contracts bump needs id", args: []string{"ci", "contracts", "bump"}, use: "ci contracts bump"},
+		{name: "ci contracts bump id is non-empty", args: []string{"ci", "contracts", "bump", "--id", ""}, use: "ci contracts bump"},
+		{name: "validate message needs file", args: []string{"validate-message"}, use: "validate-message FILE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitUsage {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if out.Len() != 0 || strings.Contains(errOut.String(), "configuration error") {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+			}
+			if !strings.Contains(errOut.String(), "Usage:\n  smt "+tc.use) || strings.Count(errOut.String(), "Usage:") != 1 {
+				t.Fatalf("stderr=%q, want one leaf usage for %q", errOut.String(), tc.use)
+			}
+		})
+	}
+}
+
+func TestCobraMigratedLeafHelpAndValidOutput(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"apply", "--help"}, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("help code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{"Apply a workspace blueprint", "Usage:\n  smt apply PATH", "--config string"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("help stdout=%q, want %q", out.String(), want)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("help stderr=%q", errOut.String())
+	}
+
+	if err := writeTestConfig("smt.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	message := filepath.Join(t.TempDir(), "message")
+	if err := writeTestMessage(message, "feat(api): add a thing\n"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"validate-message", message}, strings.NewReader(""), out, errOut); code != exitOK || out.String() != "valid commit message\n" || errOut.Len() != 0 {
+		t.Fatalf("valid code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCobraPersistentVerbosePreservesUnknownInitExit(t *testing.T) {
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"init", "--verbose"}, strings.NewReader(""), out, errOut); code != exitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 || !strings.Contains(errOut.String(), "unknown command \"init\"") || !strings.Contains(errOut.String(), "command finished") {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
 func TestRunNewCreatesConfigurationWithoutExistingConfiguration(t *testing.T) {
 	t.Chdir(t.TempDir())
 	allowNewInput(t)
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\ny\n"), out, errOut)
+	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\n\ny\n"), out, errOut)
 	if code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
@@ -262,7 +522,7 @@ func TestRunNewCreatesConfigurationAtCustomPath(t *testing.T) {
 	allowNewInput(t)
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\nn\nn\ny\n"), out, errOut); code != exitOK {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\ny\nn\nn\ny\n"), out, errOut); code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := config.Load(destination); err != nil {
@@ -273,13 +533,13 @@ func TestRunNewCreatesConfigurationAtCustomPath(t *testing.T) {
 func TestRunNewUsageAndDecline(t *testing.T) {
 	allowNewInput(t)
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", "a", "b"}, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "usage: smt new [FILE]") {
+	if code := runWithInput([]string{"new", "a", "b"}, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "Usage:\n  smt new [FILE]") || strings.Count(errOut.String(), "Usage:") != 1 {
 		t.Fatalf("new usage code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	out.Reset()
 	errOut.Reset()
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\nn\n"), out, errOut); code != exitOK || !strings.Contains(out.String(), "no file was written") {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\nn\n"), out, errOut); code != exitOK || !strings.Contains(out.String(), "no file was written") {
 		t.Fatalf("new decline code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
@@ -293,7 +553,7 @@ func TestRunNewRejectsNonTerminalInputWithoutWriting(t *testing.T) {
 	newInputIsTerminal = func(io.Reader) bool { return false }
 	t.Cleanup(func() { newInputIsTerminal = previous })
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\n"), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "interactive terminal") {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\ny\n"), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "interactive terminal") {
 		t.Fatalf("new non-terminal code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
@@ -319,7 +579,7 @@ func TestRunPushDryRunPrintsChildFirstPlanWithoutRemoteAccess(t *testing.T) {
 		ID: "repo", Path: root, Remote: config.Remote{URL: "https://example.invalid/root.git"},
 	}}}
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runPush(context.Background(), []string{"--dry-run"}, cfg, git.ExecRunner{}, out, errOut); code != exitOK {
+	if code := runPush(context.Background(), cfg, git.ExecRunner{}, true, out, errOut); code != exitOK {
 		t.Fatalf("runPush() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if !strings.Contains(out.String(), "push plan") || !strings.Contains(out.String(), "repo: main") {
@@ -337,7 +597,7 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "feature")
 	cfg := config.Config{Repositories: []config.Repository{{ID: "repo", Path: ".", Scope: "repo"}}}
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWorktree(context.Background(), []string{"add", destination, "--branch", "feature/demo", "--dry-run"}, cfg, root, git.ExecRunner{}, out, errOut); code != exitOK {
+	if code := runWorktree(context.Background(), cfg, root, git.ExecRunner{}, destination, "feature/demo", true, out, errOut); code != exitOK {
 		t.Fatalf("runWorktree() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if !strings.Contains(out.String(), "worktree plan") || !strings.Contains(out.String(), destination) {
@@ -345,12 +605,13 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 	}
 }
 
-func TestRunPushUsesRemoteURLsConfiguredAfterInit(t *testing.T) {
+func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "platform")
-	if _, err := scaffold.New(git.ExecRunner{}).Init(context.Background(), root, scaffold.Selection{Web: true, API: true, Codex: true}); err != nil {
-		t.Fatalf("Init() error = %v", err)
+	blueprintPath := filepath.Join(t.TempDir(), "smt.yaml")
+	if _, err := blueprint.Create(strings.NewReader("y\ny\ny\nn\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
+		t.Fatalf("Create() error = %v", err)
 	}
-	cfg, err := config.Load(filepath.Join(root, "smt.yaml"))
+	cfg, err := config.Load(blueprintPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,10 +628,14 @@ func TestRunPushUsesRemoteURLsConfiguredAfterInit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "smt.yaml"), data, 0o600); err != nil {
-		t.Fatal(err)
+	service := applypkg.Service{
+		Config:        *cfg,
+		Prerequisites: applyPrereq(func(context.Context) error { return nil }),
+		Beads:         applyInit(func(context.Context, string) error { return nil }),
 	}
-	commitTestFiles(t, root, "configure remotes")
+	if err := service.Apply(context.Background(), root, data); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 	t.Chdir(root)
 	out, errOut := new(strings.Builder), new(strings.Builder)
 	if code := run([]string{"push"}, out, errOut); code != exitOK {
@@ -471,7 +736,7 @@ func TestRunVerboseInvalidCommandPreservesUsageAndExitCode(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", out.String())
 	}
-	if !strings.Contains(errOut.String(), "usage: smt") {
+	if !strings.Contains(errOut.String(), "Usage:\n  smt") {
 		t.Fatalf("stderr = %q, want usage", errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "level=debug") ||
