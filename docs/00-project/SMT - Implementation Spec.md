@@ -70,6 +70,52 @@ Workflow, and Developer Tools. Implemented commands are:
 These commands use argument arrays, never force-push or rewrite history, and
 never log or persist tokens, authorization headers, or sensitive payloads.
 
+## Approved Flutter Mobile component (planned)
+
+This is the approved contract for the next Mobile delivery; it does **not**
+claim that the current Go implementation already supports Mobile. `smt new`
+will ask the literal prompt `Include Flutter mobile application? [Y/n]`
+immediately after the Web selection. Enter means Yes and an explicit no
+excludes Mobile. The selected component and repository order is always: repo,
+web, mobile, api, database, infra.
+
+Mobile extends, rather than changes, `version: 1`. Existing version-1
+blueprints/configurations that lack Mobile remain valid; applying one produces
+no Mobile output. When selected, `smt new` must emit and `smt apply` must
+accept exactly this stack entry and repository mapping:
+
+```yaml
+workspace:
+  stack:
+    mobile: flutter
+
+repositories:
+  - id: mobile
+    path: mobile-app
+    component: mobile
+    technology: flutter
+    scope: mobile
+```
+
+Only `flutter` is supported for the Mobile stack in version 1. Any unsupported
+Mobile stack or mismatched Mobile metadata is a validation failure before any
+destination mutation. Version 1 targets Android and iOS only; store signing,
+metadata, submission, and publication are outside this workspace-setup scope.
+
+Applying a selected Mobile blueprint will create the same Git-ready component
+basics as the existing stacks: an independent initialized local bootstrap
+submodule, a `mobile_worker` manifest, Flutter-oriented README and ignore
+rules, and `.tool-versions` containing the literal pin `flutter 3.44.9`.
+The Mobile component is strictly scaffold-only: SMT must not invoke `flutter
+create`, `flutter --version`, or any other Flutter SDK CLI; require a Flutter
+executable or SDK; install dependencies; access the network; or promise
+generated Flutter application source.
+
+`smt apply` validates first and remains atomic/all-or-nothing. Any
+prerequisite, staging, Beads, or publish failure leaves no partial destination.
+Existing all-or-nothing semantics remain, and SMT must never attempt remote
+rollback after a later submit failure.
+
 ## Configuration contract
 
 The root `smt.yaml` uses this shape (the existing file is canonical):
@@ -120,7 +166,9 @@ contracts:
 ```
 
 The fixed workspace stack values are `nextjs`, `go`, `postgresql`, and the
-DevOps tools `docker` plus `opentofu`; `ai_assist` is either absent or `codex`.
+DevOps tools `docker` plus `opentofu`; the approved planned Mobile extension
+adds only `mobile: flutter` as described above. `ai_assist` is either absent or
+`codex`.
 `remote.url` is optional at initialization but required by `smt push`; it may
 not contain embedded credentials. Existing `provider` and `project` metadata
 remain supported and are optional when both are absent.
@@ -173,6 +221,21 @@ the Go tests. The implementation must keep focused tests for configuration,
 scaffolded Git submodules, push/worktree preflight and recovery reporting,
 harmless metadata, profiles and mutation guards, status/doctor output, contract
 severity and path validation, CI audit, and guarded bump planning/apply behavior.
+
+The planned Mobile focused-test contract covers default inclusion, explicit
+opt-out, invalid-answer retry, EOF/decline no-write, exact YAML/repository
+mapping/scopes/order, invalid stack or metadata rejection before mutation,
+existing-version-1 compatibility, atomic cleanup for preflight and
+stage/publish failures, generated artifacts, and focused tests without Flutter.
+Human end-to-end confirmation is later human-owned work (`smt-3r2.5`), not
+completed runtime proof in this delivery.
+
+## Flutter Mobile delivery order
+
+`smt-3r2.1` defines this contract and blocks configuration/blueprint work in
+`smt-3r2.2`; that then precedes atomic apply work in `smt-3r2.3`, final
+documentation/release verification in `smt-3r2.4`, and the human-owned E2E
+review in `smt-3r2.5`.
 
 ## Related
 
