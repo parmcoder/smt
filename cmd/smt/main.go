@@ -26,6 +26,7 @@ import (
 	"github.com/parmcoder/smt/internal/operations"
 	"github.com/parmcoder/smt/internal/tui"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -79,10 +80,118 @@ func run(args []string, out, errOut io.Writer) int {
 }
 
 func runWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
-	verbose := len(args) > 0 && args[0] == "--verbose"
-	if verbose {
-		args = args[1:]
+	args, verbose := withoutVerbose(args)
+	root := newRootCommand(in, out, errOut, verbose)
+	root.SetArgs(args)
+	started := time.Now()
+	if err := root.Execute(); err != nil {
+		if code, ok := err.(commandExitError); ok {
+			return int(code)
+		}
+		fmt.Fprintf(errOut, "error: %v\n", err)
+		fmt.Fprint(errOut, root.UsageString())
+		if verbose {
+			command := ""
+			if len(args) > 0 {
+				command = args[0]
+			}
+			newRunLogger(true, errOut).WithFields(logrus.Fields{
+				"command":     command,
+				"status":      commandStatus(exitUsage),
+				"exit_code":   exitUsage,
+				"duration_ms": time.Since(started).Milliseconds(),
+			}).Debug("command finished")
+		}
+		return exitUsage
 	}
+	return exitOK
+}
+
+type commandExitError int
+
+func (code commandExitError) Error() string { return "command failed" }
+
+func withoutVerbose(args []string) ([]string, bool) {
+	filtered := make([]string, 0, len(args))
+	verbose := false
+	for _, arg := range args {
+		if arg == "--verbose" {
+			verbose = true
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered, verbose
+}
+
+func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "smt",
+		Short:         "Sanovy Mono Tool",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
+	}
+	root.SetIn(in)
+	root.SetOut(out)
+	root.SetErr(errOut)
+	root.PersistentFlags().Bool("verbose", false, "write diagnostic command details to stderr")
+	root.AddGroup(
+		&cobra.Group{ID: "getting-started", Title: "Getting Started"},
+		&cobra.Group{ID: "workspace", Title: "Workspace"},
+		&cobra.Group{ID: "review-workflow", Title: "Review Workflow"},
+		&cobra.Group{ID: "developer-tools", Title: "Developer Tools"},
+	)
+	root.SetHelpCommandGroupID("developer-tools")
+	root.SetCompletionCommandGroupID("developer-tools")
+
+	leaf := func(use, short, groupID string, path ...string) *cobra.Command {
+		return &cobra.Command{
+			Use:                use,
+			Short:              short,
+			GroupID:            groupID,
+			DisableFlagParsing: true,
+			RunE: func(_ *cobra.Command, args []string) error {
+				return commandExitError(runCommandWithVerbose(append(path, args...), in, out, errOut, verbose))
+			},
+		}
+	}
+	newCommand := leaf("new [FILE]", "Create a workspace blueprint", "getting-started", "new")
+	applyCommand := leaf("apply [--config FILE] PATH", "Apply a workspace blueprint", "getting-started", "apply")
+	initCommand := leaf("init [PATH]", "Show workspace initialization guidance", "getting-started", "init")
+	pushCommand := leaf("push [--dry-run]", "Push configured repositories", "workspace", "push")
+	worktreeCommand := leaf("worktree", "Manage linked worktrees", "workspace", "worktree")
+	worktreeCommand.AddCommand(leaf("add PATH --branch NAME [--dry-run]", "Create linked worktrees", "", "worktree", "add"))
+	statusCommand := leaf("status [--json]", "Show workspace status", "workspace", "status")
+	doctorCommand := leaf("doctor", "Check local readiness", "workspace", "doctor")
+	validateCommand := leaf("validate-message FILE", "Validate a commit message", "developer-tools", "validate-message")
+	checkCommand := leaf("check --profile PROFILE", "Run a check profile", "developer-tools", "check")
+	contractsCommand := leaf("contracts", "Inspect reusable contracts", "developer-tools", "contracts")
+	contractsCommand.AddCommand(leaf("validate", "Validate contracts", "", "contracts", "validate"))
+	ciCommand := leaf("ci", "Run CI-parity tools", "developer-tools", "ci")
+	ciContractsCommand := leaf("contracts", "Manage CI contracts", "", "ci", "contracts")
+	ciContractsCommand.AddCommand(leaf("bump --id ID [--apply]", "Plan or apply a contract bump", "", "ci", "contracts", "bump"))
+	ciCommand.AddCommand(leaf("audit", "Audit CI parity", "", "ci", "audit"), ciContractsCommand)
+	workCommand := leaf("work", "Manage work items", "review-workflow", "work")
+	workCommand.AddCommand(leaf("ready [--json]", "List ready work", "", "work", "ready"))
+	reviewCommand := leaf("review", "Open the review terminal interface", "review-workflow", "review")
+	reviewCommand.AddCommand(
+		leaf("list [--json]", "List queued reviews", "", "review", "list"),
+		leaf("queue FEATURE --handoff PATH --evidence PATH [--json]", "Queue a review", "", "review", "queue"),
+		leaf("requeue REVIEW [--json]", "Requeue a review", "", "review", "requeue"),
+		leaf("pass", "Reserved for the review TUI", "", "review", "pass"),
+		leaf("fail", "Reserved for the review TUI", "", "review", "fail"),
+		leaf("close", "Reserved for the review TUI", "", "review", "close"),
+	)
+	releaseCommand := leaf("release", "Check release readiness", "review-workflow", "release")
+	releaseCommand.AddCommand(leaf("check [--json]", "Check release readiness", "", "release", "check"))
+	root.AddCommand(newCommand, applyCommand, initCommand, pushCommand, worktreeCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
+	return root
+}
+
+func runCommandWithVerbose(args []string, in io.Reader, out, errOut io.Writer, verbose bool) int {
 	command := ""
 	if len(args) > 0 {
 		command = args[0]

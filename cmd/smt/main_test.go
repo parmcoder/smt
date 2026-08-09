@@ -206,7 +206,7 @@ func TestAgentRoutesUseSafeDeterministicDTOsAndExactUsage(t *testing.T) {
 }
 func TestRunBareHelpAndReviewTTYRouting(t *testing.T) {
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 || !strings.HasPrefix(out.String(), "usage: smt new [FILE]") {
+	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 || !strings.Contains(out.String(), "Getting Started") {
 		t.Fatalf("bare code=%d out=%q err=%q", code, out.String(), errOut.String())
 	}
 	oldTTY, oldTUI := reviewIsInteractive, runReviewTUI
@@ -241,6 +241,102 @@ func TestRunBareHelpAndReviewTTYRouting(t *testing.T) {
 	errOut.Reset()
 	if code := runWithInput([]string{"review"}, strings.NewReader(""), out, errOut); code != exitInternal || errOut.String() != "review: terminal interface failed\n" || strings.Contains(errOut.String(), "private TUI error") {
 		t.Fatalf("TUI error code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+const cobraRootHelpGolden = `Sanovy Mono Tool
+
+Usage:
+  smt [flags]
+  smt [command]
+
+Getting Started
+  apply            Apply a workspace blueprint
+  init             Show workspace initialization guidance
+  new              Create a workspace blueprint
+
+Workspace
+  doctor           Check local readiness
+  push             Push configured repositories
+  status           Show workspace status
+  worktree         Manage linked worktrees
+
+Review Workflow
+  release          Check release readiness
+  review           Open the review terminal interface
+  work             Manage work items
+
+Developer Tools
+  check            Run a check profile
+  ci               Run CI-parity tools
+  completion       Generate the autocompletion script for the specified shell
+  contracts        Inspect reusable contracts
+  help             Help about any command
+  validate-message Validate a commit message
+
+Flags:
+  -h, --help      help for smt
+      --verbose   write diagnostic command details to stderr
+
+Use "smt [command] --help" for more information about a command.
+`
+
+func TestCobraRootHelpMatchesGoldenWithoutConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.String() != cobraRootHelpGolden || errOut.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestCobraHelpAliasesWriteStdoutWithoutConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, args := range [][]string{{"help"}, {"--help"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitOK {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+		if out.Len() == 0 || errOut.Len() != 0 {
+			t.Fatalf("args=%q stdout=%q stderr=%q", args, out.String(), errOut.String())
+		}
+	}
+}
+
+func TestCobraCompletionDoesNotLoadConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"completion", "zsh"}, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "#compdef smt") || errOut.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestCobraSyntaxErrorsAreConciseAndUseStderr(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, args := range [][]string{{"stattus"}, {"init", "one", "two"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+		usageCount := strings.Count(errOut.String(), "Usage:") + strings.Count(errOut.String(), "usage: smt")
+		if out.Len() != 0 || usageCount != 1 {
+			t.Fatalf("args=%q stdout=%q stderr=%q", args, out.String(), errOut.String())
+		}
+	}
+}
+
+func TestCobraPersistentVerbosePreservesLeafSuccess(t *testing.T) {
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"init", "--verbose"}, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "smt init no longer creates a workspace") || !strings.Contains(errOut.String(), "command finished") {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 	}
 }
 
@@ -471,7 +567,7 @@ func TestRunVerboseInvalidCommandPreservesUsageAndExitCode(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", out.String())
 	}
-	if !strings.Contains(errOut.String(), "usage: smt") {
+	if !strings.Contains(errOut.String(), "Usage:\n  smt") {
 		t.Fatalf("stderr = %q, want usage", errOut.String())
 	}
 	if !strings.Contains(errOut.String(), "level=debug") ||

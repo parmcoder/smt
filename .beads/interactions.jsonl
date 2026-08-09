@@ -15,3 +15,4 @@
 {"id":"int-31e3309b52cd4f14b60720a6137bc488","kind":"field_change","created_at":"2026-08-09T11:03:49.760738Z","actor":"parmcoder","issue_id":"smt-5w0.6","extra":{"field":"priority","new_value":"2","old_value":"1"}}
 {"id":"int-540f929b1fdb0ce68a3db6ab13f5c417","kind":"field_change","created_at":"2026-08-09T11:03:49.918685Z","actor":"parmcoder","issue_id":"smt-5w0.7","extra":{"field":"priority","new_value":"2","old_value":"1"}}
 {"id":"int-1bf967651f7065dc03737184e660e249","kind":"field_change","created_at":"2026-08-09T11:03:50.089753Z","actor":"parmcoder","issue_id":"smt-5w0.8","extra":{"field":"priority","new_value":"2","old_value":"1"}}
+{"id":"int-b0c1ac782e106df3115fca940bab1bd9","kind":"field_change","created_at":"2026-08-09T11:32:39.853782Z","actor":"parmcoder","issue_id":"smt-5w0.10.1","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Completed Cobra command shell with grouped help, completion, and tests"}}
