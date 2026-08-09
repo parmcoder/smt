@@ -56,6 +56,7 @@ type Workspace struct {
 // WorkspaceStack contains the fixed first-release component profiles.
 type WorkspaceStack struct {
 	Web      string   `yaml:"web,omitempty"`
+	Mobile   string   `yaml:"mobile,omitempty"`
 	API      string   `yaml:"api,omitempty"`
 	Database string   `yaml:"database,omitempty"`
 	DevOps   []string `yaml:"devops,omitempty"`
@@ -225,6 +226,9 @@ func (c *Config) Validate(workspaceRoot string) error {
 	if err := c.Workspace.validate(); err != nil {
 		return err
 	}
+	if err := c.validateMobile(); err != nil {
+		return err
+	}
 	if err := c.validateWorkflow(); err != nil {
 		return err
 	}
@@ -336,6 +340,7 @@ func (w Workspace) validate() error {
 		want  string
 	}{
 		{field: "web", value: w.Stack.Web, want: "nextjs"},
+		{field: "mobile", value: w.Stack.Mobile, want: "flutter"},
 		{field: "api", value: w.Stack.API, want: "go"},
 		{field: "database", value: w.Stack.Database, want: "postgresql"},
 	} {
@@ -356,19 +361,48 @@ func (w Workspace) validate() error {
 	return nil
 }
 
+func (c Config) validateMobile() error {
+	const (
+		mobileID         = "mobile"
+		mobilePath       = "mobile-app"
+		mobileComponent  = "mobile"
+		mobileTechnology = "flutter"
+		mobileScope      = "mobile"
+	)
+	if c.Workspace.Stack.Mobile == "" {
+		for _, repository := range c.Repositories {
+			if repository.Component == mobileComponent {
+				return fmt.Errorf("mobile repository requires workspace.stack.mobile")
+			}
+		}
+		return nil
+	}
+	for _, repository := range c.Repositories {
+		if repository.ID != mobileID {
+			continue
+		}
+		if repository.Path == mobilePath && repository.Component == mobileComponent && repository.Technology == mobileTechnology && repository.Scope == mobileScope {
+			return nil
+		}
+		return fmt.Errorf("mobile repository must use id=%q, path=%q, component=%q, technology=%q, and scope=%q", mobileID, mobilePath, mobileComponent, mobileTechnology, mobileScope)
+	}
+	return fmt.Errorf("mobile repository must use id=%q, path=%q, component=%q, technology=%q, and scope=%q", mobileID, mobilePath, mobileComponent, mobileTechnology, mobileScope)
+}
+
 func validateComponent(repository Repository) error {
 	if repository.Component == "" && repository.Technology == "" {
 		return nil
 	}
 	expected := map[string]string{
 		"web":      "nextjs",
+		"mobile":   "flutter",
 		"api":      "go",
 		"database": "postgresql",
 		"devops":   "docker-opentofu",
 	}
 	want, ok := expected[repository.Component]
 	if !ok {
-		return fmt.Errorf("component must be web, api, database, or devops")
+		return fmt.Errorf("component must be web, mobile, api, database, or devops")
 	}
 	if repository.Technology != want {
 		return fmt.Errorf("technology for component %q must be %q", repository.Component, want)

@@ -64,6 +64,50 @@ func TestRunApplyUsesCustomConfigAndLeafUsage(t *testing.T) {
 	}
 }
 
+func TestRunApplyRejectsInvalidMobileBeforeServiceMutation(t *testing.T) {
+	original := newApplyService
+	t.Cleanup(func() { newApplyService = original })
+	called := 0
+	newApplyService = func() applypkg.Service {
+		called++
+		return applypkg.Service{}
+	}
+	base := `version: 1
+workspace: {stack: {mobile: react-native}}
+commit: {types: [feat], scopes: [repo, mobile]}
+repositories: [{id: repo, path: ., scope: repo, remote: {url: ""}}, {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}]
+`
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "unsupported stack", yaml: base, want: "workspace.stack.mobile"},
+		{name: "wrong ID", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "id: mobile", "id: handheld", 1), want: "mobile repository"},
+		{name: "wrong path", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "path: mobile-app", "path: apps/mobile", 1), want: "mobile repository"},
+		{name: "wrong component", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "component: mobile", "component: web", 1), want: "mobile repository"},
+		{name: "wrong technology", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "technology: flutter", "technology: kotlin", 1), want: "mobile repository"},
+		{name: "wrong scope", yaml: strings.Replace(strings.Replace(base, "mobile: react-native", "mobile: flutter", 1), "scope: mobile", "scope: app", 1), want: "mobile repository"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called = 0
+			root := t.TempDir()
+			configPath := filepath.Join(root, "invalid-mobile.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := runWithInput([]string{"apply", "--config", configPath, filepath.Join(root, "workspace")}, strings.NewReader(""), out, errOut); code != exitValidation || called != 0 || !strings.Contains(errOut.String(), tt.want) {
+				t.Fatalf("code=%d service calls=%d stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+			}
+			if _, err := os.Lstat(filepath.Join(root, "workspace")); !os.IsNotExist(err) {
+				t.Fatalf("destination stat=%v, want no mutation", err)
+			}
+		})
+	}
+}
+
 type applyPrereq func(context.Context) error
 
 func (f applyPrereq) Check(ctx context.Context) error { return f(ctx) }
@@ -464,7 +508,7 @@ func TestRunNewCreatesConfigurationWithoutExistingConfiguration(t *testing.T) {
 	t.Chdir(t.TempDir())
 	allowNewInput(t)
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\ny\n"), out, errOut)
+	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\n\ny\n"), out, errOut)
 	if code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
@@ -478,7 +522,7 @@ func TestRunNewCreatesConfigurationAtCustomPath(t *testing.T) {
 	allowNewInput(t)
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\nn\nn\ny\n"), out, errOut); code != exitOK {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\ny\nn\nn\ny\n"), out, errOut); code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := config.Load(destination); err != nil {
@@ -495,7 +539,7 @@ func TestRunNewUsageAndDecline(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	out.Reset()
 	errOut.Reset()
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\nn\n"), out, errOut); code != exitOK || !strings.Contains(out.String(), "no file was written") {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\nn\n"), out, errOut); code != exitOK || !strings.Contains(out.String(), "no file was written") {
 		t.Fatalf("new decline code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
@@ -509,7 +553,7 @@ func TestRunNewRejectsNonTerminalInputWithoutWriting(t *testing.T) {
 	newInputIsTerminal = func(io.Reader) bool { return false }
 	t.Cleanup(func() { newInputIsTerminal = previous })
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\n"), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "interactive terminal") {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\ny\n"), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "interactive terminal") {
 		t.Fatalf("new non-terminal code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
@@ -564,7 +608,7 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "platform")
 	blueprintPath := filepath.Join(t.TempDir(), "smt.yaml")
-	if _, err := blueprint.Create(strings.NewReader("y\ny\nn\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
+	if _, err := blueprint.Create(strings.NewReader("y\ny\ny\nn\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	cfg, err := config.Load(blueprintPath)
