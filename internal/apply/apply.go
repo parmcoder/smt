@@ -35,6 +35,8 @@ var runBeads = func(ctx context.Context, dir, name string, args []string) ([]byt
 	return cmd.CombinedOutput()
 }
 
+var writeStagedConfig = os.WriteFile
+
 // Service stages every effect beside its target. Initialize is retained as a
 // narrow failure seam; when absent, Config drives the built-in go-git builder.
 type Service struct {
@@ -99,7 +101,7 @@ func (s Service) Apply(ctx context.Context, destination string, raw []byte) erro
 		return fmt.Errorf("create stage: %w", err)
 	}
 	defer os.RemoveAll(stage)
-	if err := os.WriteFile(filepath.Join(stage, "smt.yaml"), raw, 0o600); err != nil {
+	if err := writeStagedConfig(filepath.Join(stage, "smt.yaml"), raw, 0o600); err != nil {
 		return fmt.Errorf("write staged config: %w", err)
 	}
 	if s.Initialize != nil {
@@ -186,7 +188,7 @@ func addChild(ctx context.Context, root, publishedRoot string, c component) (plu
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}
-	if err := writeFile(filepath.Join(bootstrap, "README.md"), "# "+c.title+"\n\nThis repository is a local SMT scaffold.\n"); err != nil {
+	if err := writeFile(filepath.Join(bootstrap, "README.md"), componentReadme(c)); err != nil {
 		return plumbing.ZeroHash, err
 	}
 	if err := writeFile(filepath.Join(bootstrap, ".gitignore"), componentIgnore(c.kind)); err != nil {
@@ -393,6 +395,8 @@ func toolVersions(cs []component) string {
 			v = append(v, "golang 1.26.5")
 		case "web":
 			v = append(v, "nodejs 24.18.0")
+		case "mobile":
+			v = append(v, "flutter 3.44.9")
 		case "infra":
 			v = append(v, "opentofu 1.12.3")
 		}
@@ -408,9 +412,18 @@ func componentIgnore(kind string) string {
 		return base + "\nbin/\ntmp/\n.env\n"
 	case "database":
 		return base + "\npostgres-data/\n.env\n"
+	case "mobile":
+		return base + "\n.dart_tool/\nbuild/\n.flutter-plugins\n.flutter-plugins-dependencies\n.packages\n"
 	default:
 		return base + "\n.terraform/\n.tofu/\n*.tfstate\n.env\n"
 	}
+}
+
+func componentReadme(c component) string {
+	if c.kind == "mobile" {
+		return "# Flutter mobile application\n\nThis repository is a local SMT Flutter scaffold for Android and iOS.\n"
+	}
+	return "# " + c.title + "\n\nThis repository is a local SMT scaffold.\n"
 }
 
 // ValidateBlueprint accepts only the shape emitted by smt new. Remote URL
@@ -432,15 +445,18 @@ func ValidateBlueprint(cfg config.Config) error {
 	if cfg.Repositories[0].HasChecks || len(cfg.Repositories[0].UnknownFields) != 0 {
 		return fmt.Errorf("apply requires only supported blueprint fields")
 	}
-	expected := []component{{"web", "web-app", "web", "web", "nextjs", ""}, {"api", "apis", "api", "api", "go", ""}, {"database", "database", "database", "database", "postgresql", ""}, {"infra", "devops", "infra", "devops", "docker-opentofu", ""}}
-	stacks := []string{cfg.Workspace.Stack.Web, cfg.Workspace.Stack.API, cfg.Workspace.Stack.Database, strings.Join(cfg.Workspace.Stack.DevOps, ",")}
+	expected := []component{{"web", "web-app", "web", "web", "nextjs", ""}, {"mobile", "mobile-app", "mobile", "mobile", "flutter", ""}, {"api", "apis", "api", "api", "go", ""}, {"database", "database", "database", "database", "postgresql", ""}, {"infra", "devops", "infra", "devops", "docker-opentofu", ""}}
+	stacks := []string{cfg.Workspace.Stack.Web, cfg.Workspace.Stack.Mobile, cfg.Workspace.Stack.API, cfg.Workspace.Stack.Database, strings.Join(cfg.Workspace.Stack.DevOps, ",")}
 	scopes := []string{"repo"}
 	n := 1
 	for i, e := range expected {
 		if stacks[i] == "" {
 			continue
 		}
-		if i == 3 && stacks[i] != "docker,opentofu" {
+		if i == 1 && stacks[i] != "flutter" {
+			return fmt.Errorf("apply requires the fixed mobile stack")
+		}
+		if e.id == "infra" && stacks[i] != "docker,opentofu" {
 			return fmt.Errorf("apply requires the fixed devops stack")
 		}
 		if n >= len(cfg.Repositories) {
