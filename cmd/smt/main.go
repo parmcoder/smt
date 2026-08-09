@@ -15,6 +15,7 @@ import (
 	"time"
 
 	applypkg "github.com/parmcoder/smt/internal/apply"
+	"github.com/parmcoder/smt/internal/beads"
 	"github.com/parmcoder/smt/internal/blueprint"
 	"github.com/parmcoder/smt/internal/checks"
 	"github.com/parmcoder/smt/internal/commit"
@@ -23,7 +24,7 @@ import (
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
 	"github.com/parmcoder/smt/internal/operations"
-	"github.com/parmcoder/smt/internal/scaffold"
+	"github.com/parmcoder/smt/internal/tui"
 	"github.com/sirupsen/logrus"
 )
 
@@ -44,6 +45,30 @@ var newInputIsTerminal = func(in io.Reader) bool {
 }
 
 var newApplyService = func() applypkg.Service { return applypkg.New() }
+var reviewIsInteractive = func(in io.Reader, out io.Writer) bool {
+	a, ok := in.(*os.File)
+	if !ok {
+		return false
+	}
+	b, ok := out.(*os.File)
+	if !ok {
+		return false
+	}
+	ai, e := a.Stat()
+	bi, f := b.Stat()
+	return e == nil && f == nil && ai.Mode()&os.ModeCharDevice != 0 && bi.Mode()&os.ModeCharDevice != 0
+}
+var runReviewTUI = func(ctx context.Context, noColor bool, root string) error { return tui.RunLocal(ctx, noColor, root) }
+
+type agentService interface {
+	ReadyWork(context.Context) ([]beads.Issue, error)
+	ListReviews(context.Context) ([]beads.Issue, error)
+	QueueReview(context.Context, string, string, string) (beads.QueueResult, error)
+	RequeueAfterFix(context.Context, string) (beads.Recovery, error)
+	ReleaseReadiness(context.Context) (beads.ReleaseReadiness, error)
+}
+
+var newBeadsService = func(root string) agentService { return beads.New(root, beads.CommandRunner{}) }
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -101,11 +126,35 @@ func newRunLogger(verbose bool, errOut io.Writer) *logrus.Logger {
 
 func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logrus.Logger) int {
 	if len(args) == 0 {
-		printUsage(errOut)
-		return exitUsage
+		printUsage(out)
+		return exitOK
 	}
 	if args[0] == "init" {
 		return runInit(args[1:], in, out, errOut)
+	}
+	if args[0] == "review" && len(args) == 1 {
+		if !reviewIsInteractive(in, out) {
+			fmt.Fprintln(errOut, "review: interactive terminal input and output are required")
+			return exitUsage
+		}
+		root, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(errOut, "review: resolve working directory: %v\n", err)
+			return exitInternal
+		}
+		if err := runReviewTUI(context.Background(), os.Getenv("NO_COLOR") != "", root); err != nil {
+			fmt.Fprintln(errOut, "review: terminal interface failed")
+			return exitInternal
+		}
+		return exitOK
+	}
+	if args[0] == "review" && len(args) >= 2 && (args[1] == "pass" || args[1] == "fail" || args[1] == "close") {
+		fmt.Fprintln(errOut, "human review decisions are available only in the SMT TUI")
+		printUsage(errOut)
+		return exitUsage
+	}
+	if args[0] == "work" || args[0] == "review" || args[0] == "release" {
+		return runAgentRoute(context.Background(), args, ".", out, errOut)
 	}
 	if args[0] == "new" {
 		return runNew(args[1:], in, out, errOut)
@@ -323,22 +372,150 @@ func runInit(args []string, in io.Reader, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "usage: smt init [PATH]")
 		return exitUsage
 	}
-	destination := "."
-	if len(args) == 1 {
-		destination = args[0]
-	}
-	selection, err := scaffold.Prompt(in, out)
-	if err != nil {
-		fmt.Fprintf(errOut, "init: %v\n", err)
-		return exitUsage
-	}
-	result, err := scaffold.New(git.ExecRunner{}).Init(context.Background(), destination, selection)
-	if err != nil {
-		fmt.Fprintf(errOut, "init: %v\n", err)
-		return exitValidation
-	}
-	fmt.Fprintf(out, "initialized workspace %s (%s)\n", result.Destination, strings.Join(result.Repositories, ", "))
+	fmt.Fprintln(out, "smt init no longer creates a workspace; run smt new [FILE], review smt.yaml, then run smt apply [--config FILE] PATH")
 	return exitOK
+}
+
+func runAgentRoute(ctx context.Context, args []string, root string, out, errOut io.Writer) int {
+	s := newBeadsService(root)
+	write := func(value any, jsonMode bool) int {
+		if jsonMode {
+			data, err := json.Marshal(value)
+			if err != nil {
+				fmt.Fprintln(errOut, "agent route: encode failed")
+				return exitInternal
+			}
+			fmt.Fprintln(out, string(data))
+			return exitOK
+		}
+		switch x := value.(type) {
+		case []safeIssue:
+			for _, issue := range x {
+				fmt.Fprintf(out, "%s %s %s state=%s %s\n", issue.ID, issue.Status, issue.Type, issue.ReviewState, issue.Title)
+			}
+		case safeRecovery:
+			fmt.Fprintf(out, "review=%s bug=%s recovery=%s\n", x.ReviewID, x.BugID, x.Recovery)
+		case safeReleaseResult:
+			fmt.Fprintf(out, "release ready=%t blockers=%d\n", x.Ready, len(x.Blocking))
+			for _, blocker := range x.Blocking {
+				fmt.Fprintf(out, "blocker %s %s\n", blocker.ID, blocker.Status)
+			}
+		default:
+			fmt.Fprintln(out, "operation complete")
+		}
+		return exitOK
+	}
+	if len(args) >= 2 && args[0] == "work" && args[1] == "ready" {
+		if len(args) > 3 || (len(args) == 3 && args[2] != "--json") {
+			fmt.Fprintln(errOut, "usage: smt work ready [--json]")
+			return exitUsage
+		}
+		xs, e := s.ReadyWork(ctx)
+		if e != nil {
+			fmt.Fprintln(errOut, "work ready: operation failed")
+			return exitValidation
+		}
+		return write(safeIssues(xs), len(args) == 3)
+	}
+	if len(args) >= 2 && args[0] == "review" && args[1] == "list" {
+		if len(args) > 3 || (len(args) == 3 && args[2] != "--json") {
+			fmt.Fprintln(errOut, "usage: smt review list [--json]")
+			return exitUsage
+		}
+		xs, e := s.ListReviews(ctx)
+		if e != nil {
+			fmt.Fprintln(errOut, "review list: operation failed")
+			return exitValidation
+		}
+		return write(safeIssues(xs), len(args) == 3)
+	}
+	if len(args) >= 2 && args[0] == "release" && args[1] == "check" {
+		if len(args) > 3 || (len(args) == 3 && args[2] != "--json") {
+			fmt.Fprintln(errOut, "usage: smt release check [--json]")
+			return exitUsage
+		}
+		r, e := s.ReleaseReadiness(ctx)
+		if e != nil {
+			fmt.Fprintln(errOut, "release check: operation failed")
+			return exitValidation
+		}
+		if code := write(safeRelease(r), len(args) == 3); code != exitOK {
+			return code
+		}
+		if !r.Ready {
+			return exitValidation
+		}
+		return exitOK
+	}
+	if len(args) >= 3 && args[0] == "review" && args[1] == "requeue" {
+		jsonMode := false
+		if len(args) == 4 && args[3] == "--json" {
+			jsonMode = true
+		} else if len(args) != 3 {
+			fmt.Fprintln(errOut, "usage: smt review requeue REVIEW [--json]")
+			return exitUsage
+		}
+		r, e := s.RequeueAfterFix(ctx, args[2])
+		if e != nil {
+			write(safeRecovery{r.ReviewID, r.BugID, r.Recovery}, jsonMode)
+			fmt.Fprintln(errOut, "review requeue: operation failed")
+			return exitValidation
+		}
+		return write(safeRecovery{r.ReviewID, r.BugID, r.Recovery}, jsonMode)
+	}
+	if len(args) >= 3 && args[0] == "review" && args[1] == "queue" {
+		f := flag.NewFlagSet("review queue", flag.ContinueOnError)
+		f.SetOutput(io.Discard)
+		h := f.String("handoff", "", "")
+		e := f.String("evidence", "", "")
+		jsonMode := f.Bool("json", false, "")
+		if f.Parse(args[3:]) != nil || f.NArg() != 0 {
+			fmt.Fprintln(errOut, "usage: smt review queue FEATURE --handoff PATH --evidence PATH [--json]")
+			return exitUsage
+		}
+		r, x := s.QueueReview(ctx, args[2], *h, *e)
+		if x != nil {
+			write(safeQueue(r), *jsonMode)
+			fmt.Fprintln(errOut, "review queue: operation failed")
+			return exitValidation
+		}
+		return write(safeQueue(r), *jsonMode)
+	}
+	printUsage(errOut)
+	return exitUsage
+}
+
+type safeIssue struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Status      string   `json:"status"`
+	Type        string   `json:"type"`
+	Labels      []string `json:"labels"`
+	ReviewState string   `json:"review_state,omitempty"`
+}
+type safeRecovery struct {
+	ReviewID string `json:"review_id"`
+	BugID    string `json:"bug_id,omitempty"`
+	Recovery string `json:"recovery,omitempty"`
+}
+type safeReleaseResult struct {
+	Ready    bool        `json:"ready"`
+	Blocking []safeIssue `json:"blocking"`
+}
+
+func safeQueue(value beads.QueueResult) safeRecovery {
+	return safeRecovery{ReviewID: value.ReviewID, Recovery: value.Recovery}
+}
+
+func safeIssues(xs []beads.Issue) []safeIssue {
+	out := make([]safeIssue, len(xs))
+	for i, x := range xs {
+		out[i] = safeIssue{x.ID, x.Title, x.Status, x.Type, x.Labels, x.ReviewState}
+	}
+	return out
+}
+func safeRelease(value beads.ReleaseReadiness) safeReleaseResult {
+	return safeReleaseResult{Ready: value.Ready, Blocking: safeIssues(value.Blocking)}
 }
 
 func runValidateMessage(args []string, out, errOut io.Writer) int {
@@ -685,5 +862,5 @@ func checkResultMessage(err error) string {
 }
 
 func printUsage(out io.Writer) {
-	fmt.Fprintln(out, "usage: smt new [FILE] | apply [--config FILE] PATH | init [PATH] | push [--dry-run] | worktree add PATH --branch NAME [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply]")
+	fmt.Fprintln(out, "usage: smt new [FILE] | apply [--config FILE] PATH | init [PATH] | push [--dry-run] | worktree add PATH --branch NAME [--dry-run] | validate-message FILE | status [--json] | doctor | check --profile PROFILE | contracts validate | ci audit | ci contracts bump --id ID [--apply] | work ready [--json] | review | review list [--json] | review queue FEATURE --handoff PATH --evidence PATH [--json] | review requeue REVIEW [--json] | release check [--json]")
 }
