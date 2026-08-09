@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	applypkg "github.com/parmcoder/smt/internal/apply"
+	"github.com/parmcoder/smt/internal/beads"
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/hooks"
@@ -70,6 +71,10 @@ func (f applyPrereq) Check(ctx context.Context) error { return f(ctx) }
 type applyInit func(context.Context, string) error
 
 func (f applyInit) Initialize(ctx context.Context, path string) error { return f(ctx, path) }
+
+type noReadReader struct{}
+
+func (noReadReader) Read([]byte) (int, error) { panic("unexpected stdin read") }
 func applyBlueprint() []byte {
 	return []byte(`version: 1
 workspace: {ai_assist: codex, stack: {web: nextjs}}
@@ -111,24 +116,131 @@ func TestRunValidateMessageExitCodes(t *testing.T) {
 	}
 }
 
-func TestRunInitCreatesWorkspaceWithoutExistingConfiguration(t *testing.T) {
+func TestRunInitPrintsWriteFreeMigrationGuidance(t *testing.T) {
 	t.Chdir(t.TempDir())
 	destination := filepath.Join(t.TempDir(), "platform")
+	for _, args := range [][]string{{"init"}, {"init", destination}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		code := runWithInput(args, noReadReader{}, out, errOut)
+		if code != exitOK || out.String() != "smt init no longer creates a workspace; run smt new [FILE], review smt.yaml, then run smt apply [--config FILE] PATH\n" || errOut.Len() != 0 {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Fatalf("destination=%v", err)
+	}
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	code := runWithInput(
-		[]string{"init", destination},
-		strings.NewReader("y\nn\nn\nn\ny\n"),
-		out,
-		errOut,
-	)
-	if code != exitOK {
-		t.Fatalf("run init code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	if code := runWithInput([]string{"init", "one", "two"}, noReadReader{}, out, errOut); code != exitUsage || errOut.String() != "usage: smt init [PATH]\n" {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
-	if _, err := os.Stat(filepath.Join(destination, "smt.yaml")); err != nil {
-		t.Fatalf("generated smt.yaml: %v", err)
+}
+
+type fakeAgentService struct {
+	ready   []beads.Issue
+	reviews []beads.Issue
+	release beads.ReleaseReadiness
+	queue   beads.QueueResult
+	requeue beads.Recovery
+	err     error
+}
+
+func (f fakeAgentService) ReadyWork(context.Context) ([]beads.Issue, error) { return f.ready, f.err }
+func (f fakeAgentService) ListReviews(context.Context) ([]beads.Issue, error) {
+	return f.reviews, f.err
+}
+func (f fakeAgentService) QueueReview(context.Context, string, string, string) (beads.QueueResult, error) {
+	return f.queue, f.err
+}
+func (f fakeAgentService) RequeueAfterFix(context.Context, string) (beads.Recovery, error) {
+	return f.requeue, f.err
+}
+func (f fakeAgentService) ReleaseReadiness(context.Context) (beads.ReleaseReadiness, error) {
+	return f.release, f.err
+}
+
+func TestAgentRoutesUseSafeDeterministicDTOsAndExactUsage(t *testing.T) {
+	original := newBeadsService
+	t.Cleanup(func() { newBeadsService = original })
+	fake := fakeAgentService{ready: []beads.Issue{{ID: "feat-1", Title: "Feature", Status: "open", Type: "feature", Labels: []string{"internal"}}}, reviews: []beads.Issue{{ID: "review-1", Title: "Review", Status: "open", Type: "task", ReviewState: "queued"}}, queue: beads.QueueResult{FeatureID: "feat-1", ReviewID: "review-1"}, requeue: beads.Recovery{ReviewID: "review-1", BugID: "bug-1", Recovery: "retry"}, release: beads.ReleaseReadiness{Ready: false, Blocking: []beads.Issue{{ID: "review-1", Status: "open"}}}}
+	newBeadsService = func(string) agentService { return fake }
+	for _, tc := range []struct {
+		args     []string
+		code     int
+		out, err string
+	}{
+		{[]string{"work", "ready"}, exitOK, "feat-1 open feature state= Feature\n", ""},
+		{[]string{"work", "ready", "--json"}, exitOK, `[{"id":"feat-1","title":"Feature","status":"open","type":"feature","labels":["internal"]}]` + "\n", ""},
+		{[]string{"review", "list", "--json"}, exitOK, `[{"id":"review-1","title":"Review","status":"open","type":"task","labels":null,"review_state":"queued"}]` + "\n", ""},
+		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, exitOK, `{"review_id":"review-1"}` + "\n", ""},
+		{[]string{"review", "requeue", "review-1", "--json"}, exitOK, `{"review_id":"review-1","bug_id":"bug-1","recovery":"retry"}` + "\n", ""},
+		{[]string{"release", "check", "--json"}, exitValidation, `{"ready":false,"blocking":[{"id":"review-1","title":"","status":"open","type":"","labels":null}]}` + "\n", ""},
+		{[]string{"review", "requeue", "review-1", "extra"}, exitUsage, "", "usage: smt review requeue REVIEW [--json]\n"},
+		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "unexpected"}, exitUsage, "", "usage: smt review queue FEATURE --handoff PATH --evidence PATH [--json]\n"},
+	} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		code := runAgentRoute(context.Background(), tc.args, "/unused", out, errOut)
+		if code != tc.code || out.String() != tc.out || errOut.String() != tc.err {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
+		}
 	}
-	if !strings.Contains(out.String(), "initialized workspace") {
-		t.Fatalf("stdout = %q, want initialization result", out.String())
+	called := 0
+	newBeadsService = func(string) agentService { called++; return fake }
+	for _, args := range [][]string{{"review", "pass"}, {"review", "pass", "x"}, {"review", "fail"}, {"review", "fail", "x"}, {"review", "close"}, {"review", "close", "x"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "human review decisions") {
+			t.Fatalf("args=%v code=%d stderr=%q", args, code, errOut.String())
+		}
+	}
+	if called != 0 {
+		t.Fatalf("review mutations reached Beads service %d times", called)
+	}
+	for _, args := range [][]string{{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, {"review", "requeue", "review-1", "--json"}, {"release", "check", "--json"}} {
+		newBeadsService = func(string) agentService {
+			return fakeAgentService{queue: beads.QueueResult{ReviewID: "review-1", Recovery: "safe retry"}, requeue: beads.Recovery{ReviewID: "review-1", Recovery: "safe retry"}, release: beads.ReleaseReadiness{}, err: errors.New("token=secret")}
+		}
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runAgentRoute(context.Background(), args, "/unused", out, errOut); code != exitValidation || strings.Contains(out.String()+errOut.String(), "secret") || !strings.Contains(errOut.String(), "operation failed") {
+			t.Fatalf("failure args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+}
+func TestRunBareHelpAndReviewTTYRouting(t *testing.T) {
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 || !strings.HasPrefix(out.String(), "usage: smt new [FILE]") {
+		t.Fatalf("bare code=%d out=%q err=%q", code, out.String(), errOut.String())
+	}
+	oldTTY, oldTUI := reviewIsInteractive, runReviewTUI
+	t.Cleanup(func() { reviewIsInteractive, runReviewTUI = oldTTY, oldTUI })
+	reviewIsInteractive = func(io.Reader, io.Writer) bool { return false }
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"review"}, strings.NewReader(""), out, errOut); code != exitUsage || errOut.String() != "review: interactive terminal input and output are required\n" {
+		t.Fatalf("review code=%d stderr=%q", code, errOut.String())
+	}
+	calls := 0
+	var gotNoColor bool
+	var gotRoot string
+	wantRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewIsInteractive = func(io.Reader, io.Writer) bool { return true }
+	t.Setenv("NO_COLOR", "1")
+	runReviewTUI = func(_ context.Context, noColor bool, root string) error {
+		calls++
+		gotNoColor, gotRoot = noColor, root
+		return nil
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"review"}, strings.NewReader(""), out, errOut); code != exitOK || calls != 1 || !gotNoColor || gotRoot != wantRoot {
+		t.Fatalf("interactive code=%d calls=%d noColor=%t root=%q", code, calls, gotNoColor, gotRoot)
+	}
+	runReviewTUI = func(context.Context, bool, string) error { return errors.New("private TUI error") }
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"review"}, strings.NewReader(""), out, errOut); code != exitInternal || errOut.String() != "review: terminal interface failed\n" || strings.Contains(errOut.String(), "private TUI error") {
+		t.Fatalf("TUI error code=%d stderr=%q", code, errOut.String())
 	}
 }
 
