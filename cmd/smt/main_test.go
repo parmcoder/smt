@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,6 +69,70 @@ func TestRunInitCreatesWorkspaceWithoutExistingConfiguration(t *testing.T) {
 	if !strings.Contains(out.String(), "initialized workspace") {
 		t.Fatalf("stdout = %q, want initialization result", out.String())
 	}
+}
+
+func TestRunNewCreatesConfigurationWithoutExistingConfiguration(t *testing.T) {
+	t.Chdir(t.TempDir())
+	allowNewInput(t)
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\ny\n"), out, errOut)
+	if code != exitOK {
+		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := config.Load("smt.yaml"); err != nil {
+		t.Fatalf("generated smt.yaml load: %v", err)
+	}
+}
+
+func TestRunNewCreatesConfigurationAtCustomPath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	allowNewInput(t)
+	destination := filepath.Join(t.TempDir(), "custom.yaml")
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\nn\nn\ny\n"), out, errOut); code != exitOK {
+		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := config.Load(destination); err != nil {
+		t.Fatalf("custom generated smt.yaml load: %v", err)
+	}
+}
+
+func TestRunNewUsageAndDecline(t *testing.T) {
+	allowNewInput(t)
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"new", "a", "b"}, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "usage: smt new [FILE]") {
+		t.Fatalf("new usage code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\nn\n"), out, errOut); code != exitOK || !strings.Contains(out.String(), "no file was written") {
+		t.Fatalf("new decline code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("declined destination stat=%v, want no file", err)
+	}
+}
+
+func TestRunNewRejectsNonTerminalInputWithoutWriting(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	previous := newInputIsTerminal
+	newInputIsTerminal = func(io.Reader) bool { return false }
+	t.Cleanup(func() { newInputIsTerminal = previous })
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\n"), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "interactive terminal") {
+		t.Fatalf("new non-terminal code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("destination stat=%v, want no file", err)
+	}
+}
+
+func allowNewInput(t *testing.T) {
+	t.Helper()
+	previous := newInputIsTerminal
+	newInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { newInputIsTerminal = previous })
 }
 
 func TestRunPushDryRunPrintsChildFirstPlanWithoutRemoteAccess(t *testing.T) {

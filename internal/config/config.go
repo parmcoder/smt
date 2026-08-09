@@ -22,6 +22,28 @@ type Config struct {
 	Commit       CommitConfig `yaml:"commit"`
 	Repositories []Repository `yaml:"repositories"`
 	Contracts    Contracts    `yaml:"contracts,omitempty"`
+	Workflow     *Workflow    `yaml:"workflow,omitempty"`
+}
+
+// Workflow records the fixed Codex delivery roles and plugins for a generated
+// blueprint. It is optional so existing version 1 configurations remain valid.
+type Workflow struct {
+	Policy  WorkflowPolicy   `yaml:"policy"`
+	Plugins []WorkflowPlugin `yaml:"plugins"`
+}
+
+// WorkflowPolicy assigns the fixed delivery responsibilities.
+type WorkflowPolicy struct {
+	Manager        string `yaml:"manager"`
+	Implementation string `yaml:"implementation"`
+	Documentation  string `yaml:"documentation"`
+	ReviewRequired bool   `yaml:"review_required"`
+}
+
+// WorkflowPlugin is one required plugin source and its ordered selectors.
+type WorkflowPlugin struct {
+	Source    string   `yaml:"source"`
+	Selectors []string `yaml:"selectors"`
 }
 
 // Workspace records the initialized platform choices without prescribing
@@ -190,6 +212,9 @@ func (c *Config) Validate(workspaceRoot string) error {
 	if err := c.Workspace.validate(); err != nil {
 		return err
 	}
+	if err := c.validateWorkflow(); err != nil {
+		return err
+	}
 
 	seen := map[string]map[string]struct{}{
 		"id": {}, "path": {}, "project": {}, "scope": {},
@@ -258,6 +283,34 @@ func (c *Config) Validate(workspaceRoot string) error {
 		return fmt.Errorf("exactly one root repository with path . is required")
 	}
 	return c.validateContracts(root, seenRepositoryIDs(c.Repositories))
+}
+
+func (c *Config) validateWorkflow() error {
+	if c.Workflow == nil {
+		return nil
+	}
+	w := c.Workflow
+	if w.Policy.Manager != "work_manager" || w.Policy.Implementation != "backend_worker" || w.Policy.Documentation != "doc_writer" || !w.Policy.ReviewRequired {
+		return fmt.Errorf("workflow.policy must use the fixed work_manager, backend_worker, doc_writer, and review_required values")
+	}
+	want := []WorkflowPlugin{
+		{Source: "parmcoder/codex-obsidian", Selectors: []string{"codex-obsidian-writer", "codex-obsidian-markdown"}},
+		{Source: "parmcoder/godex", Selectors: []string{"godex-go-backend"}},
+	}
+	if len(w.Plugins) != len(want) {
+		return fmt.Errorf("workflow.plugins must contain the two fixed plugins in order")
+	}
+	for i := range want {
+		if w.Plugins[i].Source != want[i].Source || len(w.Plugins[i].Selectors) != len(want[i].Selectors) {
+			return fmt.Errorf("workflow plugin %d does not match the required source and selectors", i)
+		}
+		for j := range want[i].Selectors {
+			if w.Plugins[i].Selectors[j] != want[i].Selectors[j] {
+				return fmt.Errorf("workflow plugin %d does not match the required source and selectors", i)
+			}
+		}
+	}
+	return nil
 }
 
 func (w Workspace) validate() error {
