@@ -39,12 +39,12 @@ func TestRunApplyParsesConfigWithoutPrompting(t *testing.T) {
 	}
 }
 
-func TestRunApplyUsesCustomConfigAndUsageIsExact(t *testing.T) {
+func TestRunApplyUsesCustomConfigAndLeafUsage(t *testing.T) {
 	for name, args := range map[string][]string{"missing path": {"apply"}, "extra path": {"apply", "a", "b"}, "bad flag": {"apply", "--unknown", "a"}} {
 		t.Run(name, func(t *testing.T) {
 			out, errOut := new(strings.Builder), new(strings.Builder)
-			if code := run(args, out, errOut); code != exitUsage || errOut.String() != "usage: smt apply [--config FILE] PATH\n" {
-				t.Fatalf("code=%d stderr=%q", code, errOut.String())
+			if code := run(args, out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "Usage:\n  smt apply PATH") || strings.Count(errOut.String(), "Usage:") != 1 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
 		})
 	}
@@ -330,6 +330,73 @@ func TestCobraSyntaxErrorsAreConciseAndUseStderr(t *testing.T) {
 	}
 }
 
+func TestCobraMigratedLeavesRejectInvalidSyntaxBeforeConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, tc := range []struct {
+		name string
+		args []string
+		use  string
+	}{
+		{name: "new has at most one path", args: []string{"new", "one", "two"}, use: "new [FILE]"},
+		{name: "apply needs path", args: []string{"apply"}, use: "apply PATH"},
+		{name: "status has no args", args: []string{"status", "extra"}, use: "status"},
+		{name: "doctor has no args", args: []string{"doctor", "extra"}, use: "doctor"},
+		{name: "check needs profile", args: []string{"check"}, use: "check"},
+		{name: "check profile is non-empty", args: []string{"check", "--profile", ""}, use: "check"},
+		{name: "push has no args", args: []string{"push", "extra"}, use: "push"},
+		{name: "status rejects unknown flags", args: []string{"status", "--unknown"}, use: "status"},
+		{name: "worktree add needs branch", args: []string{"worktree", "add", "destination"}, use: "worktree add PATH"},
+		{name: "worktree branch is non-empty", args: []string{"worktree", "add", "destination", "--branch", ""}, use: "worktree add PATH"},
+		{name: "contracts validate has no args", args: []string{"contracts", "validate", "extra"}, use: "contracts validate"},
+		{name: "ci audit has no args", args: []string{"ci", "audit", "extra"}, use: "ci audit"},
+		{name: "ci contracts bump needs id", args: []string{"ci", "contracts", "bump"}, use: "ci contracts bump"},
+		{name: "ci contracts bump id is non-empty", args: []string{"ci", "contracts", "bump", "--id", ""}, use: "ci contracts bump"},
+		{name: "validate message needs file", args: []string{"validate-message"}, use: "validate-message FILE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitUsage {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if out.Len() != 0 || strings.Contains(errOut.String(), "configuration error") {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+			}
+			if !strings.Contains(errOut.String(), "Usage:\n  smt "+tc.use) || strings.Count(errOut.String(), "Usage:") != 1 {
+				t.Fatalf("stderr=%q, want one leaf usage for %q", errOut.String(), tc.use)
+			}
+		})
+	}
+}
+
+func TestCobraMigratedLeafHelpAndValidOutput(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"apply", "--help"}, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("help code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{"Apply a workspace blueprint", "Usage:\n  smt apply PATH", "--config string"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("help stdout=%q, want %q", out.String(), want)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("help stderr=%q", errOut.String())
+	}
+
+	if err := writeTestConfig("smt.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	message := filepath.Join(t.TempDir(), "message")
+	if err := writeTestMessage(message, "feat(api): add a thing\n"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"validate-message", message}, strings.NewReader(""), out, errOut); code != exitOK || out.String() != "valid commit message\n" || errOut.Len() != 0 {
+		t.Fatalf("valid code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
 func TestCobraPersistentVerbosePreservesLeafSuccess(t *testing.T) {
 	out, errOut := new(strings.Builder), new(strings.Builder)
 	if code := runWithInput([]string{"init", "--verbose"}, strings.NewReader(""), out, errOut); code != exitOK {
@@ -369,7 +436,7 @@ func TestRunNewCreatesConfigurationAtCustomPath(t *testing.T) {
 func TestRunNewUsageAndDecline(t *testing.T) {
 	allowNewInput(t)
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", "a", "b"}, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "usage: smt new [FILE]") {
+	if code := runWithInput([]string{"new", "a", "b"}, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "Usage:\n  smt new [FILE]") || strings.Count(errOut.String(), "Usage:") != 1 {
 		t.Fatalf("new usage code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
@@ -415,7 +482,7 @@ func TestRunPushDryRunPrintsChildFirstPlanWithoutRemoteAccess(t *testing.T) {
 		ID: "repo", Path: root, Remote: config.Remote{URL: "https://example.invalid/root.git"},
 	}}}
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runPush(context.Background(), []string{"--dry-run"}, cfg, git.ExecRunner{}, out, errOut); code != exitOK {
+	if code := runPush(context.Background(), cfg, git.ExecRunner{}, true, out, errOut); code != exitOK {
 		t.Fatalf("runPush() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if !strings.Contains(out.String(), "push plan") || !strings.Contains(out.String(), "repo: main") {
@@ -433,7 +500,7 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "feature")
 	cfg := config.Config{Repositories: []config.Repository{{ID: "repo", Path: ".", Scope: "repo"}}}
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWorktree(context.Background(), []string{"add", destination, "--branch", "feature/demo", "--dry-run"}, cfg, root, git.ExecRunner{}, out, errOut); code != exitOK {
+	if code := runWorktree(context.Background(), cfg, root, git.ExecRunner{}, destination, "feature/demo", true, out, errOut); code != exitOK {
 		t.Fatalf("runWorktree() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if !strings.Contains(out.String(), "worktree plan") || !strings.Contains(out.String(), destination) {

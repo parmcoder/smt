@@ -84,12 +84,13 @@ func runWithInput(args []string, in io.Reader, out, errOut io.Writer) int {
 	root := newRootCommand(in, out, errOut, verbose)
 	root.SetArgs(args)
 	started := time.Now()
-	if err := root.Execute(); err != nil {
+	command, err := root.ExecuteC()
+	if err != nil {
 		if code, ok := err.(commandExitError); ok {
 			return int(code)
 		}
 		fmt.Fprintf(errOut, "error: %v\n", err)
-		fmt.Fprint(errOut, root.UsageString())
+		fmt.Fprint(errOut, command.UsageString())
 		if verbose {
 			command := ""
 			if len(args) > 0 {
@@ -124,6 +125,15 @@ func withoutVerbose(args []string) ([]string, bool) {
 	return filtered, verbose
 }
 
+func requireNonEmptyFlag(name string, value *string) cobra.PositionalArgs {
+	return func(_ *cobra.Command, _ []string) error {
+		if strings.TrimSpace(*value) == "" {
+			return fmt.Errorf("required flag --%s must not be empty", name)
+		}
+		return nil
+	}
+}
+
 func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "smt",
@@ -147,7 +157,7 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	root.SetHelpCommandGroupID("developer-tools")
 	root.SetCompletionCommandGroupID("developer-tools")
 
-	leaf := func(use, short, groupID string, path ...string) *cobra.Command {
+	legacyLeaf := func(use, short, groupID string, path ...string) *cobra.Command {
 		return &cobra.Command{
 			Use:                use,
 			Short:              short,
@@ -158,35 +168,141 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 			},
 		}
 	}
-	newCommand := leaf("new [FILE]", "Create a workspace blueprint", "getting-started", "new")
-	applyCommand := leaf("apply [--config FILE] PATH", "Apply a workspace blueprint", "getting-started", "apply")
-	initCommand := leaf("init [PATH]", "Show workspace initialization guidance", "getting-started", "init")
-	pushCommand := leaf("push [--dry-run]", "Push configured repositories", "workspace", "push")
-	worktreeCommand := leaf("worktree", "Manage linked worktrees", "workspace", "worktree")
-	worktreeCommand.AddCommand(leaf("add PATH --branch NAME [--dry-run]", "Create linked worktrees", "", "worktree", "add"))
-	statusCommand := leaf("status [--json]", "Show workspace status", "workspace", "status")
-	doctorCommand := leaf("doctor", "Check local readiness", "workspace", "doctor")
-	validateCommand := leaf("validate-message FILE", "Validate a commit message", "developer-tools", "validate-message")
-	checkCommand := leaf("check --profile PROFILE", "Run a check profile", "developer-tools", "check")
-	contractsCommand := leaf("contracts", "Inspect reusable contracts", "developer-tools", "contracts")
-	contractsCommand.AddCommand(leaf("validate", "Validate contracts", "", "contracts", "validate"))
-	ciCommand := leaf("ci", "Run CI-parity tools", "developer-tools", "ci")
-	ciContractsCommand := leaf("contracts", "Manage CI contracts", "", "ci", "contracts")
-	ciContractsCommand.AddCommand(leaf("bump --id ID [--apply]", "Plan or apply a contract bump", "", "ci", "contracts", "bump"))
-	ciCommand.AddCommand(leaf("audit", "Audit CI parity", "", "ci", "audit"), ciContractsCommand)
-	workCommand := leaf("work", "Manage work items", "review-workflow", "work")
-	workCommand.AddCommand(leaf("ready [--json]", "List ready work", "", "work", "ready"))
-	reviewCommand := leaf("review", "Open the review terminal interface", "review-workflow", "review")
+	nativeLeaf := func(use, short, groupID, command string, args cobra.PositionalArgs, run func([]string, *logrus.Logger) int) *cobra.Command {
+		return &cobra.Command{
+			Use:     use,
+			Short:   short,
+			GroupID: groupID,
+			Args:    args,
+			RunE: func(_ *cobra.Command, args []string) error {
+				return runNativeCommandWithVerbose(command, errOut, verbose, func(logger *logrus.Logger) int {
+					return run(args, logger)
+				})
+			},
+		}
+	}
+
+	newCommand := nativeLeaf("new [FILE]", "Create a workspace blueprint", "getting-started", "new", cobra.MaximumNArgs(1), func(args []string, _ *logrus.Logger) int {
+		destination := "./smt.yaml"
+		if len(args) == 1 {
+			destination = args[0]
+		}
+		return runNew(destination, in, out, errOut)
+	})
+	var applyConfig string
+	applyCommand := nativeLeaf("apply PATH", "Apply a workspace blueprint", "getting-started", "apply", cobra.ExactArgs(1), func(args []string, _ *logrus.Logger) int {
+		return runApply(applyConfig, args[0], out, errOut)
+	})
+	applyCommand.Flags().StringVar(&applyConfig, "config", "./smt.yaml", "configuration file")
+
+	initCommand := legacyLeaf("init [PATH]", "Show workspace initialization guidance", "getting-started", "init")
+	var pushDryRun bool
+	pushCommand := nativeLeaf("push", "Push configured repositories", "workspace", "push", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, _, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runPush(context.Background(), *cfg, git.ExecRunner{}, pushDryRun, out, errOut)
+	})
+	pushCommand.Flags().BoolVar(&pushDryRun, "dry-run", false, "validate and print the push plan")
+
+	worktreeCommand := legacyLeaf("worktree", "Manage linked worktrees", "workspace", "worktree")
+	var worktreeBranch string
+	var worktreeDryRun bool
+	worktreeAddCommand := nativeLeaf("add PATH", "Create linked worktrees", "", "worktree", cobra.MatchAll(cobra.ExactArgs(1), requireNonEmptyFlag("branch", &worktreeBranch)), func(args []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runWorktree(context.Background(), *cfg, root, git.ExecRunner{}, args[0], worktreeBranch, worktreeDryRun, out, errOut)
+	})
+	worktreeAddCommand.Flags().StringVar(&worktreeBranch, "branch", "", "new branch name")
+	worktreeAddCommand.Flags().BoolVar(&worktreeDryRun, "dry-run", false, "validate and print the worktree plan")
+	_ = worktreeAddCommand.MarkFlagRequired("branch")
+	worktreeCommand.AddCommand(worktreeAddCommand)
+
+	var statusJSON bool
+	statusCommand := nativeLeaf("status", "Show workspace status", "workspace", "status", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runStatus(context.Background(), cfg, root, git.ExecRunner{}, statusJSON, out, errOut)
+	})
+	statusCommand.Flags().BoolVar(&statusJSON, "json", false, "write JSON output")
+
+	doctorCommand := nativeLeaf("doctor", "Check local readiness", "workspace", "doctor", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, _, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runDoctor(context.Background(), cfg, git.ExecRunner{}, out, errOut)
+	})
+
+	validateCommand := nativeLeaf("validate-message FILE", "Validate a commit message", "developer-tools", "validate-message", cobra.ExactArgs(1), func(args []string, _ *logrus.Logger) int {
+		return runValidateMessage(args[0], out, errOut)
+	})
+	var checkProfile, checkRepository string
+	var checkAllowMutation, checkDryRun bool
+	checkCommand := nativeLeaf("check", "Run a check profile", "developer-tools", "check", cobra.MatchAll(cobra.NoArgs, requireNonEmptyFlag("profile", &checkProfile)), func(_ []string, logger *logrus.Logger) int {
+		cfg, _, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runCheck(context.Background(), *cfg, git.ExecRunner{}, checkProfile, checkRepository, checkAllowMutation, checkDryRun, out, errOut, logger)
+	})
+	checkCommand.Flags().StringVar(&checkProfile, "profile", "", "check profile")
+	checkCommand.Flags().StringVar(&checkRepository, "repo", "", "repository ID")
+	checkCommand.Flags().BoolVar(&checkAllowMutation, "allow-worktree-mutation", false, "allow checks that mutate the worktree")
+	checkCommand.Flags().BoolVar(&checkDryRun, "dry-run", false, "validate without running checks")
+	_ = checkCommand.MarkFlagRequired("profile")
+
+	contractsCommand := legacyLeaf("contracts", "Inspect reusable contracts", "developer-tools", "contracts")
+	contractsCommand.AddCommand(nativeLeaf("validate", "Validate contracts", "", "contracts", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runContractReport(*cfg, root, false, out, errOut)
+	}))
+
+	ciCommand := legacyLeaf("ci", "Run CI-parity tools", "developer-tools", "ci")
+	ciContractsCommand := legacyLeaf("contracts", "Manage CI contracts", "", "ci", "contracts")
+	ciAuditCommand := nativeLeaf("audit", "Audit CI parity", "", "ci", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runContractReport(*cfg, root, true, out, errOut)
+	})
+	var contractID string
+	var contractApply bool
+	ciContractsBumpCommand := nativeLeaf("bump", "Plan or apply a contract bump", "", "ci", cobra.MatchAll(cobra.NoArgs, requireNonEmptyFlag("id", &contractID)), func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runCIContractsBump(*cfg, root, contractID, contractApply, out, errOut)
+	})
+	ciContractsBumpCommand.Flags().StringVar(&contractID, "id", "", "reference contract ID")
+	ciContractsBumpCommand.Flags().BoolVar(&contractApply, "apply", false, "apply the replacement")
+	_ = ciContractsBumpCommand.MarkFlagRequired("id")
+	ciContractsCommand.AddCommand(ciContractsBumpCommand)
+	ciCommand.AddCommand(ciAuditCommand, ciContractsCommand)
+
+	workCommand := legacyLeaf("work", "Manage work items", "review-workflow", "work")
+	workCommand.AddCommand(legacyLeaf("ready [--json]", "List ready work", "", "work", "ready"))
+	reviewCommand := legacyLeaf("review", "Open the review terminal interface", "review-workflow", "review")
 	reviewCommand.AddCommand(
-		leaf("list [--json]", "List queued reviews", "", "review", "list"),
-		leaf("queue FEATURE --handoff PATH --evidence PATH [--json]", "Queue a review", "", "review", "queue"),
-		leaf("requeue REVIEW [--json]", "Requeue a review", "", "review", "requeue"),
-		leaf("pass", "Reserved for the review TUI", "", "review", "pass"),
-		leaf("fail", "Reserved for the review TUI", "", "review", "fail"),
-		leaf("close", "Reserved for the review TUI", "", "review", "close"),
+		legacyLeaf("list [--json]", "List queued reviews", "", "review", "list"),
+		legacyLeaf("queue FEATURE --handoff PATH --evidence PATH [--json]", "Queue a review", "", "review", "queue"),
+		legacyLeaf("requeue REVIEW [--json]", "Requeue a review", "", "review", "requeue"),
+		legacyLeaf("pass", "Reserved for the review TUI", "", "review", "pass"),
+		legacyLeaf("fail", "Reserved for the review TUI", "", "review", "fail"),
+		legacyLeaf("close", "Reserved for the review TUI", "", "review", "close"),
 	)
-	releaseCommand := leaf("release", "Check release readiness", "review-workflow", "release")
-	releaseCommand.AddCommand(leaf("check [--json]", "Check release readiness", "", "release", "check"))
+	releaseCommand := legacyLeaf("release", "Check release readiness", "review-workflow", "release")
+	releaseCommand.AddCommand(legacyLeaf("check [--json]", "Check release readiness", "", "release", "check"))
 	root.AddCommand(newCommand, applyCommand, initCommand, pushCommand, worktreeCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
 	return root
 }
@@ -208,6 +324,24 @@ func runCommandWithVerbose(args []string, in io.Reader, out, errOut io.Writer, v
 		}).Debug("command finished")
 	}
 	return code
+}
+
+func runNativeCommandWithVerbose(command string, errOut io.Writer, verbose bool, run func(*logrus.Logger) int) error {
+	logger := newRunLogger(verbose, errOut)
+	started := time.Now()
+	code := run(logger)
+	if verbose {
+		logger.WithFields(logrus.Fields{
+			"command":     command,
+			"status":      commandStatus(code),
+			"exit_code":   code,
+			"duration_ms": time.Since(started).Milliseconds(),
+		}).Debug("command finished")
+	}
+	if code != exitOK {
+		return commandExitError(code)
+	}
+	return nil
 }
 
 func newRunLogger(verbose bool, errOut io.Writer) *logrus.Logger {
@@ -265,62 +399,17 @@ func runCommand(args []string, in io.Reader, out, errOut io.Writer, logger *logr
 	if args[0] == "work" || args[0] == "review" || args[0] == "release" {
 		return runAgentRoute(context.Background(), args, ".", out, errOut)
 	}
-	if args[0] == "new" {
-		return runNew(args[1:], in, out, errOut)
-	}
-	if args[0] == "apply" {
-		return runApply(args[1:], out, errOut)
-	}
-	if args[0] == "validate-message" {
-		return runValidateMessage(args[1:], out, errOut)
-	}
-
-	cfg, root, code := loadConfig(errOut)
-	if code != exitOK {
-		return code
-	}
-	ctx := context.Background()
-	runner := git.ExecRunner{}
-
-	switch args[0] {
-	case "status":
-		return runStatus(ctx, args[1:], cfg, root, runner, out, errOut)
-	case "push":
-		return runPush(ctx, args[1:], *cfg, runner, out, errOut)
-	case "worktree":
-		return runWorktree(ctx, args[1:], *cfg, root, runner, out, errOut)
-	case "doctor":
-		return runDoctor(ctx, args[1:], cfg, runner, out, errOut)
-	case "check":
-		return runCheck(ctx, args[1:], *cfg, runner, out, errOut, logger)
-	case "contracts":
-		if len(args) != 2 || args[1] != "validate" {
-			fmt.Fprintln(errOut, "usage: smt contracts validate")
-			return exitUsage
-		}
-		return runContractReport(*cfg, root, false, out, errOut)
-	case "ci":
-		return runCI(ctx, args[1:], *cfg, root, runner, out, errOut)
-	default:
-		printUsage(errOut)
-		return exitUsage
-	}
+	printUsage(errOut)
+	return exitUsage
 }
 
-func runApply(args []string, out, errOut io.Writer) int {
-	flags := flag.NewFlagSet("apply", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	configPath := flags.String("config", "./smt.yaml", "configuration file")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 1 {
-		fmt.Fprintln(errOut, "usage: smt apply [--config FILE] PATH")
-		return exitUsage
-	}
-	raw, err := os.ReadFile(*configPath)
+func runApply(configPath, destination string, out, errOut io.Writer) int {
+	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		fmt.Fprintf(errOut, "apply: read config: %v\n", err)
 		return exitValidation
 	}
-	cfg, err := config.LoadBytes(raw, *configPath)
+	cfg, err := config.LoadBytes(raw, configPath)
 	if err != nil {
 		fmt.Fprintf(errOut, "apply: %v\n", err)
 		return exitValidation
@@ -331,7 +420,7 @@ func runApply(args []string, out, errOut io.Writer) int {
 	}
 	service := newApplyService()
 	service.Config = *cfg
-	if err := service.Apply(context.Background(), flags.Arg(0), raw); err != nil {
+	if err := service.Apply(context.Background(), destination, raw); err != nil {
 		fmt.Fprintf(errOut, "apply: %v\n", err)
 		return exitValidation
 	}
@@ -339,15 +428,7 @@ func runApply(args []string, out, errOut io.Writer) int {
 	return exitOK
 }
 
-func runNew(args []string, in io.Reader, out, errOut io.Writer) int {
-	if len(args) > 1 {
-		fmt.Fprintln(errOut, "usage: smt new [FILE]")
-		return exitUsage
-	}
-	destination := "./smt.yaml"
-	if len(args) == 1 {
-		destination = args[0]
-	}
+func runNew(destination string, in io.Reader, out, errOut io.Writer) int {
 	if !newInputIsTerminal(in) {
 		fmt.Fprintln(errOut, "new: interactive terminal input is required")
 		return exitUsage
@@ -360,14 +441,7 @@ func runNew(args []string, in io.Reader, out, errOut io.Writer) int {
 	return exitOK
 }
 
-func runPush(ctx context.Context, args []string, cfg config.Config, runner git.Runner, out, errOut io.Writer) int {
-	flags := flag.NewFlagSet("push", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	dryRun := flags.Bool("dry-run", false, "validate and print the push plan")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		fmt.Fprintln(errOut, "usage: smt push [--dry-run]")
-		return exitUsage
-	}
+func runPush(ctx context.Context, cfg config.Config, runner git.Runner, dryRun bool, out, errOut io.Writer) int {
 	targets := make([]git.PushTarget, 0, len(cfg.Repositories))
 	for _, repository := range cfg.Repositories {
 		targets = append(targets, git.PushTarget{
@@ -384,7 +458,7 @@ func runPush(ctx context.Context, args []string, cfg config.Config, runner git.R
 		fmt.Fprintf(errOut, "push: %v\n", err)
 		return exitValidation
 	}
-	report, err := git.ExecutePush(ctx, runner, plan, *dryRun)
+	report, err := git.ExecutePush(ctx, runner, plan, dryRun)
 	if report.DryRun {
 		fmt.Fprintln(out, "push plan:")
 		for _, step := range report.Planned {
@@ -405,12 +479,7 @@ func runPush(ctx context.Context, args []string, cfg config.Config, runner git.R
 	return exitValidation
 }
 
-func runWorktree(ctx context.Context, args []string, cfg config.Config, root string, runner git.Runner, out, errOut io.Writer) int {
-	destination, branch, dryRun, ok := parseWorktreeArgs(args)
-	if !ok {
-		fmt.Fprintln(errOut, "usage: smt worktree add PATH --branch NAME [--dry-run]")
-		return exitUsage
-	}
+func runWorktree(ctx context.Context, cfg config.Config, root string, runner git.Runner, destination, branch string, dryRun bool, out, errOut io.Writer) int {
 	targets := make([]git.WorktreeTarget, 0, len(cfg.Repositories))
 	for _, repository := range cfg.Repositories {
 		dir := root
@@ -450,30 +519,6 @@ func runWorktree(ctx context.Context, args []string, cfg config.Config, root str
 	}
 	fmt.Fprintf(errOut, "worktree: %v\n", err)
 	return exitValidation
-}
-
-func parseWorktreeArgs(args []string) (destination, branch string, dryRun, ok bool) {
-	if len(args) == 0 || args[0] != "add" {
-		return "", "", false, false
-	}
-	for index := 1; index < len(args); index++ {
-		switch args[index] {
-		case "--dry-run":
-			dryRun = true
-		case "--branch":
-			if index+1 >= len(args) || args[index+1] == "" {
-				return "", "", false, false
-			}
-			branch = args[index+1]
-			index++
-		default:
-			if strings.HasPrefix(args[index], "-") || destination != "" {
-				return "", "", false, false
-			}
-			destination = args[index]
-		}
-	}
-	return destination, branch, dryRun, destination != "" && branch != ""
 }
 
 func runInit(args []string, in io.Reader, out, errOut io.Writer) int {
@@ -627,12 +672,8 @@ func safeRelease(value beads.ReleaseReadiness) safeReleaseResult {
 	return safeReleaseResult{Ready: value.Ready, Blocking: safeIssues(value.Blocking)}
 }
 
-func runValidateMessage(args []string, out, errOut io.Writer) int {
-	if len(args) != 1 {
-		fmt.Fprintln(errOut, "usage: smt validate-message FILE")
-		return exitUsage
-	}
-	message, err := os.ReadFile(args[0])
+func runValidateMessage(path string, out, errOut io.Writer) int {
+	message, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(errOut, "read message: %v\n", err)
 		return exitInternal
@@ -674,14 +715,7 @@ type contractCounts struct {
 	Warnings int `json:"warnings"`
 }
 
-func runStatus(ctx context.Context, args []string, cfg *config.Config, root string, runner git.Runner, out, errOut io.Writer) int {
-	flags := flag.NewFlagSet("status", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	jsonOutput := flags.Bool("json", false, "write JSON output")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		fmt.Fprintln(errOut, "usage: smt status [--json]")
-		return exitUsage
-	}
+func runStatus(ctx context.Context, cfg *config.Config, root string, runner git.Runner, jsonOutput bool, out, errOut io.Writer) int {
 	entries, err := operations.New(*cfg, runner).Status(ctx)
 	if err != nil {
 		fmt.Fprintf(errOut, "status: %v\n", err)
@@ -698,7 +732,7 @@ func runStatus(ctx context.Context, args []string, cfg *config.Config, root stri
 		return exitInternal
 	}
 	result := statusOutput{Repositories: entries, Profiles: profileNames(*cfg), Contracts: countFindings(report)}
-	if *jsonOutput {
+	if jsonOutput {
 		encoder := json.NewEncoder(out)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(result); err != nil {
@@ -728,13 +762,7 @@ func runStatus(ctx context.Context, args []string, cfg *config.Config, root stri
 	return exitOK
 }
 
-func runDoctor(ctx context.Context, args []string, cfg *config.Config, runner git.Runner, out, errOut io.Writer) int {
-	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		fmt.Fprintln(errOut, "usage: smt doctor")
-		return exitUsage
-	}
+func runDoctor(ctx context.Context, cfg *config.Config, runner git.Runner, out, errOut io.Writer) int {
 	doctor := operations.NewDoctorWithHookInspector(*cfg, exec.LookPath, func(name string) bool {
 		_, ok := os.LookupEnv(name)
 		return ok
@@ -757,38 +785,28 @@ func runDoctor(ctx context.Context, args []string, cfg *config.Config, runner gi
 	return exitOK
 }
 
-func runCheck(ctx context.Context, args []string, cfg config.Config, runner git.Runner, out, errOut io.Writer, logger *logrus.Logger) int {
-	flags := flag.NewFlagSet("check", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	profile := flags.String("profile", "", "check profile")
-	repoID := flags.String("repo", "", "repository ID")
-	allowMutation := flags.Bool("allow-worktree-mutation", false, "allow checks that mutate the worktree")
-	dryRun := flags.Bool("dry-run", false, "validate without running checks")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *profile == "" {
-		fmt.Fprintln(errOut, "usage: smt check --profile hook|submit|ci-parity [--repo ID] [--allow-worktree-mutation] [--dry-run]")
-		return exitUsage
-	}
+func runCheck(ctx context.Context, cfg config.Config, runner git.Runner, profile, repoID string, allowMutation, dryRun bool, out, errOut io.Writer, logger *logrus.Logger) int {
 	selected := cfg.Repositories
-	if *repoID != "" {
+	if repoID != "" {
 		selected = nil
 		for _, repository := range cfg.Repositories {
-			if repository.ID == *repoID {
+			if repository.ID == repoID {
 				selected = append(selected, repository)
 			}
 		}
 		if selected == nil {
-			fmt.Fprintf(errOut, "unknown repository %q\n", *repoID)
+			fmt.Fprintf(errOut, "unknown repository %q\n", repoID)
 			return exitUsage
 		}
 	}
-	executor := commandExecutor{logger: logger.WithField("profile", *profile)}
+	executor := commandExecutor{logger: logger.WithField("profile", profile)}
 	for _, repository := range selected {
-		if _, ok := repository.Profiles[*profile]; !ok {
-			fmt.Fprintf(errOut, "repository %q has no check profile %q\n", repository.ID, *profile)
+		if _, ok := repository.Profiles[profile]; !ok {
+			fmt.Fprintf(errOut, "repository %q has no check profile %q\n", repository.ID, profile)
 			return exitUsage
 		}
 		var changed []string
-		if !*dryRun {
+		if !dryRun {
 			var err error
 			changed, err = git.ChangedFiles(ctx, runner, git.Repository{ID: repository.ID, Dir: repository.Path})
 			if err != nil {
@@ -796,11 +814,11 @@ func runCheck(ctx context.Context, args []string, cfg config.Config, runner git.
 				return exitInternal
 			}
 		}
-		if err := checks.RunProfile(ctx, executor, repository, *profile, changed, *allowMutation, *dryRun); err != nil {
+		if err := checks.RunProfile(ctx, executor, repository, profile, changed, allowMutation, dryRun); err != nil {
 			fmt.Fprintln(errOut, err)
 			return exitValidation
 		}
-		fmt.Fprintf(out, "%s: %s checks passed\n", repository.ID, *profile)
+		fmt.Fprintf(out, "%s: %s checks passed\n", repository.ID, profile)
 	}
 	return exitOK
 }
@@ -828,34 +846,19 @@ func runContractReport(cfg config.Config, root string, audit bool, out, errOut i
 	return exitOK
 }
 
-func runCI(_ context.Context, args []string, cfg config.Config, root string, _ git.Runner, out, errOut io.Writer) int {
-	if len(args) == 1 && args[0] == "audit" {
-		return runContractReport(cfg, root, true, out, errOut)
-	}
-	if len(args) < 3 || args[0] != "contracts" || args[1] != "bump" {
-		fmt.Fprintln(errOut, "usage: smt ci audit | smt ci contracts bump --id ID [--apply]")
-		return exitUsage
-	}
-	flags := flag.NewFlagSet("ci contracts bump", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	id := flags.String("id", "", "reference contract ID")
-	apply := flags.Bool("apply", false, "apply the replacement")
-	if err := flags.Parse(args[2:]); err != nil || flags.NArg() != 0 || *id == "" {
-		fmt.Fprintln(errOut, "usage: smt ci contracts bump --id ID [--apply]")
-		return exitUsage
-	}
+func runCIContractsBump(cfg config.Config, root, id string, apply bool, out, errOut io.Writer) int {
 	service, err := newContracts(root, cfg)
 	if err != nil {
 		fmt.Fprintf(errOut, "contracts: %v\n", err)
 		return exitInternal
 	}
-	plan, err := service.PlanBump(*id)
+	plan, err := service.PlanBump(id)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return exitValidation
 	}
 	fmt.Fprintf(out, "contract %s (%s)\n--- before\n%s--- after\n%s", plan.ContractID, plan.Path, plan.Before, plan.After)
-	if !*apply {
+	if !apply {
 		return exitOK
 	}
 	if err := service.Apply(plan, true); err != nil {
