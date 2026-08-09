@@ -1,6 +1,6 @@
 ---
 type: component-design
-status: approved-planned
+status: active
 owner: platform
 tags:
   - smt
@@ -25,9 +25,9 @@ application source is part of this design. The canonical contract is
 ## Selection and blueprint contract
 
 `smt new` asks `Include Flutter mobile application? [Y/n]` immediately after
-the Web selection. Enter selects Mobile; an explicit no excludes it. The
-selected component and repository order is repo, web, mobile, api, database,
-infra.
+the Web selection. Enter selects Mobile; an explicit no excludes it. When
+Mobile is selected, the component and repository order is repo, web, mobile,
+api, database, infra; an opt-out omits Mobile.
 
 Mobile keeps configuration at `version: 1`. Existing version-1 configurations
 without Mobile remain valid and apply without Mobile output. A selected Mobile
@@ -62,9 +62,10 @@ flowchart LR
 Applying a selected Mobile blueprint creates an independent initialized local
 bootstrap submodule at `mobile-app`, a `mobile_worker` manifest,
 Flutter-oriented README and ignore rules, and `.tool-versions` with the
-literal `flutter 3.44.9` pin. It must not run `flutter create`,
-`flutter --version`, or any Flutter SDK CLI; require Flutter; install
-dependencies; access the network; or promise Flutter source generation.
+literal `flutter 3.44.9` pin. It does not invoke `flutter create`,
+`flutter --version`, or any Flutter SDK CLI. It does not require Flutter,
+install dependencies, access the network, produce Flutter source, sign an app,
+or publish an app.
 
 `smt apply` validates before mutation and remains atomic/all-or-nothing. A
 prerequisite, staging, Beads, or publish failure leaves no partial destination.
@@ -73,17 +74,26 @@ submit failure.
 
 ## Delivery and verification
 
-This documentation task, `smt-3r2.1`, blocks the configuration/blueprint work
-in `smt-3r2.2`; it precedes atomic apply work in `smt-3r2.3`, final
-documentation/release verification in `smt-3r2.4`, and human-owned E2E in
-`smt-3r2.5`. This is approved planned behavior, not a claim of current Go
-support.
+The contract, configuration/blueprint work, atomic apply, and documentation
+alignment are delivered through `smt-3r2.4`. Human-owned E2E remains
+`smt-3r2.5`; this document does not claim that runtime review is complete.
 
 Focused verification covers inclusion by default, opt-out, invalid-answer
 retry, EOF/decline no-write, exact YAML/mapping/scopes/order, invalid stack and
 metadata rejection before mutation, version-1 compatibility, atomic preflight
 and stage/publish cleanup, generated artifacts, and tests without Flutter.
 Human runtime E2E is deferred to `smt-3r2.5` and is not claimed complete here.
+
+## Human E2E review handoff
+
+Create a default blueprint by pressing Enter at the Mobile prompt and an
+opt-out blueprint by answering no. Apply each only to a new destination. For
+the default case, verify the ordered Mobile configuration plus `mobile-app`,
+`agents/mobile_worker.toml`, the Mobile README and ignore rules, and the
+`flutter 3.44.9` pin. The review must not expect Flutter source generation or
+use of Flutter, its SDK, dependencies, network, signing, or store publication.
+At one additional fresh destination, exercise one safe prerequisite, staging,
+Beads, or publish failure and verify that no partial destination remains.
 
 ## Related
 

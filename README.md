@@ -22,10 +22,20 @@ bin/smt apply --config ../platform-config/smt.yaml ../platform
 ```
 
 `smt new` requires a new blueprint file. It prompts for the fixed Next.js, Go,
-PostgreSQL, and Docker/OpenTofu components, then writes a reviewed workspace
-blueprint. Inspect and edit that `smt.yaml` before `smt apply` creates the root
-repository and selected local submodules at the new destination. Add
-credential-free `remote.url` values after applying the blueprint and before using
+PostgreSQL, and Docker/OpenTofu components, and asks whether to include a
+Flutter Mobile application immediately after the Web selection. Mobile targets
+Android and iOS, defaults to included when you press Enter, and is excluded
+only by an explicit no. When Mobile is selected, repositories are ordered
+`repo`, `web`, `mobile`, `api`, `database`, `infra`; an opt-out omits the
+Mobile entry. Inspect and edit the resulting `smt.yaml`
+before `smt apply` creates the root repository and selected local submodules at
+the new destination. A selected Mobile component is a Git-ready `mobile-app`
+shell with a `mobile_worker` manifest, Flutter README and ignore rules, and
+`.tool-versions` pinning Flutter `3.44.9`; it is not generated Flutter app
+source. Applying it does not invoke or require the Flutter CLI or SDK, install
+dependencies, access the network, sign an app, or publish to an app store. Add
+credential-free `remote.url` values after applying the blueprint and before
+using
 `bin/smt push [--dry-run]`. Create a matching root-plus-submodule workspace
 with `bin/smt worktree add PATH --branch NAME [--dry-run]`.
 

@@ -26,10 +26,15 @@ bin/smt new ../platform-config/smt.yaml
 ```
 
 `new` interactively selects the fixed Next.js, Go, PostgreSQL, and
-Docker/OpenTofu components and writes `smt.yaml` only after confirmation. It
-does not create a workspace. The destination file must not already exist. Read
-and adjust the generated `smt.yaml` before applying it; for example, inspect
-the selected repositories and add project-specific check profiles.
+Docker/OpenTofu components. Immediately after Web, it asks `Include Flutter
+mobile application? [Y/n]`: Enter includes the Android/iOS Flutter component;
+only an explicit no opts out. When Mobile is selected, repositories are ordered
+`repo`, `web`, `mobile`, `api`, `database`, `infra`; an opt-out omits the
+Mobile entry. It writes `smt.yaml` only after
+confirmation and does not create a workspace. The destination file must not
+already exist. Read and adjust the generated `smt.yaml` before applying it; for
+example, inspect the selected repositories and add project-specific check
+profiles.
 
 ```sh
 $EDITOR ../platform-config/smt.yaml
@@ -39,7 +44,22 @@ bin/smt apply --config ../platform-config/smt.yaml ../platform
 `apply` validates the supplied workspace blueprint/configuration, creates a
 root repository plus one local submodule per selected component, and writes the
 workspace files and local workflow metadata at a destination that does not
-already exist. It does not install dependencies or create remote repositories.
+already exist. With Mobile selected, it creates a Git-ready `mobile-app` shell,
+`mobile_worker` manifest, Flutter README and ignore rules, and a
+`.tool-versions` Flutter `3.44.9` pin—not application source. It does not
+invoke or require Flutter or its SDK, install dependencies, access the network,
+sign an app, or publish an app. It does not create remote repositories.
+
+## Human E2E Mobile review handoff
+
+The pending human review (`smt-3r2.5`) should create one default Mobile
+blueprint (press Enter) and one explicit opt-out blueprint, then apply each in
+new destinations. Verify the default YAML order and Mobile artifacts listed
+above; verify the opt-out contains no Mobile stack or repository. This review
+does not require Flutter installation and must not expect generated app source,
+dependency installation, network access, signing, or store publication. At one
+additional fresh destination, exercise one safe prerequisite, staging, Beads,
+or publish failure and verify that no partial destination remains.
 
 Add credential-free remote URLs after applying the blueprint:
 

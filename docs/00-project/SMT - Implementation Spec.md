@@ -26,8 +26,11 @@ The Cobra root help groups commands as Getting Started, Workspace, Review
 Workflow, and Developer Tools. Implemented commands are:
 
 - `smt new [FILE]` — interactively select fixed Next.js, Go, PostgreSQL, and
-  Docker/OpenTofu components and write a validated `smt.yaml` blueprint only
-  after confirmation. It does not create a repository or workspace.
+  Docker/OpenTofu components; immediately after the Web selection it asks
+  `Include Flutter mobile application? [Y/n]`. Enter includes the Android/iOS
+  Flutter Mobile component and an explicit no excludes it. It writes a
+  validated `smt.yaml` blueprint only after confirmation and does not create a
+  repository or workspace.
 - `smt apply [--config FILE] PATH` — validate the supplied workspace
   blueprint/configuration, then create the root Git repository, selected local
   bootstrap submodules, ignore files, Beads metadata, and repository-local
@@ -70,19 +73,17 @@ Workflow, and Developer Tools. Implemented commands are:
 These commands use argument arrays, never force-push or rewrite history, and
 never log or persist tokens, authorization headers, or sensitive payloads.
 
-## Approved Flutter Mobile component (planned)
+## Flutter Mobile component
 
-This is the approved contract for the next Mobile delivery; it does **not**
-claim that the current Go implementation already supports Mobile. `smt new`
-will ask the literal prompt `Include Flutter mobile application? [Y/n]`
+`smt new` asks the literal prompt `Include Flutter mobile application? [Y/n]`
 immediately after the Web selection. Enter means Yes and an explicit no
-excludes Mobile. The selected component and repository order is always: repo,
-web, mobile, api, database, infra.
+excludes Mobile. When Mobile is selected, the component and repository order
+is repo, web, mobile, api, database, infra; an opt-out omits Mobile.
 
 Mobile extends, rather than changes, `version: 1`. Existing version-1
 blueprints/configurations that lack Mobile remain valid; applying one produces
-no Mobile output. When selected, `smt new` must emit and `smt apply` must
-accept exactly this stack entry and repository mapping:
+no Mobile output. When selected, `smt new` emits and `smt apply` accepts
+exactly this stack entry and repository mapping:
 
 ```yaml
 workspace:
@@ -102,14 +103,14 @@ Mobile stack or mismatched Mobile metadata is a validation failure before any
 destination mutation. Version 1 targets Android and iOS only; store signing,
 metadata, submission, and publication are outside this workspace-setup scope.
 
-Applying a selected Mobile blueprint will create the same Git-ready component
+Applying a selected Mobile blueprint creates the same Git-ready component
 basics as the existing stacks: an independent initialized local bootstrap
 submodule, a `mobile_worker` manifest, Flutter-oriented README and ignore
 rules, and `.tool-versions` containing the literal pin `flutter 3.44.9`.
-The Mobile component is strictly scaffold-only: SMT must not invoke `flutter
-create`, `flutter --version`, or any other Flutter SDK CLI; require a Flutter
-executable or SDK; install dependencies; access the network; or promise
-generated Flutter application source.
+The Mobile component is strictly scaffold-only: SMT does not invoke `flutter
+create`, `flutter --version`, or any other Flutter SDK CLI. It does not require
+a Flutter executable or SDK, install dependencies, access the network, produce
+Flutter application source, sign an app, or publish an app.
 
 `smt apply` validates first and remains atomic/all-or-nothing. Any
 prerequisite, staging, Beads, or publish failure leaves no partial destination.
@@ -166,8 +167,8 @@ contracts:
 ```
 
 The fixed workspace stack values are `nextjs`, `go`, `postgresql`, and the
-DevOps tools `docker` plus `opentofu`; the approved planned Mobile extension
-adds only `mobile: flutter` as described above. `ai_assist` is either absent or
+DevOps tools `docker` plus `opentofu`; the implemented Mobile extension adds
+only `mobile: flutter` as described above. `ai_assist` is either absent or
 `codex`.
 `remote.url` is optional at initialization but required by `smt push`; it may
 not contain embedded credentials. Existing `provider` and `project` metadata
@@ -222,7 +223,7 @@ scaffolded Git submodules, push/worktree preflight and recovery reporting,
 harmless metadata, profiles and mutation guards, status/doctor output, contract
 severity and path validation, CI audit, and guarded bump planning/apply behavior.
 
-The planned Mobile focused-test contract covers default inclusion, explicit
+The Mobile focused-test contract covers default inclusion, explicit
 opt-out, invalid-answer retry, EOF/decline no-write, exact YAML/repository
 mapping/scopes/order, invalid stack or metadata rejection before mutation,
 existing-version-1 compatibility, atomic cleanup for preflight and
@@ -232,10 +233,25 @@ completed runtime proof in this delivery.
 
 ## Flutter Mobile delivery order
 
-`smt-3r2.1` defines this contract and blocks configuration/blueprint work in
-`smt-3r2.2`; that then precedes atomic apply work in `smt-3r2.3`, final
-documentation/release verification in `smt-3r2.4`, and the human-owned E2E
-review in `smt-3r2.5`.
+The contract, blueprint, atomic apply, and documentation/release verification
+work are complete through `smt-3r2.4`. The human-owned E2E review remains
+`smt-3r2.5`.
+
+## Human E2E review handoff
+
+`smt-3r2.5` should run `smt new` twice in clean temporary locations: first
+press Enter at the Mobile prompt and confirm `mobile: flutter`, the Mobile
+repository entry, and the Mobile-selected `repo`, `web`, `mobile`, `api`,
+`database`, `infra` order; then explicitly answer no and confirm no Mobile
+configuration. Apply
+each reviewed blueprint to a new destination. For the default case, inspect
+the Git-ready `mobile-app` submodule, `agents/mobile_worker.toml`, Mobile
+README and ignore rules, and `.tool-versions` Flutter `3.44.9` pin. Do not
+expect or attempt Flutter source generation, SDK/CLI use, dependency install,
+network access, signing, or store publication; record the observed commands
+and artifacts as human-review evidence. At one additional fresh destination,
+exercise one safe prerequisite, staging, Beads, or publish failure and verify
+that no partial destination remains.
 
 ## Related
 
