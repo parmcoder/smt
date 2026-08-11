@@ -38,3 +38,30 @@ func TestValidateMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePreparedMessageRequiresAssignedReferenceImmediatelyAfterPrefix(t *testing.T) {
+	policy := Policy{Types: []string{"feat", "fix"}, Scopes: []string{"api"}}
+	allowed := []string{"smt-123", "API-7"}
+	for _, message := range []string{
+		"feat(api): [smt-123] add endpoint",
+		"fix(api): [API-7] handle empty response",
+	} {
+		if err := ValidatePreparedMessage(message, policy, allowed); err != nil {
+			t.Fatalf("ValidatePreparedMessage(%q) error = %v", message, err)
+		}
+	}
+	for _, tc := range []struct {
+		name, message, want string
+	}{
+		{name: "missing", message: "feat(api): add endpoint", want: "requires an assigned work-item reference"},
+		{name: "not immediate", message: "feat(api): add [smt-123] endpoint", want: "requires an assigned work-item reference"},
+		{name: "wrong repository", message: "feat(api): [WEB-1] add endpoint", want: "not assigned to this repository"},
+		{name: "malformed", message: "feat(api): [bad/id] add endpoint", want: "invalid work-item reference"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidatePreparedMessage(tc.message, policy, allowed); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error=%v, want %q", err, tc.want)
+			}
+		})
+	}
+}

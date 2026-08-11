@@ -234,6 +234,76 @@ Run smt worktree add PATH --branch NAME [--dry-run]. The branch must be new in e
 	_ = worktreeAddCommand.MarkFlagRequired("branch")
 	worktreeCommand.AddCommand(worktreeAddCommand)
 
+	workspaceCommand := &cobra.Command{
+		Use:     "workspace",
+		Short:   "Prepare and submit feature workspaces",
+		GroupID: "workspace",
+		Args:    cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
+	}
+	var prepareBranch string
+	var prepareDryRun, prepareJSON bool
+	prepareCommand := nativeLeaf("prepare FEATURE PATH", "Prepare an assigned feature workspace", "", "workspace prepare", cobra.MatchAll(cobra.ExactArgs(2), requireNonEmptyFlag("branch", &prepareBranch)), func(args []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runPrepare(context.Background(), *cfg, root, newPrepareBeadsService(root), git.ExecRunner{}, args[0], args[1], prepareBranch, prepareDryRun, prepareJSON, out, errOut)
+	})
+	prepareCommand.Flags().StringVar(&prepareBranch, "branch", "", "new feature branch name")
+	prepareCommand.Flags().BoolVar(&prepareDryRun, "dry-run", false, "resolve and print the preparation plan without changing state")
+	prepareCommand.Flags().BoolVar(&prepareJSON, "json", false, "write JSON output")
+	_ = prepareCommand.MarkFlagRequired("branch")
+	workspaceCommand.AddCommand(prepareCommand)
+	var submitReady, submitDryRun, submitJSON bool
+	submitCommand := nativeLeaf("submit FEATURE", "Submit prepared workspace branches", "", "workspace submit", cobra.MatchAll(cobra.ExactArgs(1)), func(args []string, logger *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runWorkspaceSubmit(context.Background(), *cfg, root, args[0], git.ExecRunner{}, submitReady, submitDryRun, submitJSON, out, errOut, logger)
+	})
+	submitCommand.Long = `Submit only assigned commits from a prepared workspace.
+
+Children are pushed before the root. An existing open PR/MR is reused when its
+source and target branches match; otherwise SMT creates a draft. --ready opts
+into ready-for-review. A missing provider token still permits Git pushes and
+prints copy-ready review handoff content.`
+	submitCommand.Flags().BoolVar(&submitReady, "ready", false, "create or promote reviews as ready for review")
+	submitCommand.Flags().BoolVar(&submitDryRun, "dry-run", false, "plan without pushing or creating reviews")
+	submitCommand.Flags().BoolVar(&submitJSON, "json", false, "write JSON output")
+	workspaceCommand.AddCommand(submitCommand)
+
+	remoteCommand := &cobra.Command{
+		Use:     "remote",
+		Short:   "Manage provider-backed remotes",
+		GroupID: "workspace",
+		Long:    "Provision empty GitHub or GitLab projects and wire their SSH remotes after every configured target is available. Tokens are read only from SMT_GITHUB_TOKEN and SMT_GITLAB_TOKEN.",
+		Args:    cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
+	}
+	var provisionDryRun, provisionJSON bool
+	provisionCommand := nativeLeaf("provision", "Provision and wire provider projects", "", "remote provision", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runRemoteProvision(context.Background(), *cfg, root, git.ExecRunner{}, provisionDryRun, provisionJSON, out, errOut)
+	})
+	provisionCommand.Long = `Provision every configured repository project in child-first order.
+
+Projects must be fully qualified and default to private visibility. Existing
+projects are reused only when their identity and SSH/web URLs are compatible.
+Provider discovery and creation complete before smt.yaml, .gitmodules, or Git
+origins are changed. --dry-run performs no provider creation or local wiring.`
+	provisionCommand.Flags().BoolVar(&provisionDryRun, "dry-run", false, "inspect the provision plan without creating or wiring")
+	provisionCommand.Flags().BoolVar(&provisionJSON, "json", false, "write JSON output")
+	remoteCommand.AddCommand(provisionCommand)
+
 	hooksCommand := &cobra.Command{
 		Use:     "hooks",
 		Short:   "Manage workspace Git hooks",
@@ -273,7 +343,18 @@ Run smt worktree add PATH --branch NAME [--dry-run]. The branch must be new in e
 		}
 		return runDoctor(context.Background(), cfg, git.ExecRunner{}, out, errOut)
 	})
-	doctorCommand.Long = "Check repository, hook, tool, and credential readiness with safe remediation."
+	doctorCommand.Long = `Check local readiness as a repository-first tree.
+
+Each repository contains worktree, hook, remote, and provider readiness. Tools
+and credentials are shown as separate roots. READY means all checks passed,
+WARN means work can continue with a non-blocking issue, and ERROR means a
+required local check failed. A worktree is the Git checkout SMT inspects; a
+hook is the commit-msg validation installed in that checkout; a remote is the
+configured Git destination; a provider is the optional GitHub or GitLab
+project; and a credential is the environment token used for provider APIs.
+
+Warnings and errors include their remediation below the affected node. Output
+is safe for terminals, redirected logs, and NO_COLOR environments.`
 
 	var validateConfig string
 	validateCommand := nativeLeaf("validate-message FILE", "Validate a commit message", "developer-tools", "validate-message", cobra.ExactArgs(1), func(args []string, _ *logrus.Logger) int {
@@ -392,7 +473,7 @@ Run smt worktree add PATH --branch NAME [--dry-run]. The branch must be new in e
 	})
 	releaseCheckCommand.Flags().BoolVar(&releaseCheckJSON, "json", false, "write JSON output")
 	releaseCommand.AddCommand(releaseCheckCommand)
-	root.AddCommand(newCommand, applyCommand, pushCommand, worktreeCommand, hooksCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
+	root.AddCommand(newCommand, applyCommand, pushCommand, worktreeCommand, workspaceCommand, remoteCommand, hooksCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
 	return root
 }
 
@@ -749,8 +830,20 @@ func runValidateMessage(configPath, path string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "configuration error: %v\n", err)
 		return exitInternal
 	}
-	if err := commit.ValidateMessage(string(message), commit.Policy{Types: cfg.Commit.Types, Scopes: cfg.Commit.Scopes}); err != nil {
-		fmt.Fprintln(errOut, err)
+	policy := commit.Policy{Types: cfg.Commit.Types, Scopes: cfg.Commit.Scopes}
+	allowed, prepared, preparedErr := preparedCommitReferences(context.Background(), configPath, git.ExecRunner{})
+	if preparedErr != nil {
+		fmt.Fprintf(errOut, "prepared workspace validation: %v\n", preparedErr)
+		return exitValidation
+	}
+	var validationErr error
+	if prepared {
+		validationErr = commit.ValidatePreparedMessage(string(message), policy, allowed)
+	} else {
+		validationErr = commit.ValidateMessage(string(message), policy)
+	}
+	if validationErr != nil {
+		fmt.Fprintln(errOut, validationErr)
 		return exitValidation
 	}
 	fmt.Fprintln(out, "valid commit message")
@@ -824,7 +917,7 @@ func runDoctor(ctx context.Context, cfg *config.Config, runner git.Runner, out, 
 		fmt.Fprintf(errOut, "doctor: %v\n", err)
 		return exitInternal
 	}
-	renderDoctor(out, result)
+	renderDoctor(out, *cfg, result)
 	for _, check := range result.Checks {
 		if check.Status == "error" {
 			return exitValidation
@@ -900,79 +993,8 @@ func renderStatus(out io.Writer, result statusOutput) {
 	printSteps(out, steps)
 }
 
-func renderDoctor(out io.Writer, result operations.Result) {
-	label := "OK"
-	for _, check := range result.Checks {
-		if check.Status == "error" {
-			label = "ERROR"
-			break
-		}
-		if check.Status == "warning" {
-			label = "WARN"
-		}
-	}
-	fmt.Fprintf(out, "DOCTOR: %s\n", label)
-	missingSMT, missingLefthook := false, false
-	for _, check := range result.Checks {
-		if check.Status == "error" && check.ID == "tool:smt" {
-			missingSMT = true
-		}
-		if check.Status == "error" && check.ID == "tool:lefthook" {
-			missingLefthook = true
-		}
-	}
-	groups := []struct {
-		name  string
-		match func(operations.Check) bool
-	}{
-		{"REPOSITORIES", func(check operations.Check) bool { return strings.HasPrefix(check.ID, "repo:") }},
-		{"TOOLS", func(check operations.Check) bool { return check.ID == "git" || strings.HasPrefix(check.ID, "tool:") }},
-		{"HOOKS", func(check operations.Check) bool { return strings.HasPrefix(check.ID, "hook:") }},
-		{"CREDENTIALS", func(check operations.Check) bool { return strings.HasPrefix(check.ID, "token:") }},
-	}
-	steps := map[string]bool{}
-	for _, group := range groups {
-		var found bool
-		for _, check := range result.Checks {
-			if !group.match(check) {
-				continue
-			}
-			if !found {
-				fmt.Fprintln(out, group.name)
-				found = true
-			}
-			message := check.Message
-			if check.Status == "error" && strings.HasPrefix(check.ID, "hook:") {
-				message = "hook inspection failed"
-			}
-			fmt.Fprintf(out, "%s %s - %s\n", checkLabel(check.Status), check.ID, message)
-			if check.Status == "ok" {
-				continue
-			}
-			switch {
-			case strings.HasPrefix(check.ID, "hook:") && strings.Contains(check.Message, "absent") && !missingSMT && !missingLefthook:
-				steps["run smt hooks install to install missing commit-msg hooks"] = true
-			case strings.HasPrefix(check.ID, "hook:") && strings.Contains(check.Message, "unmanaged"):
-				steps["custom commit-msg hooks are never overwritten; resolve them manually before smt hooks install"] = true
-			case strings.HasPrefix(check.ID, "tool:lefthook"):
-				steps["install lefthook and rerun smt doctor"] = true
-			case check.ID == "tool:smt":
-				steps["from the SMT source checkout, run task build then export PATH=\"$PWD/bin:$PATH\"; return to the target workspace and rerun smt doctor"] = true
-			case strings.HasPrefix(check.ID, "token:"):
-				steps["set SMT_"+strings.ToUpper(strings.TrimPrefix(check.ID, "token:"))+"_TOKEN before provider operations"] = true
-			default:
-				steps["inspect the affected repository locally"] = true
-			}
-		}
-	}
-	printSteps(out, steps)
-}
-
-func checkLabel(status string) string {
-	if status == "warning" {
-		return "WARN"
-	}
-	return strings.ToUpper(status)
+func renderDoctor(out io.Writer, cfg config.Config, result operations.Result) {
+	renderDoctorReport(out, operations.BuildDoctorReport(cfg, result))
 }
 
 func printSteps(out io.Writer, set map[string]bool) {
@@ -987,6 +1009,187 @@ func printSteps(out io.Writer, set map[string]bool) {
 	fmt.Fprintln(out, "next steps:")
 	for _, step := range steps {
 		fmt.Fprintf(out, "- %s\n", step)
+	}
+}
+
+func renderDoctorReport(out io.Writer, report operations.DoctorReport) {
+	fmt.Fprintf(out, "DOCTOR %s %s\n", doctorMark(report.Status), doctorOverall(report.Status))
+	hookInstallReady := true
+	for _, node := range report.Tools {
+		if (node.ID == "tool:smt" || node.ID == "tool:lefthook") && node.Status != operations.DoctorStatusOK {
+			hookInstallReady = false
+		}
+	}
+	if len(report.Repositories) > 0 {
+		fmt.Fprintln(out, "workspace")
+		renderDoctorNodes(out, report.Repositories, "", hookInstallReady)
+	}
+	if len(report.Tools) > 0 {
+		fmt.Fprintln(out, "tools")
+		renderDoctorNodes(out, report.Tools, "", hookInstallReady)
+	}
+	if len(report.Credentials) > 0 {
+		fmt.Fprintln(out, "credentials")
+		renderDoctorNodes(out, report.Credentials, "", hookInstallReady)
+	}
+	if len(report.Unmapped) > 0 {
+		fmt.Fprintln(out, "unmapped")
+		renderDoctorNodes(out, report.Unmapped, "", hookInstallReady)
+	}
+}
+
+func renderDoctorNodes(out io.Writer, nodes []operations.DoctorNode, prefix string, hookInstallReady bool) {
+	for i, node := range nodes {
+		last := i == len(nodes)-1
+		connector := "├─ "
+		continuation := "│  "
+		if last {
+			connector = "└─ "
+			continuation = "   "
+		}
+		fmt.Fprintf(out, "%s%s%s\n", prefix, connector, doctorNodeLabel(node))
+		if len(node.Children) > 0 {
+			renderDoctorNodes(out, node.Children, prefix+continuation, hookInstallReady)
+		}
+		if remediation := doctorRemediation(node, hookInstallReady); remediation != "" {
+			fmt.Fprintf(out, "%s%s└─ fix: %s\n", prefix, continuation, remediation)
+		}
+	}
+}
+
+func doctorOverall(status string) string {
+	switch status {
+	case operations.DoctorStatusError:
+		return "ERROR"
+	case operations.DoctorStatusWarning:
+		return "WARN"
+	default:
+		return "READY"
+	}
+}
+
+func doctorMark(status string) string {
+	switch status {
+	case operations.DoctorStatusError:
+		return "✗"
+	case operations.DoctorStatusWarning:
+		return "!"
+	default:
+		return "✓"
+	}
+}
+
+func doctorNodeLabel(node operations.DoctorNode) string {
+	mark := doctorMark(node.Status)
+	switch {
+	case strings.HasPrefix(node.ID, "repo:") && !strings.Contains(strings.TrimPrefix(node.ID, "repo:"), ":"):
+		return strings.TrimPrefix(node.ID, "repo:") + " " + mark + " " + doctorState(node.Status)
+	case strings.HasSuffix(node.ID, ":worktree"):
+		if node.Status == operations.DoctorStatusOK {
+			return "worktree " + mark + " initialized"
+		}
+		return "worktree " + mark + " not initialized"
+	case strings.HasPrefix(node.ID, "hook:"):
+		return "hook " + mark + " " + doctorHookState(node.Message)
+	case strings.HasPrefix(node.ID, "remote:"):
+		if node.Status == operations.DoctorStatusOK {
+			return "remote " + mark + " configured"
+		}
+		return "remote " + mark + " not configured"
+	case strings.HasPrefix(node.ID, "provider:"):
+		return "provider " + mark + " " + doctorProviderState(node.Message)
+	case node.ID == "git" || strings.HasPrefix(node.ID, "tool:"):
+		return doctorToolID(node.ID) + " " + mark + " " + doctorToolState(node.Message)
+	case strings.HasPrefix(node.ID, "token:"):
+		provider := strings.TrimPrefix(node.ID, "token:")
+		state := "token set"
+		if node.Status != operations.DoctorStatusOK {
+			state = "token missing"
+		}
+		return provider + " " + mark + " " + state
+	default:
+		return "check " + node.ID + " " + mark + " " + doctorState(node.Status)
+	}
+}
+
+func doctorState(status string) string {
+	switch status {
+	case operations.DoctorStatusError:
+		return "error"
+	case operations.DoctorStatusWarning:
+		return "warning"
+	default:
+		return "ready"
+	}
+}
+
+func doctorHookState(message string) string {
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "unmanaged"):
+		return "unmanaged"
+	case strings.Contains(lower, "absent"):
+		return "absent"
+	case strings.Contains(lower, "could not"):
+		return "inspection failed"
+	default:
+		return "current"
+	}
+}
+
+func doctorProviderState(message string) string {
+	const marker = " provider "
+	if strings.Contains(message, "local-only") {
+		return "local-only"
+	}
+	parts := strings.SplitN(message, marker, 2)
+	if len(parts) != 2 {
+		return "configured"
+	}
+	value := strings.TrimSuffix(parts[1], " is configured")
+	value = strings.Replace(value, " project ", " · ", 1)
+	return value
+}
+
+func doctorToolID(id string) string { return strings.TrimPrefix(id, "tool:") }
+
+func doctorToolState(message string) string {
+	if strings.HasSuffix(message, "is available") {
+		return "available"
+	}
+	return "not available"
+}
+
+func doctorRemediation(node operations.DoctorNode, hookInstallReady bool) string {
+	if node.Status == operations.DoctorStatusOK {
+		return ""
+	}
+	if strings.HasPrefix(node.ID, "repo:") && !strings.Contains(strings.TrimPrefix(node.ID, "repo:"), ":") {
+		return ""
+	}
+	lower := strings.ToLower(node.Message)
+	switch {
+	case strings.HasPrefix(node.ID, "hook:") && strings.Contains(lower, "absent"):
+		if !hookInstallReady {
+			return "install smt and lefthook before installing hooks"
+		}
+		return "run smt hooks install"
+	case strings.HasPrefix(node.ID, "hook:") && strings.Contains(lower, "unmanaged"):
+		return "resolve the existing hook before running smt hooks install"
+	case strings.HasPrefix(node.ID, "hook:"):
+		return "inspect the commit-msg hook locally"
+	case strings.HasPrefix(node.ID, "remote:"):
+		return "configure remote.url before remote operations"
+	case strings.HasPrefix(node.ID, "token:"):
+		return "set SMT_" + strings.ToUpper(strings.TrimPrefix(node.ID, "token:")) + "_TOKEN before provider operations"
+	case node.ID == "tool:lefthook":
+		return "install lefthook and rerun smt doctor"
+	case node.ID == "tool:smt":
+		return "run task build from the SMT source checkout, add bin/ to PATH, and rerun smt doctor"
+	case node.ID == "git" || strings.HasPrefix(node.ID, "tool:"):
+		return "install the missing tool and rerun smt doctor"
+	default:
+		return "inspect the affected repository locally"
 	}
 }
 

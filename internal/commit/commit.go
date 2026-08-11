@@ -3,11 +3,15 @@ package commit
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	conventionalcommits "github.com/leodido/go-conventionalcommits"
 	"github.com/leodido/go-conventionalcommits/parser"
 )
+
+var preparedHeaderPattern = regexp.MustCompile(`^[^:\s(]+\([^)]*\)!?:\s+\[([^\]\s]+)\]\s+\S`)
+var preparedReferencePattern = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*|[A-Z][A-Z0-9]+-[0-9]+)$`)
 
 // Policy contains the configured commit types and scopes.
 type Policy struct {
@@ -46,6 +50,35 @@ func ValidateMessage(message string, policy Policy) error {
 		}
 	}
 	return nil
+}
+
+// ValidatePreparedMessage applies normal commit policy plus one assigned
+// reference immediately after the conventional prefix.
+func ValidatePreparedMessage(message string, policy Policy, allowed []string) error {
+	if err := ValidateMessage(message, policy); err != nil {
+		return err
+	}
+	reference, err := WorkItemReference(message)
+	if err != nil {
+		return err
+	}
+	if !contains(allowed, reference) {
+		return fmt.Errorf("work-item reference %q is not assigned to this repository", reference)
+	}
+	return nil
+}
+
+// WorkItemReference extracts and validates the bracketed prepared-workspace ID.
+func WorkItemReference(message string) (string, error) {
+	firstLine := strings.SplitN(strings.TrimSuffix(strings.TrimSuffix(message, "\n"), "\r"), "\n", 2)[0]
+	match := preparedHeaderPattern.FindStringSubmatch(firstLine)
+	if len(match) != 2 {
+		return "", fmt.Errorf("prepared workspace commit requires an assigned work-item reference immediately after the conventional prefix")
+	}
+	if !preparedReferencePattern.MatchString(match[1]) {
+		return "", fmt.Errorf("invalid work-item reference")
+	}
+	return match[1], nil
 }
 
 func contains(values []string, value string) bool {

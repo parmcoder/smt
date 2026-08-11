@@ -90,6 +90,7 @@ type Repository struct {
 	Remote        Remote        `yaml:"remote"`
 	Provider      string        `yaml:"provider,omitempty"`
 	Project       string        `yaml:"project,omitempty"`
+	Visibility    string        `yaml:"visibility,omitempty"`
 	Scope         string        `yaml:"scope"`
 	Checks        []Check       `yaml:"-"`
 	Profiles      CheckProfiles `yaml:"-"`
@@ -141,6 +142,7 @@ func (r *Repository) UnmarshalYAML(value *yaml.Node) error {
 		Remote     Remote    `yaml:"remote"`
 		Provider   string    `yaml:"provider"`
 		Project    string    `yaml:"project"`
+		Visibility string    `yaml:"visibility"`
 		Scope      string    `yaml:"scope"`
 		Checks     yaml.Node `yaml:"checks"`
 	}
@@ -150,8 +152,8 @@ func (r *Repository) UnmarshalYAML(value *yaml.Node) error {
 	}
 	r.ID, r.Path = raw.ID, raw.Path
 	r.Component, r.Technology, r.Remote = raw.Component, raw.Technology, raw.Remote
-	r.Provider, r.Project, r.Scope = raw.Provider, raw.Project, raw.Scope
-	allowed := map[string]bool{"id": true, "path": true, "component": true, "technology": true, "remote": true, "provider": true, "project": true, "scope": true, "checks": true}
+	r.Provider, r.Project, r.Visibility, r.Scope = raw.Provider, raw.Project, raw.Visibility, raw.Scope
+	allowed := map[string]bool{"id": true, "path": true, "component": true, "technology": true, "remote": true, "provider": true, "project": true, "visibility": true, "scope": true, "checks": true}
 	for i := 0; i+1 < len(value.Content); i += 2 {
 		if !allowed[value.Content[i].Value] {
 			r.UnknownFields = append(r.UnknownFields, value.Content[i].Value)
@@ -269,6 +271,17 @@ func (c *Config) Validate(workspaceRoot string) error {
 		if repo.Provider != "" && repo.Project == "" {
 			return fmt.Errorf("repository %q provider requires project", repo.ID)
 		}
+		if repo.Visibility != "" && repo.Visibility != "private" && repo.Visibility != "public" {
+			return fmt.Errorf("repository %q visibility must be private or public", repo.ID)
+		}
+		if repo.Visibility != "" && repo.Provider == "" {
+			return fmt.Errorf("repository %q visibility requires provider", repo.ID)
+		}
+		if repo.Provider != "" {
+			if err := validateProjectIdentity(repo.Provider, repo.Project); err != nil {
+				return fmt.Errorf("repository %q: %w", repo.ID, err)
+			}
+		}
 		if err := validateComponent(repo); err != nil {
 			return fmt.Errorf("repository %q: %w", repo.ID, err)
 		}
@@ -300,6 +313,36 @@ func (c *Config) Validate(workspaceRoot string) error {
 		return fmt.Errorf("exactly one root repository with path . is required")
 	}
 	return c.validateContracts(root, seenRepositoryIDs(c.Repositories))
+}
+
+// EffectiveVisibility returns the provisioning default for a configured provider project.
+func (r Repository) EffectiveVisibility() string {
+	if r.Visibility == "" {
+		return "private"
+	}
+	return r.Visibility
+}
+
+var projectComponentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func validateProjectIdentity(provider, project string) error {
+	if strings.Contains(project, "://") || strings.TrimSpace(project) != project {
+		return fmt.Errorf("project must be a fully qualified provider path")
+	}
+	parts := strings.Split(project, "/")
+	minimum := 2
+	if provider == "github" && len(parts) != 2 {
+		return fmt.Errorf("github project must use owner/repository")
+	}
+	if len(parts) < minimum {
+		return fmt.Errorf("%s project must include a namespace and repository", provider)
+	}
+	for _, part := range parts {
+		if !projectComponentPattern.MatchString(part) {
+			return fmt.Errorf("project must contain only qualified path components")
+		}
+	}
+	return nil
 }
 
 func (c *Config) validateWorkflow() error {

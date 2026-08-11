@@ -18,6 +18,12 @@ temporary-local-Git integration tests under `internal/` and `cmd/smt/`.
 scope, make architecture decisions that were not assigned, or spawn another
 agent.
 
+When working in a prepared workspace, every commit subject must be exactly
+`type(scope): [WORK-ID] summary`. The bracketed ID is immediately after the
+conventional prefix and must be one of the repository's assigned Beads IDs or
+Jira aliases in the prepared workspace manifest. The manifest is authoritative
+for repository ownership and integration references.
+
 Preserve the SMT invariants: no secret or token logging, no credential store,
 context-aware I/O, Git argument arrays rather than shell strings, all-or-
 nothing checkout after preflight, submit preflight before commits, submodules

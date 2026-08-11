@@ -80,9 +80,34 @@ repositories:
       url: git@github.com:example/web-app.git
 ```
 
-The generated `.gitmodules` records local bootstrap URLs. SMT pushes through
-`remote.url` but does not yet synchronize those values into `.gitmodules` for
-fresh external clones.
+The generated `.gitmodules` initially records local bootstrap URLs. For
+provider-backed delivery, declare exact projects and let SMT discover/create
+and wire them:
+
+```yaml
+providers:
+  github:
+    api_base_url: https://api.github.com/
+repositories:
+  - id: repo
+    path: .
+    provider: github
+    project: acme/platform
+    scope: repo
+    visibility: private
+```
+
+```sh
+export SMT_GITHUB_TOKEN=...
+bin/smt remote provision --dry-run
+bin/smt remote provision --json
+```
+
+Provisioning uses child-first provider discovery/creation and private
+visibility by default. It refuses incompatible existing projects or occupied
+local origins, never deletes remote projects, and only updates `smt.yaml`,
+`.gitmodules`, and Git origins after every target is available. Tokens are read
+from `SMT_GITHUB_TOKEN` or `SMT_GITLAB_TOKEN` and are never written to disk.
 
 ## Discover commands and enable completion
 
@@ -124,6 +149,60 @@ creating the root worktree and then nested child worktrees. If an unexpected
 child creation fails, SMT reports the created and pending paths for manual
 recovery; it does not delete worktrees automatically.
 
+## Prepare an assigned feature workspace
+
+Resolve one active Beads feature and prepare its synchronized workspace before
+starting implementation:
+
+```sh
+smt workspace prepare smt-feature ../platform-feature --branch feature/demo --dry-run
+smt workspace prepare smt-feature ../platform-feature --branch feature/demo
+```
+
+Preparation selects direct active dependency-ready children with exactly one
+matching `repo:<id>` label, groups them in configuration order, and records
+their titles, descriptions, designs, acceptance criteria, Beads IDs, and
+optional Jira-shaped aliases. It creates the root worktree before children and
+writes `.smt/runs/smt-feature.json` only after all worktrees succeed. The run
+manifest is ignored, contains no credentials, and is the authority for
+repository ownership and accepted commit references.
+
+Inside that prepared workspace, commit subjects must use:
+
+```text
+feat(api): [smt-123] add endpoint
+fix(web): [WEB-456] handle empty response
+```
+
+The bracketed ID is mandatory immediately after the conventional prefix.
+Child commits accept only their assigned Beads ID or Jira alias. Root
+integration/gitlink commits may additionally use the feature ID and assigned
+root-task IDs. Missing, malformed, wrong-repository, ambiguous, or corrupt
+manifest state fails closed with safe remediation. Outside a prepared
+workspace, normal configured conventional-commit validation remains unchanged.
+
+## Submit a prepared workspace
+
+```sh
+bin/smt workspace submit smt-feature --dry-run --json
+bin/smt workspace submit smt-feature
+bin/smt workspace submit smt-feature --ready
+```
+
+Submission selects only assigned commits ahead of each manifest base and
+requires clean attached worktrees, matching configured origins, reachable
+target branches, valid assigned references, and passing `submit` checks before
+the first push. Child repositories are pushed before the root; a changed child
+must have its gitlink integrated by a root commit. Pushes never force-update or
+roll back remote state.
+
+With a configured provider token, SMT reuses an open review with the same
+source/target branches or creates a draft PR/MR. `--ready` creates or promotes
+a ready review. If a token is absent, the push still succeeds and the command
+prints a provider creation link with copy-ready title/body content and exact
+`Closes \`WORK-ID\`` lines. A root review waits until selected child review
+URLs are available. Repeating the command reuses matching open reviews.
+
 ## Inspect and install workspace hooks
 
 ```sh
@@ -145,10 +224,43 @@ form is for automation and returns the repository entries, profiles, and
 contract counts. When no profiles are configured, the human report says
 `profiles: none`; JSON retains `profiles: []`.
 
-`doctor` is read-only and groups repository, hook, tool, and credential
-readiness. It always checks Git, bare `smt`, and Lefthook, reports token
-presence only, never token values, and gives the build/PATH or
-Lefthook-install remediation before suggesting hook installation.
+`doctor` is read-only and renders a repository-first readiness tree. Each
+configured repository is expanded in configuration order with `worktree`,
+`hook`, `remote`, and `provider` nodes; `tools` and `credentials` are separate
+roots. It reports token presence only, never token values, and places the
+remediation directly beneath the affected warning or error. Missing remotes
+and provider tokens are warnings; absent providers are valid local-only state.
+
+For example, a safe redirected report is shaped like this:
+
+```text
+DOCTOR ! WARN
+workspace
+├─ repo ✓ ready
+│  ├─ worktree ✓ initialized
+│  ├─ hook ✓ current
+│  ├─ remote ✓ configured
+│  └─ provider ✓ github · acme/repo
+└─ api ! warning
+   ├─ worktree ✓ initialized
+   ├─ hook ! absent
+   │  └─ fix: run smt hooks install
+   ├─ remote ! not configured
+   │  └─ fix: configure remote.url before remote operations
+   └─ provider ✓ local-only
+tools
+└─ git ✓ available
+credentials
+└─ github ! token missing
+   └─ fix: set SMT_GITHUB_TOKEN before provider operations
+```
+
+`READY` means all checks passed, `WARN` means work can continue with a
+non-blocking issue, and `ERROR` means a required local check failed. A
+worktree is the Git checkout SMT inspects; a hook is the commit-msg validation
+installed there; a remote is the configured Git destination; a provider is the
+optional GitHub/GitLab project; and a credential is the environment token used
+for provider APIs. `NO_COLOR` and redirected output remain deterministic.
 
 `task build` creates `bin/smt` in the SMT source checkout; it does not put bare
 `smt` on `PATH`. Keep that inherited PATH while returning to the target

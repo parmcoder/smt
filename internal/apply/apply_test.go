@@ -227,6 +227,15 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 			t.Fatalf("published %s: %v", path, err)
 		}
 	}
+	for _, path := range []string{"AGENTS.md", "agents/work_manager.toml", "agents/web_worker.toml", "prompts/build.md"} {
+		contents, err := os.ReadFile(filepath.Join(destination, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(contents), "type(scope): [WORK-ID] summary") || !strings.Contains(string(contents), "prepared workspace") {
+			t.Fatalf("generated contract %s=%q", path, contents)
+		}
+	}
 }
 
 func TestServiceRegistersSubmodulesAsInitialized(t *testing.T) {

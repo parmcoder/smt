@@ -106,6 +106,38 @@ repositories:
 	}
 }
 
+func TestRepositoryVisibilityAndQualifiedProjects(t *testing.T) {
+	valid := `version: 1
+commit: {types: [feat], scopes: [repo, api, platform]}
+repositories:
+  - {id: repo, path: ., provider: github, project: acme/api, visibility: public, scope: repo}
+  - {id: platform, path: platform, provider: gitlab, project: acme/group/api, visibility: private, scope: platform}
+  - {id: api, path: api, scope: api}
+`
+	cfg, err := Load(writeConfig(t, valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Repositories[0].Visibility; got != "public" {
+		t.Fatalf("visibility=%q", got)
+	}
+	if got := cfg.Repositories[1].EffectiveVisibility(); got != "private" {
+		t.Fatalf("effective visibility=%q", got)
+	}
+	for name, raw := range map[string]string{
+		"github project needs owner":     strings.Replace(valid, "project: acme/api", "project: api", 1),
+		"gitlab project needs namespace": strings.Replace(valid, "project: acme/group/api", "project: api", 1),
+		"invalid visibility":             strings.Replace(valid, "visibility: public", "visibility: internal", 1),
+		"visibility needs provider":      strings.Replace(valid, "provider: github, project: acme/api, visibility: public", "project: acme/api, visibility: public", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, raw)); err == nil {
+				t.Fatal("invalid provider configuration accepted")
+			}
+		})
+	}
+}
+
 func TestLoadWorkspaceScaffoldConfiguration(t *testing.T) {
 	yaml := `version: 1
 workspace:
