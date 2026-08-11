@@ -8,7 +8,7 @@ tags:
   - git
   - developer-experience
 created: 2026-07-16
-updated: 2026-08-09
+updated: 2026-08-11
 ---
 # SMT — Product Concept
 
@@ -25,23 +25,27 @@ flowchart LR
     B --> C[smt apply PATH]
     C --> D[Configure remote URLs]
     D --> E[status or doctor]
-    E --> F[Run named check profile]
-    F --> G[Push children then root]
-    F --> H[Create synchronized worktree]
-    F --> I[Validate CI contracts]
-    I --> J[Plan guarded literal bump]
-    J --> K[Apply only with explicit approval]
+    E --> F[Optionally install safe hooks]
+    F --> G[Run named check profile]
+    G --> H[Push children then root]
+    G --> I[Create synchronized worktree]
+    G --> J[Validate CI contracts]
+    J --> K[Plan guarded literal bump]
+    K --> L[Apply only with explicit approval]
 ```
 
 Safety is the product: argument-array execution, an explicit blueprint review
 before workspace creation, complete preflight before push/worktree side
 effects, child-first pushes, root-first worktree creation, path containment,
-harmless OS metadata filtering, and no credential persistence. Cobra groups
+harmless OS metadata filtering, no credential persistence, and no automatic
+hook overwrite. A workspace hook install is all-repository-preflighted, then
+root-first; it never forces, overwrites an unmanaged hook, or rolls back an
+earlier install. Cobra groups
 the discoverable command tree into Getting Started, Workspace, Review
 Workflow, and Developer Tools; help and generated shell completion work
 without workspace configuration. The current CLI covers blueprint creation and
-application, inspection, checks, contracts, CI audits, guarded contract bumps,
-configured pushes, linked worktrees, local work/review workflow, and release
+application, inspection, safe hook installation, checks, contracts, CI audits,
+guarded contract bumps, configured pushes, linked worktrees, local work/review workflow, and release
 readiness. The release path is deliberately split: `release:build` makes four
 local archives and checksums, while a clean `release:tag` creates and pushes an
 annotated version tag. GitHub Actions now publishes a GitHub Release from that
@@ -52,6 +56,12 @@ release automation does not exist. Remote repository creation, external-clone
 submodule URL synchronization, submit orchestration, cloud or database actions,
 deployment, rollback, and credential storage remain outside the current product
 boundary.
+
+Human `status` and `doctor` reports emphasize the next safe action. `status
+--json` is intentionally separate for automation. Both may say that a
+`commit-msg` hook is absent, current, or unmanaged; an unmanaged hook is a
+human decision, never something SMT replaces. Generated `lefthook.yml` is a
+scaffold, not proof that Lefthook has run or that a hook was installed.
 
 ## Related
 

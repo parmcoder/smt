@@ -30,6 +30,17 @@ func TestDoctorReportsMissingGitTool(t *testing.T) {
 	}
 }
 
+func TestDoctorAlwaysChecksCoreToolsWithoutProfiles(t *testing.T) {
+	var lookedUp []string
+	doctor := NewDoctor(config.Config{}, func(name string) (string, error) { lookedUp = append(lookedUp, name); return "/tools/" + name, nil }, func(string) bool { return true }, func(context.Context, string) (git.State, error) { return git.State{}, nil })
+	if _, err := doctor.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(lookedUp, ","), "git,smt,lefthook"; got != want {
+		t.Fatalf("lookups=%q want=%q", got, want)
+	}
+}
+
 func TestDoctorReportsMissingRepositoryWorktree(t *testing.T) {
 	cfg := config.Config{Repositories: []config.Repository{{ID: "api", Path: "apis"}}}
 	doctor := NewDoctor(
@@ -49,7 +60,7 @@ func TestDoctorReportsMissingRepositoryWorktree(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	want := Check{ID: "repo:api:worktree", Status: "error", Message: "repository api is not an initialized Git worktree"}
-	if !reflect.DeepEqual(result.Checks[1], want) {
+	if !reflect.DeepEqual(result.Checks[3], want) {
 		t.Fatalf("repository check = %#v, want %#v", result.Checks[1], want)
 	}
 }
@@ -75,7 +86,7 @@ func TestDoctorReportsProviderTokenPresenceWithoutExposingValue(t *testing.T) {
 	if strings.Contains(string(encoded), secret) {
 		t.Fatalf("result contains token value: %s", encoded)
 	}
-	if got, want := result.Checks[3], (Check{ID: "token:gitlab", Status: "error", Message: "SMT_GITLAB_TOKEN is not set"}); got != want {
+	if got, want := result.Checks[5], (Check{ID: "token:gitlab", Status: "error", Message: "SMT_GITLAB_TOKEN is not set"}); got != want {
 		t.Fatalf("token check = %#v, want %#v", got, want)
 	}
 }
@@ -105,7 +116,7 @@ func TestDoctorDeduplicatesConfiguredProviderAndProfileExecutables(t *testing.T)
 	if _, err := doctor.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	want := []string{"git", "go", "task"}
+	want := []string{"git", "smt", "lefthook", "go", "task"}
 	if !reflect.DeepEqual(lookedUp, want) {
 		t.Fatalf("looked up = %#v, want %#v", lookedUp, want)
 	}
@@ -139,10 +150,10 @@ func TestDoctorOrderingAndJSONAreDeterministic(t *testing.T) {
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatalf("JSON is not deterministic: %s != %s", firstJSON, secondJSON)
 	}
-	if got, want := first.Checks[1].ID, "repo:z:worktree"; got != want {
+	if got, want := first.Checks[3].ID, "repo:z:worktree"; got != want {
 		t.Fatalf("first repository check = %q, want %q", got, want)
 	}
-	if got, want := first.Checks[2].ID, "repo:a:worktree"; got != want {
+	if got, want := first.Checks[4].ID, "repo:a:worktree"; got != want {
 		t.Fatalf("second repository check = %q, want %q", got, want)
 	}
 }
@@ -174,7 +185,7 @@ func TestDoctorReportsCommitMsgHookStateForEveryRepository(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	want := []Check{
-		{ID: "hook:absent:commit-msg", Status: "ok", Message: "repository absent commit-msg hook is absent"},
+		{ID: "hook:absent:commit-msg", Status: "warning", Message: "repository absent commit-msg hook is absent"},
 		{ID: "hook:current:commit-msg", Status: "ok", Message: "repository current commit-msg hook is current"},
 		{ID: "hook:unmanaged:commit-msg", Status: "warning", Message: "repository unmanaged commit-msg hook is unmanaged"},
 	}
@@ -185,6 +196,23 @@ func TestDoctorReportsCommitMsgHookStateForEveryRepository(t *testing.T) {
 	}
 	if !reflect.DeepEqual(inspected, []string{"absent", "current", "unmanaged"}) {
 		t.Fatalf("inspected = %#v, want every repository in order", inspected)
+	}
+}
+
+func TestDoctorTreatsAbsentCommitMsgHookAsWarning(t *testing.T) {
+	cfg := config.Config{Repositories: []config.Repository{{ID: "repo", Path: "."}}}
+	doctor := NewDoctorWithHookInspector(cfg,
+		func(string) (string, error) { return "/usr/bin/git", nil },
+		func(string) bool { return true },
+		func(context.Context, string) (git.State, error) { return git.State{Initialized: true}, nil },
+		func(string) (hooks.HookStatus, error) { return hooks.HookAbsent, nil },
+	)
+	result, err := doctor.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := result.Checks[4], (Check{ID: "hook:repo:commit-msg", Status: "warning", Message: "repository repo commit-msg hook is absent"}); got != want {
+		t.Fatalf("hook check=%#v, want=%#v", got, want)
 	}
 }
 
@@ -216,7 +244,7 @@ func TestDoctorHookInspectionIsReadOnlyAndHookErrorsAreTokenSafe(t *testing.T) {
 	if strings.Contains(string(encoded), secret) {
 		t.Fatalf("result contains hook error value: %s", encoded)
 	}
-	if got := result.Checks[2]; got.Status != "error" || got.Message != "repository repo commit-msg hook could not be inspected" {
+	if got := result.Checks[4]; got.Status != "error" || got.Message != "repository repo commit-msg hook could not be inspected" {
 		t.Fatalf("hook check = %#v, want token-safe inspection error", got)
 	}
 }

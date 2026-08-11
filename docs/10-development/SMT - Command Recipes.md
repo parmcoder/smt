@@ -8,13 +8,13 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-08-09
+updated: 2026-08-11
 ---
 # SMT — Command Recipes
 
-These examples assume Go plus Task are installed. Build first when using
-`bin/smt`; commands that inspect or operate an existing workspace require a
-valid `smt.yaml`.
+These examples assume Go plus Task are installed. Build first in the SMT source
+checkout when using `bin/smt`; commands that inspect or operate an existing
+workspace require a valid `smt.yaml`.
 
 ## Create a platform workspace
 
@@ -49,6 +49,15 @@ already exist. With Mobile selected, it creates a Git-ready `mobile-app` shell,
 `.tool-versions` Flutter `3.44.9` pin—not application source. It does not
 invoke or require Flutter or its SDK, install dependencies, access the network,
 sign an app, or publish an app. It does not create remote repositories.
+
+Each created repository receives a scaffold-only `lefthook.yml` with top-level
+`no_auto_install: true` and `assert_lefthook_installed: true`. Its `commit-msg`
+entry calls bare `smt validate-message --config FILE {1}`, where `FILE` is the
+correct relative path to the root `smt.yaml`. `no_auto_install` prevents
+Lefthook from automatically installing or updating hooks when configuration
+changes; the assertion makes Git fail if Lefthook cannot be found, rather than
+silently skipping validation. Applying a blueprint does not execute Lefthook or
+install a Git hook.
 
 ## Human E2E Mobile review handoff
 
@@ -115,32 +124,95 @@ creating the root worktree and then nested child worktrees. If an unexpected
 child creation fails, SMT reports the created and pending paths for manual
 recovery; it does not delete worktrees automatically.
 
+## Inspect and install workspace hooks
+
+```sh
+# From the SMT source checkout.
+task build
+export PATH="$PWD/bin:$PATH"
+# Return to the target/generated workspace.
+cd ../platform
+smt doctor
+smt hooks install --dry-run
+smt hooks install
+smt status
+smt status --json
+```
+
+The normal `status` report is for people: it has an overall label, a repository
+table, configured profiles and contract counts, and safe next steps. Its JSON
+form is for automation and returns the repository entries, profiles, and
+contract counts. When no profiles are configured, the human report says
+`profiles: none`; JSON retains `profiles: []`.
+
+`doctor` is read-only and groups repository, hook, tool, and credential
+readiness. It always checks Git, bare `smt`, and Lefthook, reports token
+presence only, never token values, and gives the build/PATH or
+Lefthook-install remediation before suggesting hook installation.
+
+`task build` creates `bin/smt` in the SMT source checkout; it does not put bare
+`smt` on `PATH`. Keep that inherited PATH while returning to the target
+workspace. Both bare `smt` and Lefthook must remain available when Git runs a
+`commit-msg` hook. Use an equivalent durable PATH setup for an IDE, GUI client,
+or other launch environment; retain the bare-command design rather than
+replacing it with an absolute path. `smt hooks --help` repeats that both bare
+`smt` and Lefthook must be on `PATH`.
+
+For each configured repository, `commit-msg` is `absent` when no hook exists,
+`current` when it exactly matches a recognized historical SMT script or the
+reviewed Lefthook 2.1.10 dispatcher, and `unmanaged` when it is custom,
+lookalike, modified, symlinked, a directory, or another nonregular target. An
+absent hook is a warning, not a failed `doctor` run, when the required readiness
+checks pass. Unmanaged targets must be resolved manually first: SMT does not
+follow or replace them and has no force or chaining mode. An exact recognized
+legacy SMT hook is eligible for migration only when no `commit-msg.old` entry
+exists. Lefthook 2.1.10 may then preserve it as `commit-msg.old` while it
+installs its dispatcher. A current Lefthook dispatcher with an existing `.old`
+entry remains allowed.
+
+`hooks install` resolves `smt` and `lefthook` with `exec.LookPath`, then
+uses argument-array `git config --get core.hooksPath` in every initialized
+configured repository before any installer mutation. Any nonempty effective
+setting, including a relative one, blocks all installation as a custom hook-path
+policy; resolve it manually rather than forcing or resetting it. It then
+requires a regular eligible `commit-msg` target and a top-level `commit-msg`
+mapping in `lefthook.yml`, and runs `lefthook validate` in every repository
+using argument arrays. A symlink, directory, or other nonregular `commit-msg`
+target is unmanaged and blocks the plan. It completes all root-and-child
+preflight before installing anything, then runs argument-array
+`lefthook install commit-msg` root-first. `--dry-run` performs that preflight
+and prints the configured repository plan without changing hooks. A successful
+real install prints installed repository IDs. If a later real install fails,
+use its installed and pending IDs for manual recovery; SMT does not force,
+reset a collision, use a shell, overwrite unmanaged hooks, or undo an earlier
+install.
+
+For an exact legacy SMT `commit-msg` hook, preflight also checks
+`commit-msg.old`. If any entry exists—including a symlink—both the real install
+and `--dry-run` reject the whole plan before root-first execution. Lefthook
+2.1.10 would refuse this migration without `--force`; resolve the collision
+manually instead. The collision error does not disclose paths or hook contents.
+An existing `.old` beside a current Lefthook dispatcher is allowed.
+
+Fixture evidence is narrow: a clean fixture installed all configured hooks and
+accepted a normal commit. In a deliberate negative test, removing the
+installer-provided Lefthook binary while retaining `smt` on PATH caused Git to
+reject an otherwise valid commit with the assertion error. Treat this as proof
+of the assertion path, not as a full human E2E result.
+
 ## Build and validate
 
 ```sh
+# From the SMT source checkout.
 task build                         # creates bin/smt
 task verify                        # runs go test ./...
-bin/smt validate-message .git/COMMIT_EDITMSG
-bin/smt status
-bin/smt status --json
-bin/smt doctor
+export PATH="$PWD/bin:$PATH"
+smt validate-message .git/COMMIT_EDITMSG
+smt validate-message --config ../platform/smt.yaml .git/COMMIT_EDITMSG
 ```
 
-`validate-message FILE` expects a complete commit-message file. `status` reads
-configured repositories and contracts; `doctor` checks local prerequisites.
-
-## Hooks and commit task
-
-These tasks require Task and Lefthook. Build `bin/smt` first; `task setup`
-installs the Lefthook `commit-msg` hook, which delegates to SMT validation.
-
-```sh
-task hooks:install
-task setup
-task commit:validate -- .git/COMMIT_EDITMSG
-```
-
-`commit:validate` expects an existing complete commit-message file.
+`validate-message FILE` expects a complete commit-message file. `--config`
+selects its configuration file and is useful from a child repository hook.
 
 ## Checks and contracts
 

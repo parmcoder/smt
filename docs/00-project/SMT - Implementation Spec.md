@@ -10,7 +10,7 @@ tags:
   - monorepo
   - developer-experience
 created: 2026-07-15
-updated: 2026-08-09
+updated: 2026-08-11
 ---
 # SMT — Sanovy Mono Tool
 
@@ -45,12 +45,18 @@ Workflow, and Developer Tools. Implemented commands are:
   repository at the same destination layout. It rejects dirty, detached,
   uninitialized, branch-colliding, gitlink-mismatched, or existing-destination
   state.
-- `smt validate-message FILE` — validate one complete conventional commit
-  message against the configured types and scopes.
+- `smt hooks install [--dry-run]` — require bare `smt` and `lefthook` on
+  `PATH`, then preflight every configured initialized worktree, valid
+  `lefthook.yml` `commit-msg` mapping, `lefthook validate` result, and eligible
+  `commit-msg` hook before installing Lefthook dispatchers root-first. Dry-run
+  prints the complete plan without mutation.
+- `smt validate-message [--config FILE] FILE` — validate one complete
+  conventional commit message against the selected configuration's types and
+  scopes.
 - `smt status [--json]` — inspect configured repositories and summarize
   available profiles and contract findings.
-- `smt doctor` — report repository, executable, provider-token, and profile
-  readiness without printing secret values.
+- `smt doctor` — report repository, commit-msg hook, executable,
+  provider-token, and profile readiness without printing secret values.
 - `smt check --profile hook|submit|ci-parity [--repo ID]
   [--allow-worktree-mutation] [--dry-run]` — run one named profile. A check
   with `mutates_worktree: true` is refused unless the explicit
@@ -202,8 +208,8 @@ implemented by the CLI or this release:
 - YAML selector rewrites or automatic CI configuration edits;
 - GitLab/GitHub provider calls, MR/PR creation, credential use, and mixed
   provider submit orchestration;
-- `checkout`, remote-URL synchronization into `.gitmodules`, `hooks install`,
-  `validate-range`, and `submit` workflows from the earlier design.
+- `checkout`, remote-URL synchronization into `.gitmodules`, `validate-range`,
+  and `submit` workflows from the earlier design.
 
 Git lifecycle operations preflight all configured repositories before a remote
 push or worktree creation. Pushes are child-first and stop after a failure with
@@ -214,14 +220,95 @@ reported if a later child fails. Fixed untracked OS metadata (`.DS_Store`,
 blocking. Provider projects and runtime tokens remain explicit
 configuration/environment inputs.
 
+## Workspace diagnostics and hooks
+
+`status` is a human report: it starts with `STATUS: OK`, `WARN`, or `ERROR`,
+then shows each configured repository's path, Git state, branch, and
+`commit-msg` hook state, followed by configured profile names, contract counts,
+and safe next steps. `status --json` is the machine-readable alternative; it
+returns repository entries plus profile names and contract error/warning
+counts. When no profiles are configured, the human report writes
+`profiles: none`; JSON remains `profiles: []`. Diagnostics are state-oriented
+and do not print token values, command arguments, or command output.
+
+Hook state is local to each configured repository: `absent` means no
+`commit-msg` hook is present; `current` means the hook exactly matches a
+recognized historical SMT script or the reviewed Lefthook 2.1.10 dispatcher;
+`unmanaged` means another, lookalike, modified, symlinked, directory, or other
+nonregular hook target exists. SMT neither follows nor overwrites unmanaged
+hooks. Resolve those targets manually before running `smt hooks install`; no
+`--force` or chaining mode exists. An exact recognized historical SMT hook is
+eligible for migration only when no `commit-msg.old` entry exists. Lefthook
+2.1.10 may preserve it as `commit-msg.old` during dispatcher installation. A
+current Lefthook dispatcher with an existing `.old` entry remains allowed.
+
+`doctor` is also read-only. It always checks Git, bare `smt`, and Lefthook,
+then groups repository, hook, tool, and credential readiness. A missing `smt`
+or Lefthook is an error and produces an error exit; its remediation directs the
+user to return to the SMT source checkout, build the CLI, and expose
+`$PWD/bin` on `PATH`, or install Lefthook and rerun `smt doctor`, before
+attempting hook installation. An absent hook is a warning and does not itself
+make `doctor` fail when all required checks pass. Provider token checks report
+only whether the expected environment variable is set.
+
+`smt hooks install` plans only after every configured repository passes its
+preflight, so a failing child prevents all installation. It resolves `smt` and
+`lefthook` with `exec.LookPath`. Before any installer mutation, it runs
+argument-array `git config --get core.hooksPath` in every initialized configured
+repository; any nonempty effective setting, including a relative path, blocks
+the entire plan as a manually resolved custom hook-path policy. It then checks
+each repository is an initialized Git worktree with a top-level `commit-msg`
+mapping in `lefthook.yml`, and treats symlink, directory, and other nonregular
+`commit-msg` targets as unmanaged blockers. It uses argument-array execution
+for `lefthook validate` in every repository and, only after successful
+preflight, for root-first `lefthook install commit-msg`.
+
+Unmanaged custom, lookalike, modified, and nonregular hooks are never followed
+or overwritten. For every exact legacy SMT `commit-msg` hook, SMT also
+preflights `commit-msg.old`: if any entry exists, including a symlink, both
+`smt hooks install` and `--dry-run` reject the entire plan before root-first
+execution. Lefthook 2.1.10 itself refuses that migration without `--force`; SMT
+requires manual collision resolution instead. The exact legacy hook is eligible
+only when `.old` is absent, at which point Lefthook may preserve it as
+`commit-msg.old` while installing the dispatcher. A current Lefthook dispatcher
+with an existing `.old` entry remains allowed. Collision errors do not disclose
+paths or hook contents. This does not authorize `--force`, shell execution,
+resetting a collision, overwriting unmanaged hooks, or rollback of an earlier
+install. Successful installation prints the installed repository IDs. If an
+unexpected later install fails, SMT reports installed and pending IDs for manual
+recovery.
+
+Generated workspaces include root and child `lefthook.yml` files with
+top-level `no_auto_install: true` and `assert_lefthook_installed: true`, plus a
+`commit-msg` command that invokes bare
+`smt validate-message --config FILE {1}` using the correct relative path to
+the root configuration. `no_auto_install` prevents Lefthook from automatically
+installing or updating hooks when configuration changes. The Lefthook assertion
+makes Git fail the hook if Lefthook cannot be found, preventing a silent skip
+of `smt validate-message`. In the SMT source checkout, `task build` creates
+`bin/smt` but does not put it on `PATH`; use `export PATH="$PWD/bin:$PATH"`
+there, then return to the target workspace for `smt doctor` or hook
+installation. Both `smt` and Lefthook must remain durably available on PATH for
+every hook-running environment, including IDE or GUI launches. Workspace
+creation writes that scaffold only; it does not run Lefthook or install a hook.
+
+Fixture evidence is bounded rather than universal: a clean fixture installed
+the dispatcher in every configured repository and accepted a normal commit.
+After deliberately removing the installer-provided Lefthook binary while
+leaving `smt` on PATH, Git rejected an otherwise valid commit with Lefthook's
+assertion error. This demonstrates the no-silent-skip boundary, not a completed
+human end-to-end review across every launch environment.
+
 ## Local requirements and verification
 
-Go 1.26.4 or newer and `git` are required. The root `Taskfile.yml` is the
-repeatable entrypoint: `task build` creates `bin/smt` and `task verify` runs
-the Go tests. The implementation must keep focused tests for configuration,
-scaffolded Git submodules, push/worktree preflight and recovery reporting,
-harmless metadata, profiles and mutation guards, status/doctor output, contract
-severity and path validation, CI audit, and guarded bump planning/apply behavior.
+Go 1.26.4 or newer and `git` are required. The SMT source checkout's
+`Taskfile.yml` is the repeatable entrypoint: `task build` creates `bin/smt` and
+`task verify` runs the Go tests. The implementation must keep focused tests for
+configuration, scaffolded Git submodules, push/worktree preflight and recovery
+reporting, hook preflight/installation, custom hook-path, nonregular-hook, and
+migration/collision behavior, harmless metadata, profiles and mutation guards,
+status/doctor output, contract severity and path validation, CI audit, and
+guarded bump planning/apply behavior.
 
 The Mobile focused-test contract covers default inclusion, explicit
 opt-out, invalid-answer retry, EOF/decline no-write, exact YAML/repository
