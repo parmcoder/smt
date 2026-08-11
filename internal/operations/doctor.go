@@ -2,7 +2,9 @@ package operations
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
@@ -19,6 +21,212 @@ type Check struct {
 // Result is the deterministic, JSON-marshallable Doctor report.
 type Result struct {
 	Checks []Check `json:"checks"`
+}
+
+const (
+	DoctorStatusOK      = "ok"
+	DoctorStatusWarning = "warning"
+	DoctorStatusError   = "error"
+)
+
+// DoctorNode is one safe node in the repository-first Doctor report tree.
+// Messages are canonical summaries and never contain raw command or private
+// inspection output.
+type DoctorNode struct {
+	ID       string       `json:"id"`
+	Status   string       `json:"status"`
+	Message  string       `json:"message,omitempty"`
+	Children []DoctorNode `json:"children,omitempty"`
+}
+
+// DoctorReport is the presentation model for a collected Doctor result.
+// Repositories follow configuration order; tools and credentials retain their
+// first collection order and are deduplicated by check ID.
+type DoctorReport struct {
+	Status       string       `json:"status"`
+	Repositories []DoctorNode `json:"repositories"`
+	Tools        []DoctorNode `json:"tools"`
+	Credentials  []DoctorNode `json:"credentials"`
+	Unmapped     []DoctorNode `json:"unmapped"`
+}
+
+// BuildDoctorReport maps collected checks into a deterministic, safe tree.
+// It does not inspect or mutate the workspace and does not expose raw check
+// messages in the returned model.
+func BuildDoctorReport(cfg config.Config, result Result) DoctorReport {
+	report := DoctorReport{
+		Status:       DoctorStatusOK,
+		Repositories: make([]DoctorNode, 0, len(cfg.Repositories)),
+		Tools:        make([]DoctorNode, 0),
+		Credentials:  make([]DoctorNode, 0),
+		Unmapped:     make([]DoctorNode, 0),
+	}
+
+	knownRepositoryChecks := make(map[string]struct{}, len(cfg.Repositories)*2)
+	checksByID := make(map[string][]Check, len(result.Checks))
+	for _, repository := range cfg.Repositories {
+		knownRepositoryChecks["repo:"+repository.ID+":worktree"] = struct{}{}
+		knownRepositoryChecks["hook:"+repository.ID+":commit-msg"] = struct{}{}
+	}
+	for _, check := range result.Checks {
+		checksByID[check.ID] = append(checksByID[check.ID], check)
+		switch {
+		case isToolCheck(check.ID):
+			report.Tools = appendDoctorNodeOnce(report.Tools, check)
+		case isCredentialCheck(check.ID):
+			report.Credentials = appendDoctorNodeOnce(report.Credentials, check)
+		case hasKnownCheck(knownRepositoryChecks, check.ID):
+		default:
+			report.Unmapped = append(report.Unmapped, doctorNode(check))
+		}
+	}
+
+	for _, repository := range cfg.Repositories {
+		node := DoctorNode{
+			ID:       "repo:" + repository.ID,
+			Status:   DoctorStatusOK,
+			Message:  "repository " + repository.ID,
+			Children: make([]DoctorNode, 0, 4),
+		}
+		for _, checkID := range []string{
+			"repo:" + repository.ID + ":worktree",
+			"hook:" + repository.ID + ":commit-msg",
+		} {
+			for _, check := range checksByID[checkID] {
+				child := doctorNode(check)
+				node.Children = append(node.Children, child)
+				node.Status = worseDoctorStatus(node.Status, child.Status)
+			}
+		}
+
+		remote := DoctorNode{ID: "remote:" + repository.ID, Status: DoctorStatusOK}
+		if strings.TrimSpace(repository.Remote.URL) == "" {
+			remote.Status = DoctorStatusWarning
+			remote.Message = "repository " + repository.ID + " remote is not configured"
+		} else {
+			remote.Message = "repository " + repository.ID + " remote is configured"
+		}
+		node.Children = append(node.Children, remote)
+		node.Status = worseDoctorStatus(node.Status, remote.Status)
+
+		provider := DoctorNode{ID: "provider:" + repository.ID, Status: DoctorStatusOK}
+		if repository.Provider == "" {
+			provider.Message = "repository " + repository.ID + " uses local-only provider configuration"
+		} else {
+			provider.Message = fmt.Sprintf("repository %s provider %s project %s is configured", repository.ID, repository.Provider, repository.Project)
+		}
+		node.Children = append(node.Children, provider)
+		node.Status = worseDoctorStatus(node.Status, provider.Status)
+		report.Repositories = append(report.Repositories, node)
+		report.Status = worseDoctorStatus(report.Status, node.Status)
+	}
+
+	for _, node := range report.Tools {
+		report.Status = worseDoctorStatus(report.Status, node.Status)
+	}
+	for _, node := range report.Credentials {
+		report.Status = worseDoctorStatus(report.Status, node.Status)
+	}
+	for _, node := range report.Unmapped {
+		report.Status = worseDoctorStatus(report.Status, node.Status)
+	}
+	return report
+}
+
+func hasKnownCheck(checks map[string]struct{}, id string) bool {
+	_, ok := checks[id]
+	return ok
+}
+
+func isToolCheck(id string) bool {
+	return id == "git" || strings.HasPrefix(id, "tool:")
+}
+
+func isCredentialCheck(id string) bool {
+	return strings.HasPrefix(id, "token:")
+}
+
+func appendDoctorNodeOnce(nodes []DoctorNode, check Check) []DoctorNode {
+	for i := range nodes {
+		if nodes[i].ID != check.ID {
+			continue
+		}
+		candidate := doctorNode(check)
+		status := worseDoctorStatus(nodes[i].Status, candidate.Status)
+		if status != nodes[i].Status {
+			nodes[i].Status = status
+			nodes[i].Message = candidate.Message
+		}
+		return nodes
+	}
+	return append(nodes, doctorNode(check))
+}
+
+func doctorNode(check Check) DoctorNode {
+	return DoctorNode{ID: check.ID, Status: check.Status, Message: safeDoctorMessage(check)}
+}
+
+func safeDoctorMessage(check Check) string {
+	switch {
+	case check.ID == "git" || strings.HasPrefix(check.ID, "tool:"):
+		name := strings.TrimPrefix(check.ID, "tool:")
+		return fmt.Sprintf("%s executable is %s", name, availability(check.Status))
+	case strings.HasPrefix(check.ID, "repo:") && strings.HasSuffix(check.ID, ":worktree"):
+		repositoryID := strings.TrimSuffix(strings.TrimPrefix(check.ID, "repo:"), ":worktree")
+		if check.Status == DoctorStatusOK {
+			return "repository " + repositoryID + " is an initialized Git worktree"
+		}
+		return "repository " + repositoryID + " is not an initialized Git worktree"
+	case strings.HasPrefix(check.ID, "hook:") && strings.HasSuffix(check.ID, ":commit-msg"):
+		repositoryID := strings.TrimSuffix(strings.TrimPrefix(check.ID, "hook:"), ":commit-msg")
+		if check.Status == DoctorStatusError {
+			return "repository " + repositoryID + " commit-msg hook could not be inspected"
+		}
+		state := "current"
+		if check.Status == DoctorStatusWarning {
+			state = "absent"
+			if strings.Contains(strings.ToLower(check.Message), "unmanaged") {
+				state = "unmanaged"
+			}
+		}
+		return "repository " + repositoryID + " commit-msg hook is " + state
+	case strings.HasPrefix(check.ID, "token:"):
+		provider := strings.TrimPrefix(check.ID, "token:")
+		variable := "SMT_" + strings.ToUpper(provider) + "_TOKEN"
+		if check.Status == DoctorStatusOK {
+			return variable + " is set"
+		}
+		return variable + " is not set"
+	default:
+		return ""
+	}
+}
+
+func availability(status string) string {
+	if status == DoctorStatusOK {
+		return "available"
+	}
+	return "not available"
+}
+
+func worseDoctorStatus(current, candidate string) string {
+	if doctorStatusRank(candidate) > doctorStatusRank(current) {
+		return candidate
+	}
+	return current
+}
+
+func doctorStatusRank(status string) int {
+	switch status {
+	case DoctorStatusError:
+		return 3
+	case DoctorStatusWarning:
+		return 2
+	case DoctorStatusOK:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // ExecutableLookup reports whether an executable can be found.
@@ -146,7 +354,7 @@ func (d *Doctor) repositoryCheck(ctx context.Context, repository config.Reposito
 
 func (d *Doctor) tokenCheck(provider, variable string) Check {
 	set := d.environment != nil && d.environment(variable)
-	status := "error"
+	status := "warning"
 	message := variable + " is not set"
 	if set {
 		status = "ok"

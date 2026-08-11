@@ -1212,6 +1212,57 @@ func TestRunDoctorDoesNotRedactOrPrintTokenValue(t *testing.T) {
 	}
 }
 
+func TestRunDoctorMissingProviderTokenIsNonBlocking(t *testing.T) {
+	sourceDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	t.Chdir(root)
+	initTestGit(t, root)
+	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := os.ReadFile(filepath.Join(sourceDir, "..", "..", "internal", "hooks", "testdata", "lefthook-2.1.10-commit-msg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher = []byte(strings.ReplaceAll(string(dispatcher), "<LETHOOK_PATH>", "/opt/lefthook/bin/lefthook"))
+	if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "commit-msg"), dispatcher, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("smt.yaml", []byte(testConfigYAML("gitlab", "repo", "repo")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous, wasSet := os.LookupEnv("SMT_GITLAB_TOKEN")
+	if err := os.Unsetenv("SMT_GITLAB_TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv("SMT_GITLAB_TOKEN", previous)
+		} else {
+			_ = os.Unsetenv("SMT_GITLAB_TOKEN")
+		}
+	})
+	original := doctorLookup
+	t.Cleanup(func() { doctorLookup = original })
+	doctorLookup = func(name string) (string, error) {
+		if name == "git" || name == "smt" || name == "lefthook" {
+			return "/tools/" + name, nil
+		}
+		return exec.LookPath(name)
+	}
+
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"doctor"}, out, errOut); code != exitOK {
+		t.Fatalf("run() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "WARN token:gitlab") || strings.Contains(out.String(), "ERROR") {
+		t.Fatalf("doctor output = %q, want only non-blocking token warning", out.String())
+	}
+}
+
 func TestRunDoctorRequiresBareSMTAndLefthookBeforeAbsentHookInstallGuidance(t *testing.T) {
 	root := t.TempDir()
 	initTestGit(t, root)

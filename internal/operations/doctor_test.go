@@ -86,7 +86,7 @@ func TestDoctorReportsProviderTokenPresenceWithoutExposingValue(t *testing.T) {
 	if strings.Contains(string(encoded), secret) {
 		t.Fatalf("result contains token value: %s", encoded)
 	}
-	if got, want := result.Checks[5], (Check{ID: "token:gitlab", Status: "error", Message: "SMT_GITLAB_TOKEN is not set"}); got != want {
+	if got, want := result.Checks[5], (Check{ID: "token:gitlab", Status: "warning", Message: "SMT_GITLAB_TOKEN is not set"}); got != want {
 		t.Fatalf("token check = %#v, want %#v", got, want)
 	}
 }
@@ -247,6 +247,157 @@ func TestDoctorHookInspectionIsReadOnlyAndHookErrorsAreTokenSafe(t *testing.T) {
 	if got := result.Checks[4]; got.Status != "error" || got.Message != "repository repo commit-msg hook could not be inspected" {
 		t.Fatalf("hook check = %#v, want token-safe inspection error", got)
 	}
+}
+
+func TestBuildDoctorReportPreservesRepositoryOrderAndGroupsDerivedLeaves(t *testing.T) {
+	cfg := config.Config{Repositories: []config.Repository{
+		{ID: "z", Path: "z", Remote: config.Remote{URL: "git@example.com:z.git"}, Provider: "github", Project: "org/z"},
+		{ID: "local", Path: "local"},
+	}}
+	result := Result{Checks: []Check{
+		{ID: "hook:local:commit-msg", Status: "warning", Message: "repository local commit-msg hook is unmanaged"},
+		{ID: "repo:z:worktree", Status: "ok", Message: "repository z is an initialized Git worktree"},
+		{ID: "repo:local:worktree", Status: "ok", Message: "repository local is an initialized Git worktree"},
+		{ID: "hook:z:commit-msg", Status: "ok", Message: "repository z commit-msg hook is current"},
+	}}
+
+	report := BuildDoctorReport(cfg, result)
+	if got, want := report.Status, "warning"; got != want {
+		t.Fatalf("report status = %q, want %q", got, want)
+	}
+	if got, want := nodeIDs(report.Repositories), []string{"repo:z", "repo:local"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("repository IDs = %#v, want %#v", got, want)
+	}
+	if got, want := nodeIDs(report.Repositories[0].Children), []string{"repo:z:worktree", "hook:z:commit-msg", "remote:z", "provider:z"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("z children = %#v, want %#v", got, want)
+	}
+	if got, want := nodeIDs(report.Repositories[1].Children), []string{"repo:local:worktree", "hook:local:commit-msg", "remote:local", "provider:local"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("local children = %#v, want %#v", got, want)
+	}
+	if got, want := report.Repositories[0].Children[2].Status, "ok"; got != want {
+		t.Fatalf("configured remote status = %q, want %q", got, want)
+	}
+	if got, want := report.Repositories[1].Children[2].Status, "warning"; got != want {
+		t.Fatalf("absent remote status = %q, want %q", got, want)
+	}
+	if got, want := report.Repositories[0].Children[3].Message, "repository z provider github project org/z is configured"; got != want {
+		t.Fatalf("configured provider message = %q, want %q", got, want)
+	}
+	if got, want := report.Repositories[1].Children[3].Message, "repository local uses local-only provider configuration"; got != want {
+		t.Fatalf("local-only provider message = %q, want %q", got, want)
+	}
+}
+
+func TestBuildDoctorReportDeduplicatesToolsAndCredentialsInCollectionOrder(t *testing.T) {
+	result := Result{Checks: []Check{
+		{ID: "tool:go", Status: "error", Message: "go executable is not available"},
+		{ID: "git", Status: "ok", Message: "git executable is available"},
+		{ID: "tool:go", Status: "error", Message: "go executable is not available again"},
+		{ID: "token:gitlab", Status: "warning", Message: "SMT_GITLAB_TOKEN is not set"},
+		{ID: "token:gitlab", Status: "warning", Message: "SMT_GITLAB_TOKEN is still not set"},
+		{ID: "token:github", Status: "ok", Message: "SMT_GITHUB_TOKEN is set"},
+	}}
+
+	report := BuildDoctorReport(config.Config{}, result)
+	if got, want := nodeIDs(report.Tools), []string{"tool:go", "git"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tool IDs = %#v, want %#v", got, want)
+	}
+	if got, want := nodeIDs(report.Credentials), []string{"token:gitlab", "token:github"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("credential IDs = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildDoctorReportMapsCoreErrorsAndUnmappedChecks(t *testing.T) {
+	secret := "private-command-output-and-token"
+	privateRemote := "https://private.example/group/project.git"
+	result := Result{Checks: []Check{
+		{ID: "tool:smt", Status: "error", Message: secret},
+		{ID: "hook:repo:commit-msg", Status: "error", Message: secret},
+		{ID: "token:gitlab", Status: "warning", Message: secret},
+		{ID: "repo:missing:worktree", Status: "error", Message: secret},
+		{ID: "unknown:diagnostic", Status: "error", Message: secret},
+	}}
+	report := BuildDoctorReport(config.Config{Repositories: []config.Repository{{
+		ID: "repo", Path: ".", Remote: config.Remote{URL: privateRemote}, Provider: "gitlab", Project: "group/project",
+	}}}, result)
+	if got, want := report.Status, "error"; got != want {
+		t.Fatalf("report status = %q, want %q", got, want)
+	}
+	if got, want := nodeIDs(report.Tools), []string{"tool:smt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tool IDs = %#v, want %#v", got, want)
+	}
+	if got, want := nodeIDs(report.Unmapped), []string{"repo:missing:worktree", "unknown:diagnostic"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unmapped IDs = %#v, want %#v", got, want)
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), privateRemote) {
+		t.Fatalf("report contains private diagnostic or remote URL: %s", encoded)
+	}
+}
+
+func TestBuildDoctorReportKeepsHookVariantsAndMissingTokenAsWarning(t *testing.T) {
+	cfg := config.Config{Repositories: []config.Repository{
+		{ID: "absent", Path: "absent", Provider: "gitlab", Project: "org/absent"},
+		{ID: "custom", Path: "custom"},
+		{ID: "current", Path: "current"},
+	}}
+	result := Result{Checks: []Check{
+		{ID: "repo:absent:worktree", Status: "ok", Message: "repository absent is an initialized Git worktree"},
+		{ID: "hook:absent:commit-msg", Status: "warning", Message: "repository absent commit-msg hook is absent"},
+		{ID: "repo:custom:worktree", Status: "ok", Message: "repository custom is an initialized Git worktree"},
+		{ID: "hook:custom:commit-msg", Status: "warning", Message: "repository custom commit-msg hook is unmanaged"},
+		{ID: "repo:current:worktree", Status: "ok", Message: "repository current is an initialized Git worktree"},
+		{ID: "hook:current:commit-msg", Status: "ok", Message: "repository current commit-msg hook is current"},
+		{ID: "token:gitlab", Status: "warning", Message: "SMT_GITLAB_TOKEN is not set"},
+	}}
+
+	report := BuildDoctorReport(cfg, result)
+	if got, want := report.Credentials[0].Status, "warning"; got != want {
+		t.Fatalf("missing provider token status = %q, want %q", got, want)
+	}
+	for _, repository := range report.Repositories {
+		if len(repository.Children) < 2 {
+			t.Fatalf("repository %q has too few children: %#v", repository.ID, repository.Children)
+		}
+	}
+	if got, want := report.Repositories[0].Children[1].Message, "repository absent commit-msg hook is absent"; got != want {
+		t.Fatalf("absent hook message = %q, want %q", got, want)
+	}
+	if got, want := report.Repositories[1].Children[1].Message, "repository custom commit-msg hook is unmanaged"; got != want {
+		t.Fatalf("custom hook message = %q, want %q", got, want)
+	}
+}
+
+func TestBuildDoctorReportSerializationIsDeterministic(t *testing.T) {
+	cfg := config.Config{Repositories: []config.Repository{{ID: "repo", Path: "."}}}
+	result := Result{Checks: []Check{
+		{ID: "git", Status: "ok", Message: "git executable is available"},
+		{ID: "repo:repo:worktree", Status: "ok", Message: "repository repo is an initialized Git worktree"},
+		{ID: "hook:repo:commit-msg", Status: "ok", Message: "repository repo commit-msg hook is current"},
+	}}
+	first, second := BuildDoctorReport(cfg, result), BuildDoctorReport(cfg, result)
+	firstJSON, err := json.Marshal(first)
+	if err != nil {
+		t.Fatalf("first json.Marshal() error = %v", err)
+	}
+	secondJSON, err := json.Marshal(second)
+	if err != nil {
+		t.Fatalf("second json.Marshal() error = %v", err)
+	}
+	if string(firstJSON) != string(secondJSON) {
+		t.Fatalf("report JSON is not deterministic: %s != %s", firstJSON, secondJSON)
+	}
+}
+
+func nodeIDs(nodes []DoctorNode) []string {
+	ids := make([]string, len(nodes))
+	for i, node := range nodes {
+		ids[i] = node.ID
+	}
+	return ids
 }
 
 func containsCheck(checks []Check, want Check) bool {
