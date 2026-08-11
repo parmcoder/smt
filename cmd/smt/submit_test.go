@@ -169,6 +169,64 @@ func TestWorkspaceSubmitMissingTokenSucceedsWithHandoffAndDefersRoot(t *testing.
 	}
 }
 
+func TestWorkspaceSubmitSkipsLocalOnlyReviewsAndStillCreatesRootReview(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "api")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/pulls"):
+			_, _ = io.WriteString(w, "[]")
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pulls"):
+			_, _ = io.WriteString(w, `{"number":8,"html_url":"https://reviews.example/8","title":"Root review","body":"body","draft":true,"head":{"ref":"feature/one"},"base":{"ref":"main"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("SMT_GITHUB_TOKEN", "submit-secret")
+	cfg := submitConfig(server.URL)
+	cfg.Repositories[1].Provider = ""
+	cfg.Repositories[1].Project = ""
+	manifest := submitManifest(root)
+	if _, err := workspacepkg.WriteRunManifest(root, manifest); err != nil {
+		t.Fatal(err)
+	}
+	runner := submitRunner{
+		counts: map[string]int{root: 1, child: 1},
+		origin: "git@example:acme/root.git",
+		logs: map[string]string{
+			root:  "root-sha\x00feat(repo): [feature] integrate api\x00",
+			child: "child-sha\x00feat(api): [smt-api-1] add endpoint\x00",
+		},
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWorkspaceSubmit(context.Background(), cfg, root, "feature", &runner, false, false, true, out, errOut, logrus.New()); code != exitOK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out, errOut)
+	}
+	var report submitOutput
+	if err := json.Unmarshal([]byte(out.String()), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Reviews) != 2 || report.Reviews[0].Repository != "api" || report.Reviews[0].Status != "local-only" || report.Reviews[1].Repository != "repo" || report.Reviews[1].Status != "created" {
+		t.Fatalf("reviews=%+v", report.Reviews)
+	}
+	if !reflect.DeepEqual(requests, []string{"GET /repos/acme/root/pulls", "POST /repos/acme/root/pulls"}) {
+		t.Fatalf("provider requests=%v", requests)
+	}
+	if len(report.Warnings) == 0 || !strings.Contains(report.Warnings[0], "no provider review configuration") {
+		t.Fatalf("warnings=%v", report.Warnings)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%s", errOut)
+	}
+}
+
 func submitConfig(apiBase string) config.Config {
 	return config.Config{
 		Version:   1,

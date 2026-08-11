@@ -104,8 +104,13 @@ func runWorkspaceSubmit(ctx context.Context, cfg config.Config, root, featureID 
 			output.Reviews = append(output.Reviews, submitReviewOutput{Repository: step.ID, Status: "error", Error: contentErr.Error()})
 			continue
 		}
+		if strings.TrimSpace(repository.Provider) == "" {
+			output.Reviews = append(output.Reviews, submitReviewOutput{Repository: step.ID, Status: "local-only", Title: title, Body: body, Error: "provider review is not configured"})
+			output.Warnings = append(output.Warnings, repository.ID+" has no provider review configuration")
+			continue
+		}
 		settings := providerSettings(cfg, repository.Provider)
-		if filepath.Clean(step.Path) == "." && !allChildLinks(plan, childLinks) {
+		if filepath.Clean(step.Path) == "." && !allChildLinks(cfg, plan, childLinks) {
 			output.Reviews = append(output.Reviews, submitReviewOutput{Repository: step.ID, Provider: repository.Provider, Status: "deferred", Title: title, Body: body, Error: "child review URLs are not available"})
 			output.Warnings = append(output.Warnings, "root review deferred until child review URLs are available")
 			continue
@@ -241,9 +246,13 @@ func providerSettings(cfg config.Config, name string) config.ProviderConfig {
 	return cfg.Providers.GitHub
 }
 
-func allChildLinks(plan submissionpkg.SubmissionPlan, links map[string]string) bool {
+func allChildLinks(cfg config.Config, plan submissionpkg.SubmissionPlan, links map[string]string) bool {
 	for _, step := range plan.Steps {
 		if filepath.Clean(step.Path) != "." {
+			repository, ok := configuredRepository(cfg, step.ID)
+			if ok && strings.TrimSpace(repository.Provider) == "" {
+				continue
+			}
 			if _, ok := links[step.ID]; !ok {
 				return false
 			}
