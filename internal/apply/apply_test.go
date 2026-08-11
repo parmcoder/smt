@@ -222,12 +222,12 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 	if err != nil || string(got) != string(blueprintBytes()) {
 		t.Fatalf("raw config mismatch: %q %v", got, err)
 	}
-	for _, path := range []string{".beads/marker", "docs/README.md", "AGENTS.md", "agents/work_manager.toml", "prompts/build.md", "README.md"} {
+	for _, path := range []string{".beads/marker", "docs/README.md", "AGENTS.md", "agents/work_manager.toml", "agents/integration_worker.toml", "prompts/build.md", "README.md"} {
 		if _, err := os.Stat(filepath.Join(destination, path)); err != nil {
 			t.Fatalf("published %s: %v", path, err)
 		}
 	}
-	for _, path := range []string{"AGENTS.md", "agents/work_manager.toml", "agents/web_worker.toml", "prompts/build.md"} {
+	for _, path := range []string{"AGENTS.md", "agents/work_manager.toml", "agents/web_worker.toml", "agents/integration_worker.toml", "prompts/build.md"} {
 		contents, err := os.ReadFile(filepath.Join(destination, path))
 		if err != nil {
 			t.Fatal(err)
@@ -235,6 +235,10 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 		if !strings.Contains(string(contents), "type(scope): [WORK-ID] summary") || !strings.Contains(string(contents), "prepared workspace") {
 			t.Fatalf("generated contract %s=%q", path, contents)
 		}
+	}
+	integration, err := os.ReadFile(filepath.Join(destination, "agents", "integration_worker.toml"))
+	if err != nil || !strings.Contains(string(integration), "root integration and gitlink updates only") || !strings.Contains(string(integration), "not a third delivery delegate") {
+		t.Fatalf("integration contract=%q err=%v", integration, err)
 	}
 }
 
