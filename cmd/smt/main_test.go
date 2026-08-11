@@ -17,7 +17,7 @@ import (
 	"github.com/parmcoder/smt/internal/blueprint"
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
-	"github.com/parmcoder/smt/internal/hooks"
+	"github.com/parmcoder/smt/internal/operations"
 	"gopkg.in/yaml.v3"
 )
 
@@ -157,6 +157,54 @@ func TestRunValidateMessageExitCodes(t *testing.T) {
 				t.Fatalf("output = %q, want substring %q", out.String()+errOut.String(), tt.wantOutput)
 			}
 		})
+	}
+}
+
+func TestRunValidateMessageUsesConfigFlag(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := writeTestConfig("smt.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	custom := filepath.Join(root, "custom.yaml")
+	if err := os.WriteFile(custom, []byte("version: 1\ncommit:\n  types: [feat]\n  scopes: [web]\nrepositories:\n  - id: root\n    path: .\n    scope: web\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	message := filepath.Join(root, "message")
+	if err := writeTestMessage(message, "feat(web): use the root configuration\n"); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"validate-message", "--config", custom, message}, strings.NewReader(""), out, errOut); code != exitOK || out.String() != "valid commit message\n" || errOut.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"validate-message", "--help"}, strings.NewReader(""), out, errOut); code != exitOK || !strings.Contains(out.String(), "--config string") || !strings.Contains(out.String(), "(default \"./smt.yaml\")") || errOut.Len() != 0 {
+		t.Fatalf("help code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestRunApplyRejectsInvalidConfigurationBeforePublication(t *testing.T) {
+	original := newApplyService
+	t.Cleanup(func() { newApplyService = original })
+	called := false
+	newApplyService = func() applypkg.Service {
+		called = true
+		return applypkg.Service{}
+	}
+	root := t.TempDir()
+	configPath := filepath.Join(root, "invalid.yaml")
+	if err := os.WriteFile(configPath, []byte("version: 2\ncommit: {types: [feat], scopes: [repo]}\nrepositories: [{id: repo, path: ., scope: repo}]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(root, "workspace")
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"apply", "--config", configPath, destination}, strings.NewReader(""), out, errOut); code != exitValidation || called || !strings.Contains(errOut.String(), "version must be 1") {
+		t.Fatalf("code=%d service called=%t stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+	}
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("destination stat=%v, want no publication", err)
 	}
 }
 
@@ -354,6 +402,7 @@ Getting Started
 
 Workspace
   doctor           Check local readiness
+  hooks            Manage workspace Git hooks
   push             Push configured repositories
   status           Show workspace status
   worktree         Manage linked worktrees
@@ -399,6 +448,191 @@ func TestCobraHelpAliasesWriteStdoutWithoutConfig(t *testing.T) {
 		if out.Len() == 0 || errOut.Len() != 0 {
 			t.Fatalf("args=%q stdout=%q stderr=%q", args, out.String(), errOut.String())
 		}
+	}
+}
+
+func TestCobraHooksGroupHelpAndSyntax(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{args: []string{"hooks"}, code: exitOK, want: "Install commit-msg hooks safely"},
+		{args: []string{"hooks", "--help"}, code: exitOK, want: "Available Commands:\n  install"},
+		{args: []string{"hooks", "install", "--help"}, code: exitOK, want: "--dry-run"},
+		{args: []string{"hooks", "install", "extra"}, code: exitUsage, want: "Usage:\n  smt hooks install"},
+		{args: []string{"hooks", "remove"}, code: exitUsage, want: "Usage:\n  smt hooks [flags]"},
+	} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != tc.code {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
+		}
+		stream := out.String()
+		if tc.code != exitOK {
+			stream = errOut.String()
+			if out.Len() != 0 || strings.Count(stream, "Usage:") != 1 {
+				t.Fatalf("args=%q stdout=%q stderr=%q", tc.args, out.String(), errOut.String())
+			}
+		} else if errOut.Len() != 0 {
+			t.Fatalf("args=%q stderr=%q", tc.args, errOut.String())
+		}
+		if !strings.Contains(stream, tc.want) {
+			t.Fatalf("args=%q output=%q, want %q", tc.args, stream, tc.want)
+		}
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"hooks", "--help"}, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "from the SMT source checkout") ||
+		!strings.Contains(out.String(), "task build") ||
+		!strings.Contains(out.String(), "export PATH=\"$PWD/bin:$PATH\"") ||
+		strings.Contains(out.String(), "from the workspace root") {
+		t.Fatalf("hooks help=%q", out.String())
+	}
+}
+
+func TestRenderStatusAndDoctorReportsActionableDeterministicGuidance(t *testing.T) {
+	status := statusOutput{
+		Repositories: []operations.Entry{
+			{ID: "repo", Path: ".", Initialized: true, Branch: "main", HookStatus: "current"},
+			{ID: "api", Path: "apis", Initialized: true, Dirty: true, HookStatus: "absent"},
+			{ID: "web", Path: "web", Initialized: false, HookStatus: "unmanaged", Error: "private failure"},
+		},
+		Profiles: []string{"hook", "submit"}, Contracts: contractCounts{Errors: 1, Warnings: 1},
+	}
+	out := new(strings.Builder)
+	renderStatus(out, status)
+	for _, want := range []string{"STATUS: ERROR", "REPOSITORY", "api", "DIRTY", "profiles: hook, submit", "contracts: errors=1 warnings=1", "smt hooks install", "custom commit-msg hooks are never overwritten", "review contract errors"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status=%q, want %q", out.String(), want)
+		}
+	}
+	doctor := operations.Result{Checks: []operations.Check{
+		{ID: "repo:api:worktree", Status: "error", Message: "repository api is not an initialized Git worktree"},
+		{ID: "hook:web:commit-msg", Status: "warning", Message: "repository web commit-msg hook is unmanaged"},
+		{ID: "tool:lefthook", Status: "error", Message: "lefthook executable is not available"},
+		{ID: "token:gitlab", Status: "error", Message: "SMT_GITLAB_TOKEN is not set"},
+		{ID: "hook:private:commit-msg", Status: "error", Message: "repository private commit-msg hook could not be inspected"},
+	}}
+	out.Reset()
+	renderDoctor(out, doctor)
+	for _, want := range []string{"DOCTOR: ERROR", "REPOSITORIES", "HOOKS", "TOOLS", "CREDENTIALS", "ERROR", "WARN", "smt hooks install", "custom commit-msg hooks are never overwritten", "install lefthook", "set SMT_GITLAB_TOKEN", "inspect the affected repository locally"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("doctor=%q, want %q", out.String(), want)
+		}
+	}
+	if strings.Contains(out.String(), "private failure") {
+		t.Fatalf("doctor leaked private diagnostic: %q", out.String())
+	}
+}
+
+func TestRenderStatusDetachedRepositoryExplainsBranchRemediation(t *testing.T) {
+	out := new(strings.Builder)
+	renderStatus(out, statusOutput{Repositories: []operations.Entry{{ID: "api", Path: "apis", Initialized: true, Detached: true, HookStatus: "current"}}})
+	for _, want := range []string{"STATUS: WARN", "api", "DETACHED", "switch detached repositories to a branch before workspace operations"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status=%q, want %q", out.String(), want)
+		}
+	}
+}
+
+func TestRenderStatusUsesNoneForEmptyProfiles(t *testing.T) {
+	out := new(strings.Builder)
+	renderStatus(out, statusOutput{Repositories: []operations.Entry{{ID: "repo", Path: ".", Initialized: true, Branch: "main", HookStatus: "current"}}})
+	if !strings.Contains(out.String(), "profiles: none\n") || strings.Contains(out.String(), "profiles: \n") {
+		t.Fatalf("status=%q", out.String())
+	}
+}
+
+func TestRenderCleanStatusAndDoctorHaveNoNextSteps(t *testing.T) {
+	out := new(strings.Builder)
+	renderStatus(out, statusOutput{Repositories: []operations.Entry{{ID: "repo", Path: ".", Initialized: true, Branch: "main", HookStatus: "current"}}, Profiles: []string{"hook"}})
+	if !strings.Contains(out.String(), "STATUS: OK") || strings.Contains(out.String(), "next steps:") {
+		t.Fatalf("status=%q", out.String())
+	}
+	out.Reset()
+	renderDoctor(out, operations.Result{Checks: []operations.Check{{ID: "git", Status: "ok", Message: "git executable is available"}, {ID: "repo:repo:worktree", Status: "ok", Message: "repository repo is an initialized Git worktree"}, {ID: "hook:repo:commit-msg", Status: "ok", Message: "repository repo commit-msg hook is current"}}})
+	if !strings.Contains(out.String(), "DOCTOR: OK") || strings.Contains(out.String(), "next steps:") {
+		t.Fatalf("doctor=%q", out.String())
+	}
+}
+
+func TestRenderDoctorGroupsToolsOnceAndSuppressesPrivateDiagnostics(t *testing.T) {
+	out := new(strings.Builder)
+	renderDoctor(out, operations.Result{Checks: []operations.Check{
+		{ID: "git", Status: "ok", Message: "git executable is available"},
+		{ID: "tool:lefthook", Status: "error", Message: "lefthook executable is not available"},
+		{ID: "hook:repo:commit-msg", Status: "error", Message: "private diagnostic details"},
+	}})
+	if strings.Count(out.String(), "TOOLS\n") != 1 {
+		t.Fatalf("doctor=%q, want one TOOLS heading", out.String())
+	}
+	if strings.Contains(out.String(), "private diagnostic details") {
+		t.Fatalf("doctor leaked private diagnostics: %q", out.String())
+	}
+}
+
+func TestRenderDoctorAbsentHookWarnsWithoutErrorRemediation(t *testing.T) {
+	out := new(strings.Builder)
+	renderDoctor(out, operations.Result{Checks: []operations.Check{{ID: "hook:repo:commit-msg", Status: "warning", Message: "repository repo commit-msg hook is absent"}}})
+	if !strings.Contains(out.String(), "DOCTOR: WARN") || !strings.Contains(out.String(), "WARN hook:repo:commit-msg") || !strings.Contains(out.String(), "smt hooks install") || strings.Contains(out.String(), "DOCTOR: ERROR") {
+		t.Fatalf("doctor=%q", out.String())
+	}
+}
+
+func TestCobraWorktreeGroupHelpDoesNotLoadConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, args := range [][]string{{"worktree"}, {"worktree", "--help"}} {
+		out, errOut := new(strings.Builder), new(strings.Builder)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitOK {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+		for _, want := range []string{
+			"Create synchronized linked worktrees",
+			"worktree add PATH --branch NAME [--dry-run]",
+			"branch must be new",
+			"outside the configured workspace",
+			"preflight",
+			"root worktree before nested child worktrees",
+			"--dry-run",
+			"manual recovery",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("args=%q stdout=%q, want %q", args, out.String(), want)
+			}
+		}
+		if errOut.Len() != 0 {
+			t.Fatalf("args=%q stderr=%q", args, errOut.String())
+		}
+	}
+}
+
+func TestCobraWorktreeAddHelpPreservesContract(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"worktree", "add", "--help"}, strings.NewReader(""), out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{"Usage:\n  smt worktree add PATH", "--branch string", "--dry-run"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("stdout=%q, want %q", out.String(), want)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
+
+func TestCobraWorktreeGroupRejectsInvalidSyntaxBeforeConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"worktree", "remove"}, strings.NewReader(""), out, errOut); code != exitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 || strings.Contains(errOut.String(), "configuration error") || !strings.Contains(errOut.String(), "unknown command \"remove\" for \"smt worktree\"") || !strings.Contains(errOut.String(), "Usage:\n  smt worktree [flags]\n  smt worktree [command]") || strings.Count(errOut.String(), "Usage:") != 1 {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 	}
 }
 
@@ -887,7 +1121,33 @@ contracts:
 	}
 }
 
+func TestRunStatusJSONPreservesEmptyProfilesArray(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	initTestGit(t, root)
+	if err := os.WriteFile("smt.yaml", []byte(testConfigYAML("gitlab", "repo", "repo")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"status", "--json"}, out, errOut); code != exitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	var result struct {
+		Profiles json.RawMessage `json:"profiles"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &result); err != nil {
+		t.Fatalf("status JSON: %v\n%s", err, out.String())
+	}
+	if string(result.Profiles) != "[]" {
+		t.Fatalf("profiles=%s, want []", result.Profiles)
+	}
+}
+
 func TestRunStatusHumanIncludesRepositoryHookState(t *testing.T) {
+	sourceDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := t.TempDir()
 	t.Chdir(root)
 	initTestGit(t, root)
@@ -897,7 +1157,12 @@ func TestRunStatusHumanIncludesRepositoryHookState(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "commit-msg"), hooks.CommitMsgScript(), 0o755); err != nil {
+	dispatcher, err := os.ReadFile(filepath.Join(sourceDir, "..", "..", "internal", "hooks", "testdata", "lefthook-2.1.10-commit-msg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher = []byte(strings.ReplaceAll(string(dispatcher), "<LEFTHOOK_PATH>", "/opt/lefthook/bin/lefthook"))
+	if err := os.WriteFile(filepath.Join(root, ".git", "hooks", "commit-msg"), dispatcher, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.Command("git", "-C", root, "add", "smt.yaml")
@@ -913,12 +1178,20 @@ func TestRunStatusHumanIncludesRepositoryHookState(t *testing.T) {
 	if code := run([]string{"status"}, out, errOut); code != 0 {
 		t.Fatalf("run() code = %d, stderr=%q", code, errOut.String())
 	}
-	if want := "repo: clean hook=current"; !strings.Contains(out.String(), want) {
+	if want := "repo        .     OK   main    current"; !strings.Contains(out.String(), want) {
 		t.Fatalf("status output = %q, want %q", out.String(), want)
 	}
 }
 
 func TestRunDoctorDoesNotRedactOrPrintTokenValue(t *testing.T) {
+	original := doctorLookup
+	t.Cleanup(func() { doctorLookup = original })
+	doctorLookup = func(name string) (string, error) {
+		if name == "git" || name == "smt" || name == "lefthook" {
+			return "/tools/" + name, nil
+		}
+		return exec.LookPath(name)
+	}
 	root := t.TempDir()
 	t.Chdir(root)
 	initTestGit(t, root)
@@ -931,8 +1204,50 @@ func TestRunDoctorDoesNotRedactOrPrintTokenValue(t *testing.T) {
 	if code := run([]string{"doctor"}, out, errOut); code != 0 {
 		t.Fatalf("run() code = %d, stderr=%q", code, errOut.String())
 	}
+	if !strings.Contains(out.String(), "WARN hook:repo:commit-msg") || !strings.Contains(out.String(), "run smt hooks install") {
+		t.Fatalf("doctor output=%q, want absent-hook warning guidance", out.String())
+	}
 	if strings.Contains(out.String()+errOut.String(), secret) {
 		t.Fatalf("doctor output contains token value: %q", out.String()+errOut.String())
+	}
+}
+
+func TestRunDoctorRequiresBareSMTAndLefthookBeforeAbsentHookInstallGuidance(t *testing.T) {
+	root := t.TempDir()
+	initTestGit(t, root)
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "smt"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "smt.yaml"), []byte(testConfigYAML("gitlab", "repo", "repo")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathBin := t.TempDir()
+	if err := os.Symlink(gitPath, filepath.Join(pathBin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", pathBin)
+	t.Chdir(root)
+	original := doctorLookup
+	t.Cleanup(func() { doctorLookup = original })
+	doctorLookup = exec.LookPath
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := run([]string{"doctor"}, out, errOut); code != exitValidation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{"ERROR tool:smt", "ERROR tool:lefthook", "from the SMT source checkout", "task build", "export PATH=\"$PWD/bin:$PATH\"", "return to the target workspace and rerun smt doctor", "TOOLS\n", "HOOKS\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output=%q want=%q", out.String(), want)
+		}
+	}
+	if strings.Index(out.String(), "TOOLS\n") > strings.Index(out.String(), "HOOKS\n") || strings.Contains(out.String(), "from the workspace root") || strings.Contains(out.String(), "run smt hooks install") || strings.Contains(out.String(), "doctor-secret") {
+		t.Fatalf("unsafe guidance/order: %q", out.String())
 	}
 }
 

@@ -338,6 +338,39 @@ func TestMobileAbsentLeavesExistingArtifactOutputUnchanged(t *testing.T) {
 	}
 }
 
+func TestServiceWritesPortableLefthookConfigurationWithoutLefthookOnPath(t *testing.T) {
+	parent := t.TempDir()
+	raw := []byte(`version: 1
+commit: {types: [feat], scopes: [repo, web]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+`)
+	cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "")
+	destination := filepath.Join(parent, "workspace")
+	s := Service{Config: *cfg, Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return nil })}
+	if err := s.Apply(context.Background(), destination, raw); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		filepath.Join(destination, "lefthook.yml"):            "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config smt.yaml {1}\n",
+		filepath.Join(destination, "web-app", "lefthook.yml"): "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config ../smt.yaml {1}\n",
+	} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("lefthook config %s = %q, err=%v, want %q", path, got, err, want)
+		}
+	}
+	nested, err := lefthookConfig(filepath.Join(destination, "services", "web"), destination)
+	if err != nil || nested != "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config ../../smt.yaml {1}\n" {
+		t.Fatalf("nested lefthook config=%q err=%v", nested, err)
+	}
+}
+
 func blueprintBytes() []byte {
 	return []byte(`version: 1
 workspace: {ai_assist: codex, stack: {web: nextjs}}

@@ -6,9 +6,18 @@ The implementation spec is the behavioral source of truth.
 
 ## Current accepted scope
 
-Implement and verify the local diagnostics slice only:
+Implement and verify the local workspace diagnostics and hook slice:
 
 - `status [--json]` and `doctor`;
+- human status uses `profiles: none` with no configured profiles, while
+  `status --json` retains `profiles: []`;
+- `hooks install [--dry-run]` with all-repository preflight, per-repository
+  argument-array `git config --get core.hooksPath` and `lefthook validate`,
+  plus root-first `lefthook install commit-msg` installation;
+- generated root and child `lefthook.yml` with top-level
+  `no_auto_install: true` and `assert_lefthook_installed: true`, delegating to
+  bare `smt validate-message --config FILE {1}`;
+- `validate-message [--config FILE] FILE`;
 - `check --profile hook|submit|ci-parity`, with optional `--repo`,
   `--dry-run`, and explicit `--allow-worktree-mutation`;
 - `contracts validate` and `ci audit`;
@@ -24,9 +33,31 @@ paths within the workspace, and never print or persist secrets.
 
 Do not implement changesets, release plan/run, cloud or database actions,
 provider calls, YAML selector rewrites, or GitLab/GitHub MR/PR submission.
-`checkout`, `hooks install`, commit-message/range validation, and the earlier
-provider-backed submit design remain planned future behavior. Preserve their
-documented safety intent without claiming they exist.
+`checkout`, `validate-range`, and the earlier provider-backed submit design
+remain planned future behavior. Preserve their documented safety intent without
+claiming they exist. Hook installation must never force, overwrite an unmanaged
+custom, lookalike, modified, symlinked, directory, or other nonregular
+`commit-msg` target, or roll back a partial root-first install. Any nonempty
+effective `core.hooksPath`, including a relative path, is a manually resolved
+custom hook-path policy that blocks the complete plan. An exact recognized
+historical SMT hook is eligible for migration, and Lefthook 2.1.10 may preserve
+it as `commit-msg.old` only when no `.old` entry exists. If `commit-msg.old`
+exists, including as a symlink, both the real install and `--dry-run` must
+reject the whole plan before root-first execution; a current Lefthook dispatcher
+with `.old` remains allowed. Lefthook would require `--force` for that legacy
+migration, but SMT must require manual collision resolution without exposing
+paths or hook contents. This never authorizes force, reset, shell execution, or
+overwriting unmanaged hooks. It requires bare `smt` and Lefthook on `PATH`.
+From the SMT source checkout, the supported setup is `task build`, then
+`export PATH="$PWD/bin:$PATH"`, followed by a return to the target workspace
+for `smt doctor` and hook installation. `doctor` must check Git, smt, and
+Lefthook and guide missing-tool remediation before hook installation. Resolve
+both tool names with `exec.LookPath`; use argument-array execution for Git
+config plus `lefthook validate` and `lefthook install commit-msg`. The generated assertion
+must make a missing Lefthook binary fail the Git hook instead of silently
+skipping validation. Both tools need durable PATH availability in shell, IDE,
+and GUI hook-launch environments. `apply` may generate this bare-`smt`
+Lefthook configuration but must not execute Lefthook.
 
 Use the Go standard library and the existing package boundaries. Preserve user
 changes. Add focused tests for every new behavior, run the narrowest useful

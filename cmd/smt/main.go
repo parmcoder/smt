@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	applypkg "github.com/parmcoder/smt/internal/apply"
@@ -45,6 +46,7 @@ var newInputIsTerminal = func(in io.Reader) bool {
 }
 
 var newApplyService = func() applypkg.Service { return applypkg.New() }
+var doctorLookup = exec.LookPath
 var reviewIsInteractive = func(in io.Reader, out io.Writer) bool {
 	a, ok := in.(*os.File)
 	if !ok {
@@ -204,7 +206,20 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	})
 	pushCommand.Flags().BoolVar(&pushDryRun, "dry-run", false, "validate and print the push plan")
 
-	worktreeCommand := legacyLeaf("worktree", "Manage linked worktrees", "workspace", "worktree")
+	worktreeCommand := &cobra.Command{
+		Use:     "worktree",
+		Short:   "Manage linked worktrees",
+		GroupID: "workspace",
+		Long: `Create synchronized linked worktrees across the configured root and submodules.
+
+Run smt worktree add PATH --branch NAME [--dry-run]. The branch must be new in every configured repository, and PATH must be outside the configured workspace. SMT completes every root and submodule preflight before creating anything, then creates the root worktree before nested child worktrees. Use --dry-run to inspect the plan without changing Git state. If a child creation fails after the root succeeds, use the reported paths for manual recovery; SMT does not remove worktrees automatically.`,
+		Example: `  smt worktree add ../platform-feature --branch feature/demo --dry-run
+  smt worktree add ../platform-feature --branch feature/demo`,
+		Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
+	}
 	var worktreeBranch string
 	var worktreeDryRun bool
 	worktreeAddCommand := nativeLeaf("add PATH", "Create linked worktrees", "", "worktree", cobra.MatchAll(cobra.ExactArgs(1), requireNonEmptyFlag("branch", &worktreeBranch)), func(args []string, _ *logrus.Logger) int {
@@ -219,6 +234,27 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	_ = worktreeAddCommand.MarkFlagRequired("branch")
 	worktreeCommand.AddCommand(worktreeAddCommand)
 
+	hooksCommand := &cobra.Command{
+		Use:     "hooks",
+		Short:   "Manage workspace Git hooks",
+		GroupID: "workspace",
+		Long:    "Install commit-msg hooks safely across the configured root and submodules. smt and lefthook must both be on PATH; from the SMT source checkout, run task build then export PATH=\"$PWD/bin:$PATH\". Return to the target workspace before installation.",
+		Args:    cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
+	}
+	var hooksDryRun bool
+	hooksInstallCommand := nativeLeaf("install", "Install commit-msg hooks safely", "", "hooks install", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runHooksInstall(context.Background(), *cfg, root, hooksDryRun, out, errOut)
+	})
+	hooksInstallCommand.Flags().BoolVar(&hooksDryRun, "dry-run", false, "validate and print the hook install plan")
+	hooksCommand.AddCommand(hooksInstallCommand)
+
 	var statusJSON bool
 	statusCommand := nativeLeaf("status", "Show workspace status", "workspace", "status", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
 		cfg, root, code := loadConfig(errOut)
@@ -228,6 +264,7 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		return runStatus(context.Background(), cfg, root, git.ExecRunner{}, statusJSON, out, errOut)
 	})
 	statusCommand.Flags().BoolVar(&statusJSON, "json", false, "write JSON output")
+	statusCommand.Long = "Show Git state, commit-msg hook state, configured check profiles, and contract findings."
 
 	doctorCommand := nativeLeaf("doctor", "Check local readiness", "workspace", "doctor", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
 		cfg, _, code := loadConfig(errOut)
@@ -236,10 +273,13 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		}
 		return runDoctor(context.Background(), cfg, git.ExecRunner{}, out, errOut)
 	})
+	doctorCommand.Long = "Check repository, hook, tool, and credential readiness with safe remediation."
 
+	var validateConfig string
 	validateCommand := nativeLeaf("validate-message FILE", "Validate a commit message", "developer-tools", "validate-message", cobra.ExactArgs(1), func(args []string, _ *logrus.Logger) int {
-		return runValidateMessage(args[0], out, errOut)
+		return runValidateMessage(validateConfig, args[0], out, errOut)
 	})
+	validateCommand.Flags().StringVar(&validateConfig, "config", "./smt.yaml", "configuration file")
 	var checkProfile, checkRepository string
 	var checkAllowMutation, checkDryRun bool
 	checkCommand := nativeLeaf("check", "Run a check profile", "developer-tools", "check", cobra.MatchAll(cobra.NoArgs, requireNonEmptyFlag("profile", &checkProfile)), func(_ []string, logger *logrus.Logger) int {
@@ -352,7 +392,7 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	})
 	releaseCheckCommand.Flags().BoolVar(&releaseCheckJSON, "json", false, "write JSON output")
 	releaseCommand.AddCommand(releaseCheckCommand)
-	root.AddCommand(newCommand, applyCommand, pushCommand, worktreeCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
+	root.AddCommand(newCommand, applyCommand, pushCommand, worktreeCommand, hooksCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
 	return root
 }
 
@@ -543,6 +583,30 @@ func runWorktree(ctx context.Context, cfg config.Config, root string, runner git
 	return exitValidation
 }
 
+func runHooksInstall(ctx context.Context, cfg config.Config, root string, dryRun bool, out, errOut io.Writer) int {
+	runner := hooks.ExecRunner{}
+	gitRunner := git.ExecRunner{}
+	plan, err := hooks.PlanInstall(ctx, root, cfg.Repositories, exec.LookPath, git.Inspector{Runner: gitRunner}, gitRunner, runner)
+	if err != nil {
+		fmt.Fprintf(errOut, "hooks: %v\n", err)
+		return exitValidation
+	}
+	if dryRun {
+		for _, repository := range plan.Repositories {
+			fmt.Fprintf(out, "hooks install plan: %s\n", repository.ID)
+		}
+	}
+	report, err := hooks.ExecuteInstall(ctx, plan, runner, dryRun)
+	if err != nil {
+		fmt.Fprintf(errOut, "hooks: %v\ninstalled: %s\npending: %s\n", err, strings.Join(report.Installed, ","), strings.Join(report.Pending, ","))
+		return exitValidation
+	}
+	if !dryRun {
+		fmt.Fprintf(out, "hooks installed: %s\n", strings.Join(report.Installed, ","))
+	}
+	return exitOK
+}
+
 func runReview(in io.Reader, out, errOut io.Writer) int {
 	if !reviewIsInteractive(in, out) {
 		fmt.Fprintln(errOut, "review: interactive terminal input and output are required")
@@ -674,15 +738,16 @@ func safeRelease(value beads.ReleaseReadiness) safeReleaseResult {
 	return safeReleaseResult{Ready: value.Ready, Blocking: safeIssues(value.Blocking)}
 }
 
-func runValidateMessage(path string, out, errOut io.Writer) int {
+func runValidateMessage(configPath, path string, out, errOut io.Writer) int {
 	message, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(errOut, "read message: %v\n", err)
 		return exitInternal
 	}
-	cfg, _, code := loadConfig(errOut)
-	if code != exitOK {
-		return code
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(errOut, "configuration error: %v\n", err)
+		return exitInternal
 	}
 	if err := commit.ValidateMessage(string(message), commit.Policy{Types: cfg.Commit.Types, Scopes: cfg.Commit.Scopes}); err != nil {
 		fmt.Fprintln(errOut, err)
@@ -743,29 +808,12 @@ func runStatus(ctx context.Context, cfg *config.Config, root string, runner git.
 		}
 		return exitOK
 	}
-	fmt.Fprintf(out, "profiles: %s\n", strings.Join(result.Profiles, ", "))
-	fmt.Fprintf(out, "contracts: errors=%d warnings=%d\n", result.Contracts.Errors, result.Contracts.Warnings)
-	for _, entry := range entries {
-		state := "uninitialized"
-		if entry.Initialized {
-			state = "clean"
-			if entry.Dirty {
-				state = "dirty"
-			}
-			if entry.Detached {
-				state = "detached"
-			}
-		}
-		if entry.Error != "" {
-			state += " error=" + entry.Error
-		}
-		fmt.Fprintf(out, "%s: %s hook=%s\n", entry.ID, state, entry.HookStatus)
-	}
+	renderStatus(out, result)
 	return exitOK
 }
 
 func runDoctor(ctx context.Context, cfg *config.Config, runner git.Runner, out, errOut io.Writer) int {
-	doctor := operations.NewDoctorWithHookInspector(*cfg, exec.LookPath, func(name string) bool {
+	doctor := operations.NewDoctorWithHookInspector(*cfg, doctorLookup, func(name string) bool {
 		_, ok := os.LookupEnv(name)
 		return ok
 	}, func(ctx context.Context, dir string) (git.State, error) {
@@ -776,15 +824,170 @@ func runDoctor(ctx context.Context, cfg *config.Config, runner git.Runner, out, 
 		fmt.Fprintf(errOut, "doctor: %v\n", err)
 		return exitInternal
 	}
-	failed := false
+	renderDoctor(out, result)
 	for _, check := range result.Checks {
-		fmt.Fprintf(out, "%s: %s - %s\n", check.ID, check.Status, check.Message)
-		failed = failed || check.Status == "error"
-	}
-	if failed {
-		return exitValidation
+		if check.Status == "error" {
+			return exitValidation
+		}
 	}
 	return exitOK
+}
+
+func renderStatus(out io.Writer, result statusOutput) {
+	label := "OK"
+	for _, entry := range result.Repositories {
+		if !entry.Initialized || entry.Dirty || entry.Detached || entry.Error != "" || entry.HookStatus == hooks.HookAbsent || entry.HookStatus == hooks.HookUnmanaged {
+			label = "WARN"
+		}
+	}
+	if result.Contracts.Errors > 0 {
+		label = "ERROR"
+	}
+	fmt.Fprintf(out, "STATUS: %s\n", label)
+	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(table, "REPOSITORY\tPATH\tGIT\tBRANCH\tHOOK")
+	for _, entry := range result.Repositories {
+		gitState := "OK"
+		if !entry.Initialized {
+			gitState = "UNINITIALIZED"
+		} else if entry.Detached {
+			gitState = "DETACHED"
+		} else if entry.Dirty {
+			gitState = "DIRTY"
+		}
+		if entry.Error != "" {
+			gitState = "ERROR"
+		}
+		branch := entry.Branch
+		if branch == "" {
+			branch = "-"
+		}
+		hook := string(entry.HookStatus)
+		if hook == "" {
+			hook = "unknown"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", entry.ID, entry.Path, gitState, branch, hook)
+	}
+	_ = table.Flush()
+	profiles := "none"
+	if len(result.Profiles) > 0 {
+		profiles = strings.Join(result.Profiles, ", ")
+	}
+	fmt.Fprintf(out, "profiles: %s\ncontracts: errors=%d warnings=%d\n", profiles, result.Contracts.Errors, result.Contracts.Warnings)
+	steps := map[string]bool{}
+	for _, entry := range result.Repositories {
+		if entry.Dirty {
+			steps["commit, stash, or discard local changes before workspace operations"] = true
+		}
+		if entry.Detached {
+			steps["switch detached repositories to a branch before workspace operations"] = true
+		}
+		if !entry.Initialized || entry.Error != "" {
+			steps["inspect the affected repository locally"] = true
+		}
+		if entry.HookStatus == hooks.HookAbsent {
+			steps["run smt hooks install to install missing commit-msg hooks"] = true
+		}
+		if entry.HookStatus == hooks.HookUnmanaged {
+			steps["custom commit-msg hooks are never overwritten; resolve them manually before smt hooks install"] = true
+		}
+	}
+	if result.Contracts.Errors > 0 {
+		steps["review contract errors"] = true
+	} else if result.Contracts.Warnings > 0 {
+		steps["review contract warnings"] = true
+	}
+	printSteps(out, steps)
+}
+
+func renderDoctor(out io.Writer, result operations.Result) {
+	label := "OK"
+	for _, check := range result.Checks {
+		if check.Status == "error" {
+			label = "ERROR"
+			break
+		}
+		if check.Status == "warning" {
+			label = "WARN"
+		}
+	}
+	fmt.Fprintf(out, "DOCTOR: %s\n", label)
+	missingSMT, missingLefthook := false, false
+	for _, check := range result.Checks {
+		if check.Status == "error" && check.ID == "tool:smt" {
+			missingSMT = true
+		}
+		if check.Status == "error" && check.ID == "tool:lefthook" {
+			missingLefthook = true
+		}
+	}
+	groups := []struct {
+		name  string
+		match func(operations.Check) bool
+	}{
+		{"REPOSITORIES", func(check operations.Check) bool { return strings.HasPrefix(check.ID, "repo:") }},
+		{"TOOLS", func(check operations.Check) bool { return check.ID == "git" || strings.HasPrefix(check.ID, "tool:") }},
+		{"HOOKS", func(check operations.Check) bool { return strings.HasPrefix(check.ID, "hook:") }},
+		{"CREDENTIALS", func(check operations.Check) bool { return strings.HasPrefix(check.ID, "token:") }},
+	}
+	steps := map[string]bool{}
+	for _, group := range groups {
+		var found bool
+		for _, check := range result.Checks {
+			if !group.match(check) {
+				continue
+			}
+			if !found {
+				fmt.Fprintln(out, group.name)
+				found = true
+			}
+			message := check.Message
+			if check.Status == "error" && strings.HasPrefix(check.ID, "hook:") {
+				message = "hook inspection failed"
+			}
+			fmt.Fprintf(out, "%s %s - %s\n", checkLabel(check.Status), check.ID, message)
+			if check.Status == "ok" {
+				continue
+			}
+			switch {
+			case strings.HasPrefix(check.ID, "hook:") && strings.Contains(check.Message, "absent") && !missingSMT && !missingLefthook:
+				steps["run smt hooks install to install missing commit-msg hooks"] = true
+			case strings.HasPrefix(check.ID, "hook:") && strings.Contains(check.Message, "unmanaged"):
+				steps["custom commit-msg hooks are never overwritten; resolve them manually before smt hooks install"] = true
+			case strings.HasPrefix(check.ID, "tool:lefthook"):
+				steps["install lefthook and rerun smt doctor"] = true
+			case check.ID == "tool:smt":
+				steps["from the SMT source checkout, run task build then export PATH=\"$PWD/bin:$PATH\"; return to the target workspace and rerun smt doctor"] = true
+			case strings.HasPrefix(check.ID, "token:"):
+				steps["set SMT_"+strings.ToUpper(strings.TrimPrefix(check.ID, "token:"))+"_TOKEN before provider operations"] = true
+			default:
+				steps["inspect the affected repository locally"] = true
+			}
+		}
+	}
+	printSteps(out, steps)
+}
+
+func checkLabel(status string) string {
+	if status == "warning" {
+		return "WARN"
+	}
+	return strings.ToUpper(status)
+}
+
+func printSteps(out io.Writer, set map[string]bool) {
+	if len(set) == 0 {
+		return
+	}
+	steps := make([]string, 0, len(set))
+	for step := range set {
+		steps = append(steps, step)
+	}
+	sort.Strings(steps)
+	fmt.Fprintln(out, "next steps:")
+	for _, step := range steps {
+		fmt.Fprintf(out, "- %s\n", step)
+	}
 }
 
 func runCheck(ctx context.Context, cfg config.Config, runner git.Runner, profile, repoID string, allowMutation, dryRun bool, out, errOut io.Writer, logger *logrus.Logger) int {

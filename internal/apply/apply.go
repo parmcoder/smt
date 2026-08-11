@@ -194,6 +194,9 @@ func addChild(ctx context.Context, root, publishedRoot string, c component) (plu
 	if err := writeFile(filepath.Join(bootstrap, ".gitignore"), componentIgnore(c.kind)); err != nil {
 		return plumbing.ZeroHash, err
 	}
+	if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root); err != nil {
+		return plumbing.ZeroHash, err
+	}
 	wt, err := repo.Worktree()
 	if err != nil {
 		return plumbing.ZeroHash, err
@@ -379,8 +382,25 @@ func writeArtifacts(root string, cs []component) error {
 			return err
 		}
 	}
-	return nil
+	return writeLefthookConfig(root, root, root)
 }
+
+func writeLefthookConfig(destination, repositoryRoot, workspaceRoot string) error {
+	contents, err := lefthookConfig(repositoryRoot, workspaceRoot)
+	if err != nil {
+		return err
+	}
+	return writeFile(filepath.Join(destination, "lefthook.yml"), contents)
+}
+
+func lefthookConfig(repositoryRoot, workspaceRoot string) (string, error) {
+	configPath, err := filepath.Rel(repositoryRoot, filepath.Join(workspaceRoot, "smt.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("resolve root config path: %w", err)
+	}
+	return "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config " + filepath.ToSlash(configPath) + " {1}\n", nil
+}
+
 func writeFile(path, value string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

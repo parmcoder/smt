@@ -55,7 +55,9 @@ func NewDoctorWithHookInspector(cfg config.Config, lookup ExecutableLookup, envi
 // Run returns all checks in a stable order and does not mutate the workspace.
 func (d *Doctor) Run(ctx context.Context) (Result, error) {
 	result := Result{Checks: make([]Check, 0)}
-	result.Checks = append(result.Checks, d.executableCheck("git"))
+	for _, executable := range []string{"git", "smt", "lefthook"} {
+		result.Checks = append(result.Checks, d.executableCheck(executable))
+	}
 
 	for _, repository := range d.config.Repositories {
 		result.Checks = append(result.Checks, d.repositoryCheck(ctx, repository))
@@ -100,7 +102,7 @@ func (d *Doctor) hookCheck(repository config.Repository) Check {
 		return check
 	}
 	check.Status = "ok"
-	if status == hooks.HookUnmanaged {
+	if status == hooks.HookAbsent || status == hooks.HookUnmanaged {
 		check.Status = "warning"
 	}
 	check.Message = "repository " + repository.ID + " commit-msg hook is " + string(status)
@@ -154,11 +156,15 @@ func (d *Doctor) tokenCheck(provider, variable string) Check {
 }
 
 func (d *Doctor) profileExecutables() []string {
+	core := map[string]struct{}{"git": {}, "smt": {}, "lefthook": {}}
 	seen := make(map[string]struct{})
 	for _, repository := range d.config.Repositories {
 		for _, checks := range repository.Profiles {
 			for _, check := range checks {
 				if len(check.Argv) > 0 && check.Argv[0] != "" {
+					if _, ok := core[check.Argv[0]]; ok {
+						continue
+					}
 					seen[check.Argv[0]] = struct{}{}
 				}
 			}
