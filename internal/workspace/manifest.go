@@ -140,7 +140,7 @@ func FindRunManifest(workspacePath, featureID, branch string) (RunManifest, erro
 		return RunManifest{}, errors.New("read prepared workspace manifest")
 	}
 	var manifest RunManifest
-	if err := json.Unmarshal(data, &manifest); err != nil || manifest.SchemaVersion != 1 || manifest.Feature.ID != featureID || manifest.Branch != branch || filepath.Clean(manifest.WorkspacePath) != root {
+	if err := json.Unmarshal(data, &manifest); err != nil || manifest.Feature.ID != featureID || manifest.Branch != branch || validateManifest(manifest, root) != nil {
 		return RunManifest{}, errors.New("prepared workspace manifest is corrupt or does not match")
 	}
 	return manifest, nil
@@ -177,7 +177,7 @@ func FindPreparedRepository(workspacePath, currentPath, branch string) (RunManif
 			return RunManifest{}, ManifestRepository{}, errors.New("read prepared workspace manifest")
 		}
 		var manifest RunManifest
-		if json.Unmarshal(data, &manifest) != nil || manifest.SchemaVersion != 1 || !manifestIDPattern.MatchString(manifest.Feature.ID) || filepath.Clean(manifest.WorkspacePath) != root || manifest.Branch != branch {
+		if json.Unmarshal(data, &manifest) != nil || validateManifest(manifest, root) != nil || manifest.Branch != branch {
 			return RunManifest{}, ManifestRepository{}, errors.New("prepared workspace manifest is corrupt or does not match")
 		}
 		for _, repository := range manifest.Repositories {
@@ -197,4 +197,58 @@ func FindPreparedRepository(workspacePath, currentPath, branch string) (RunManif
 		return RunManifest{}, ManifestRepository{}, errors.New("multiple matching prepared workspace manifests were found")
 	}
 	return matches[0].manifest, matches[0].repository, nil
+}
+
+func validateManifest(manifest RunManifest, root string) error {
+	if manifest.SchemaVersion != 1 || !manifestIDPattern.MatchString(manifest.Feature.ID) || strings.TrimSpace(manifest.Branch) == "" {
+		return errors.New("manifest metadata is invalid")
+	}
+	workspacePath, err := filepath.Abs(manifest.WorkspacePath)
+	if err != nil || filepath.Clean(workspacePath) != filepath.Clean(root) {
+		return errors.New("manifest workspace path is invalid")
+	}
+	seenIDs := make(map[string]struct{}, len(manifest.Repositories))
+	seenPaths := make(map[string]struct{}, len(manifest.Repositories))
+	for _, repository := range manifest.Repositories {
+		if strings.TrimSpace(repository.ID) == "" || strings.TrimSpace(repository.Path) == "" || strings.TrimSpace(repository.BaseBranch) == "" || strings.TrimSpace(repository.BaseCommit) == "" {
+			return errors.New("manifest repository is invalid")
+		}
+		if _, exists := seenIDs[repository.ID]; exists {
+			return errors.New("manifest contains duplicate repository IDs")
+		}
+		seenIDs[repository.ID] = struct{}{}
+		cleanedPath := filepath.Clean(repository.Path)
+		if filepath.IsAbs(repository.Path) {
+			return errors.New("manifest repository path is invalid")
+		}
+		resolvedPath := filepath.Clean(filepath.Join(root, cleanedPath))
+		if resolvedPath != filepath.Clean(root) && !strings.HasPrefix(resolvedPath, filepath.Clean(root)+string(filepath.Separator)) {
+			return errors.New("manifest repository path is invalid")
+		}
+		if _, exists := seenPaths[cleanedPath]; exists {
+			return errors.New("manifest contains duplicate repository paths")
+		}
+		seenPaths[cleanedPath] = struct{}{}
+		for _, task := range repository.Tasks {
+			if !manifestIDPattern.MatchString(task.ID) || (task.ExternalRef != "" && !externalReferencePattern.MatchString(task.ExternalRef)) {
+				return errors.New("manifest task is invalid")
+			}
+			allowed := make(map[string]struct{}, len(task.AllowedReferences))
+			for _, reference := range task.AllowedReferences {
+				if strings.TrimSpace(reference) == "" {
+					return errors.New("manifest task reference is invalid")
+				}
+				allowed[reference] = struct{}{}
+			}
+			if _, exists := allowed[task.ID]; !exists {
+				return errors.New("manifest task references are incomplete")
+			}
+			if task.ExternalRef != "" {
+				if _, exists := allowed[task.ExternalRef]; !exists {
+					return errors.New("manifest task references are incomplete")
+				}
+			}
+		}
+	}
+	return nil
 }

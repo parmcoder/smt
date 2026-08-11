@@ -98,7 +98,7 @@ func TestFindPreparedRepositoryMatchesCurrentPathAndBranch(t *testing.T) {
 		Feature:       FeatureContext{ID: "feature", Title: "Feature"},
 		WorkspacePath: root,
 		Branch:        "feature/one",
-		Repositories:  []ManifestRepository{{ID: "repo", Path: "."}, {ID: "api", Path: "api", Tasks: []TaskAssignment{{ID: "task", AllowedReferences: []string{"task"}}}}},
+		Repositories:  []ManifestRepository{{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "root-sha"}, {ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-sha", Tasks: []TaskAssignment{{ID: "task", AllowedReferences: []string{"task"}}}}},
 	}
 	if _, err := WriteRunManifest(root, manifest); err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestFindPreparedRepositoryMatchesCurrentPathAndBranch(t *testing.T) {
 func TestFindPreparedRepositoryFailsClosedForAmbiguousOrCorruptRuns(t *testing.T) {
 	root := t.TempDir()
 	for _, feature := range []string{"feature-a", "feature-b"} {
-		manifest := RunManifest{SchemaVersion: 1, Feature: FeatureContext{ID: feature}, WorkspacePath: root, Branch: "feature/one", Repositories: []ManifestRepository{{ID: "repo", Path: "."}}}
+		manifest := RunManifest{SchemaVersion: 1, Feature: FeatureContext{ID: feature}, WorkspacePath: root, Branch: "feature/one", Repositories: []ManifestRepository{{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: feature + "-sha"}}}
 		if _, err := WriteRunManifest(root, manifest); err != nil {
 			t.Fatal(err)
 		}
@@ -128,5 +128,55 @@ func TestFindPreparedRepositoryFailsClosedForAmbiguousOrCorruptRuns(t *testing.T
 	}
 	if _, _, err := FindPreparedRepository(root, root, "feature/one"); err == nil || !strings.Contains(err.Error(), "corrupt") {
 		t.Fatalf("corrupt error=%v", err)
+	}
+}
+
+func TestFindPreparedRepositoryRejectsSemanticallyCorruptRuns(t *testing.T) {
+	tests := []struct {
+		name         string
+		repositories []ManifestRepository
+	}{
+		{
+			name: "duplicate repository IDs",
+			repositories: []ManifestRepository{
+				{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "root-sha"},
+				{ID: "repo", Path: "api", BaseBranch: "main", BaseCommit: "api-sha"},
+			},
+		},
+		{
+			name: "missing base state",
+			repositories: []ManifestRepository{
+				{ID: "repo", Path: ".", BaseBranch: "main"},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			runs := filepath.Join(root, ".smt", "runs")
+			if err := os.MkdirAll(runs, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			manifest := RunManifest{
+				SchemaVersion: 1,
+				Feature:       FeatureContext{ID: "feature", Title: "Feature"},
+				WorkspacePath: root,
+				Branch:        "feature/one",
+				Repositories:  test.repositories,
+			}
+			data, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(runs, "feature.json"), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := FindRunManifest(root, "feature", "feature/one"); err == nil || !strings.Contains(err.Error(), "corrupt") {
+				t.Fatalf("semantic corruption via feature lookup error=%v", err)
+			}
+			if _, _, err := FindPreparedRepository(root, root, "feature/one"); err == nil || !strings.Contains(err.Error(), "corrupt") {
+				t.Fatalf("semantic corruption error=%v", err)
+			}
+		})
 	}
 }

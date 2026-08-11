@@ -291,8 +291,8 @@ func TestRunValidateMessageEnforcesPreparedRepositoryAssignment(t *testing.T) {
 		WorkspacePath: root,
 		Branch:        state.Branch,
 		Repositories: []workspacepkg.ManifestRepository{
-			{ID: "repo", Path: "."},
-			{ID: "api", Path: "api", Tasks: []workspacepkg.TaskAssignment{{ID: "task", AllowedReferences: []string{"task", "API-7"}}}},
+			{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "root-base"},
+			{ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-base", Tasks: []workspacepkg.TaskAssignment{{ID: "task", AllowedReferences: []string{"task", "API-7"}}}},
 		},
 	}
 	if _, err := workspacepkg.WriteRunManifest(root, manifest); err != nil {
