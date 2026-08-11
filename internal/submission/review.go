@@ -75,6 +75,9 @@ func ReviewContent(manifest workspacepkg.RunManifest, repositoryID string, child
 		for _, task := range repository.Tasks {
 			addReference(task.ID)
 			addReference(task.ExternalRef)
+			for _, reference := range task.AllowedReferences {
+				addReference(reference)
+			}
 		}
 	}
 	if len(childLinks) > 0 {
@@ -108,7 +111,7 @@ func ReviewLink(providerName string, settings config.ProviderConfig, project, so
 		if parsed.Host == "api.github.com" {
 			parsed.Host = "github.com"
 		}
-		parsed.Path = strings.TrimSuffix(parsed.Path, "/api/v3") + "/" + project + "/compare/" + url.PathEscape(targetBranch) + "..." + url.PathEscape(sourceBranch)
+		parsed.Path = strings.TrimSuffix(parsed.Path, "/api/v3") + "/" + project + "/compare/" + targetBranch + "..." + sourceBranch
 		return parsed.String()
 	}
 	parsed.Path = strings.TrimSuffix(parsed.Path, "/api/v4") + "/" + project + "/-/merge_requests/new"

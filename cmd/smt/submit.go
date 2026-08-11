@@ -105,6 +105,11 @@ func runWorkspaceSubmit(ctx context.Context, cfg config.Config, root, featureID 
 			continue
 		}
 		settings := providerSettings(cfg, repository.Provider)
+		if filepath.Clean(step.Path) == "." && !allChildLinks(plan, childLinks) {
+			output.Reviews = append(output.Reviews, submitReviewOutput{Repository: step.ID, Provider: repository.Provider, Status: "deferred", Title: title, Body: body, Error: "child review URLs are not available"})
+			output.Warnings = append(output.Warnings, "root review deferred until child review URLs are available")
+			continue
+		}
 		token := os.Getenv("SMT_" + strings.ToUpper(repository.Provider) + "_TOKEN")
 		if strings.TrimSpace(token) == "" {
 			link := submissionpkg.ReviewLink(repository.Provider, settings, repository.Project, manifest.Branch, entry.BaseBranch)
@@ -122,11 +127,6 @@ func runWorkspaceSubmit(ctx context.Context, cfg config.Config, root, featureID 
 		if providerErr != nil {
 			providerErrors = true
 			output.Reviews = append(output.Reviews, submitReviewOutput{Repository: step.ID, Provider: repository.Provider, Status: "error", Title: title, Body: body, Error: safeProviderError(providerErr)})
-			continue
-		}
-		if filepath.Clean(step.Path) == "." && !allChildLinks(plan, childLinks) {
-			output.Reviews = append(output.Reviews, submitReviewOutput{Repository: step.ID, Provider: repository.Provider, Status: "deferred", Title: title, Body: body, Error: "child review URLs are not available"})
-			output.Warnings = append(output.Warnings, "root review deferred until child review URLs are available")
 			continue
 		}
 		spec := providerpkg.ReviewSpec{Project: repository.Project, SourceBranch: manifest.Branch, TargetBranch: entry.BaseBranch, Title: title, Description: body, Draft: !ready}

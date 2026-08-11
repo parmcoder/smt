@@ -144,3 +144,20 @@ func TestProviderErrorsNeverExposeTokenOrResponseBody(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestProviderMalformedResponseIsSafe(t *testing.T) {
+	secret := "malformed-private-body"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, secret)
+	}))
+	defer server.Close()
+	client, err := NewGitHub(server.URL, "token-secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.InspectProject(context.Background(), "acme/api")
+	if err == nil || !strings.Contains(err.Error(), "malformed") || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "token-secret") {
+		t.Fatalf("error=%v", err)
+	}
+}

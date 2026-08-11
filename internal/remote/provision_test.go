@@ -46,6 +46,7 @@ func (r *provisionRunner) Run(_ context.Context, dir string, args ...string) (gi
 
 type provisionProvider struct {
 	created []string
+	specs   []provider.ProjectSpec
 	inspect []string
 }
 
@@ -56,6 +57,7 @@ func (p *provisionProvider) InspectProject(_ context.Context, project string) (p
 
 func (p *provisionProvider) CreateProject(_ context.Context, spec provider.ProjectSpec) (provider.ProjectInfo, error) {
 	p.created = append(p.created, spec.Project)
+	p.specs = append(p.specs, spec)
 	return provider.ProjectInfo{Exists: true, Project: spec.Project, SSHURL: "git@example:" + spec.Project + ".git", WebURL: "https://example/" + spec.Project}, nil
 }
 
@@ -78,6 +80,11 @@ func TestProvisionCreatesChildFirstAndWiresOnlyAfterAllProjectsExist(t *testing.
 	}
 	if !reflect.DeepEqual(projectProvider.created, []string{"acme/api", "acme/root"}) {
 		t.Fatalf("created=%v", projectProvider.created)
+	}
+	for _, spec := range projectProvider.specs {
+		if spec.Visibility != "private" {
+			t.Fatalf("visibility=%q for %s", spec.Visibility, spec.Project)
+		}
 	}
 	if !reflect.DeepEqual(factoryTokens, []string{"github=github-token"}) {
 		t.Fatalf("factory tokens=%v", factoryTokens)
@@ -164,6 +171,36 @@ func TestProvisionMissingTokenDoesNotContactProvider(t *testing.T) {
 	}, func(string) string { return "" }, false)
 	if err == nil || !strings.Contains(err.Error(), "token is not configured") || called {
 		t.Fatalf("err=%v called=%t", err, called)
+	}
+}
+
+func TestProvisionSupportsMixedProvidersInChildFirstOrder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := provisionConfig()
+	cfg.Repositories[0].Provider = "github"
+	cfg.Repositories[1].Provider = "gitlab"
+	cfg.Repositories[1].Project = "acme/group/api"
+	runner := &provisionRunner{origins: map[string]string{}}
+	providers := map[string]*provisionProvider{"github": {}, "gitlab": {}}
+	var factoryOrder []string
+	report, err := Provision(context.Background(), cfg, root, runner, func(name string, _ config.ProviderConfig, _ string) (provider.ProjectProvider, error) {
+		factoryOrder = append(factoryOrder, name)
+		return providers[name], nil
+	}, func(name string) string { return name + "-token" }, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(factoryOrder, []string{"gitlab", "github"}) {
+		t.Fatalf("factory order=%v", factoryOrder)
+	}
+	if !reflect.DeepEqual(providers["gitlab"].created, []string{"acme/group/api"}) || !reflect.DeepEqual(providers["github"].created, []string{"acme/root"}) {
+		t.Fatalf("created gitlab=%v github=%v", providers["gitlab"].created, providers["github"].created)
+	}
+	if !reflect.DeepEqual(report.Configured, []string{"api", "repo"}) {
+		t.Fatalf("configured=%v", report.Configured)
 	}
 }
 
