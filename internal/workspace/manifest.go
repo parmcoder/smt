@@ -114,6 +114,27 @@ func manifestCheckProfiles(repository config.Repository) []string {
 	return names
 }
 
+// ValidateManifestRepository confirms that the prepared metadata still
+// matches the current repository configuration before later workspace work.
+func ValidateManifestRepository(entry ManifestRepository, repository config.Repository) error {
+	if entry.ID != repository.ID || filepath.Clean(entry.Path) != filepath.Clean(repository.Path) {
+		return errors.New("prepared manifest metadata does not match configuration")
+	}
+	if entry.Ownership != manifestOwnership(repository) || entry.IntegrationGate != manifestIntegrationGate(repository) {
+		return errors.New("prepared manifest metadata does not match configuration")
+	}
+	wantProfiles := manifestCheckProfiles(repository)
+	if len(entry.CheckProfiles) != len(wantProfiles) {
+		return errors.New("prepared manifest metadata does not match configuration")
+	}
+	for index := range wantProfiles {
+		if entry.CheckProfiles[index] != wantProfiles[index] {
+			return errors.New("prepared manifest metadata does not match configuration")
+		}
+	}
+	return nil
+}
+
 // WriteRunManifest atomically writes the ignored run manifest after preparation.
 func WriteRunManifest(workspacePath string, manifest RunManifest) (string, error) {
 	if manifest.SchemaVersion != 1 || !manifestIDPattern.MatchString(manifest.Feature.ID) {

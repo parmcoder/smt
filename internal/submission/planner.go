@@ -63,8 +63,11 @@ func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManif
 	selected := make(map[string]Step)
 	for _, repository := range cfg.Repositories {
 		entry, ok := byID[repository.ID]
-		if !ok || filepath.Clean(entry.Path) != filepath.Clean(repository.Path) {
+		if !ok {
 			return result, fmt.Errorf("workspace submit: prepared manifest does not match repository %s", repository.ID)
+		}
+		if err := workspacepkg.ValidateManifestRepository(entry, repository); err != nil {
+			return result, fmt.Errorf("workspace submit: manifest metadata for repository %s: %w", repository.ID, err)
 		}
 		directory := filepath.Join(root, repository.Path)
 		state, inspectErr := git.Inspect(ctx, runner, git.Repository{ID: repository.ID, Dir: directory, IsRoot: filepath.Clean(repository.Path) == "."})
@@ -106,7 +109,7 @@ func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManif
 		if filesErr != nil {
 			return result, fmt.Errorf("workspace submit: inspect repository %s changes", repository.ID)
 		}
-		if checksExist(repository, "submit") {
+		if hasManifestProfile(entry.CheckProfiles, "submit") {
 			if err := checks.RunProfile(ctx, checkExecutor, repositoryWithDirectory(repository, directory), "submit", changedFiles, false, dryRun); err != nil {
 				return result, fmt.Errorf("workspace submit: repository %s submit checks failed", repository.ID)
 			}
@@ -184,9 +187,13 @@ func repositoryWithDirectory(repository config.Repository, directory string) con
 	return repository
 }
 
-func checksExist(repository config.Repository, profile string) bool {
-	_, ok := repository.Profiles[profile]
-	return ok
+func hasManifestProfile(profiles []string, want string) bool {
+	for _, profile := range profiles {
+		if profile == want {
+			return true
+		}
+	}
+	return false
 }
 
 func originURL(ctx context.Context, runner git.Runner, directory string) (string, error) {

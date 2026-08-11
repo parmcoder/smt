@@ -121,11 +121,34 @@ func TestPlanDryRunDoesNotExecuteSubmitChecks(t *testing.T) {
 		log:    map[string]string{root: "root-sha\x00feat(repo): [feature] change\x00"},
 	}
 	checks := &countingCheckExecutor{}
-	if _, err := Plan(context.Background(), cfg, plannerManifest(root), "feature", root, runner, checks, true); err != nil {
+	manifest := plannerManifest(root)
+	manifest.Repositories[0].CheckProfiles = []string{"submit"}
+	if _, err := Plan(context.Background(), cfg, manifest, "feature", root, runner, checks, true); err != nil {
 		t.Fatal(err)
 	}
 	if checks.calls != 0 {
 		t.Fatalf("submit checks ran %d times during dry-run", checks.calls)
+	}
+}
+
+func TestPlanRejectsManifestOwnershipAndProfileDrift(t *testing.T) {
+	root := t.TempDir()
+	cfg := plannerConfig(root)
+	cfg.Repositories[0].Profiles = config.CheckProfiles{"submit": {{Kind: "command", Argv: []string{"task", "verify"}}}}
+	runner := plannerRunner{
+		counts: map[string]int{root: 1, filepath.Join(root, "api"): 0, filepath.Join(root, "web"): 0},
+		origin: "git@example/project.git",
+		log:    map[string]string{root: "root-sha\x00feat(repo): [feature] change\x00"},
+	}
+	manifest := plannerManifest(root)
+	manifest.Repositories[0].Ownership = "repository-worker"
+	if _, err := Plan(context.Background(), cfg, manifest, "feature", root, runner, &countingCheckExecutor{}, false); err == nil || !strings.Contains(err.Error(), "manifest metadata") {
+		t.Fatalf("ownership drift error=%v", err)
+	}
+	manifest = plannerManifest(root)
+	manifest.Repositories[0].CheckProfiles = nil
+	if _, err := Plan(context.Background(), cfg, manifest, "feature", root, runner, &countingCheckExecutor{}, false); err == nil || !strings.Contains(err.Error(), "manifest metadata") {
+		t.Fatalf("profile drift error=%v", err)
 	}
 }
 
@@ -163,8 +186,8 @@ func plannerConfig(root string) config.Config {
 
 func plannerManifest(root string) workspacepkg.RunManifest {
 	return workspacepkg.RunManifest{SchemaVersion: 1, Feature: workspacepkg.FeatureContext{ID: "feature", Title: "Feature"}, WorkspacePath: root, Branch: "feature/one", Repositories: []workspacepkg.ManifestRepository{
-		{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "repo-base"},
-		{ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-base", Tasks: []workspacepkg.TaskAssignment{{ID: "smt-api-1", AllowedReferences: []string{"smt-api-1"}}}},
-		{ID: "web", Path: "web", BaseBranch: "main", BaseCommit: "web-base", Tasks: []workspacepkg.TaskAssignment{{ID: "smt-web-1", AllowedReferences: []string{"smt-web-1"}}}},
+		{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "repo-base", Ownership: "integration-worker", IntegrationGate: "root"},
+		{ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-base", Ownership: "repository-worker", IntegrationGate: "root-gitlink", Tasks: []workspacepkg.TaskAssignment{{ID: "smt-api-1", AllowedReferences: []string{"smt-api-1"}}}},
+		{ID: "web", Path: "web", BaseBranch: "main", BaseCommit: "web-base", Ownership: "repository-worker", IntegrationGate: "root-gitlink", Tasks: []workspacepkg.TaskAssignment{{ID: "smt-web-1", AllowedReferences: []string{"smt-web-1"}}}},
 	}}
 }
