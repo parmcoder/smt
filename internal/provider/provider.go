@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -78,7 +79,7 @@ func newClient(provider, baseURL, token string, httpClient *http.Client) (client
 		return client{}, fmt.Errorf("%s provider API base URL is required", provider)
 	}
 	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return client{}, fmt.Errorf("%s provider API base URL is invalid", provider)
 	}
 	if httpClient == nil {
@@ -160,7 +161,7 @@ func splitProject(provider, project string, exactParts int) ([]string, error) {
 		return nil, fmt.Errorf("%s project identity is invalid", provider)
 	}
 	for _, part := range parts {
-		if part == "" || part == "." || part == ".." {
+		if !projectComponentPattern.MatchString(part) {
 			return nil, fmt.Errorf("%s project identity is invalid", provider)
 		}
 	}
@@ -168,3 +169,5 @@ func splitProject(provider, project string, exactParts int) ([]string, error) {
 }
 
 var errProviderResponse = errors.New("provider response is invalid")
+
+var projectComponentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)

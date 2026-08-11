@@ -18,6 +18,7 @@ type provisionRunner struct {
 	calls      []string
 	origins    map[string]string
 	addOrigins []string
+	failAddDir string
 }
 
 func (r *provisionRunner) Run(_ context.Context, dir string, args ...string) (git.Result, error) {
@@ -35,6 +36,9 @@ func (r *provisionRunner) Run(_ context.Context, dir string, args ...string) (gi
 		return git.Result{ExitCode: 2}, errors.New("origin missing")
 	}
 	if len(args) >= 3 && args[0] == "remote" && args[1] == "add" {
+		if dir == r.failAddDir {
+			return git.Result{ExitCode: 1}, errors.New("origin add failed")
+		}
 		r.addOrigins = append(r.addOrigins, dir+"="+args[3])
 	}
 	return git.Result{}, nil
@@ -81,6 +85,9 @@ func TestProvisionCreatesChildFirstAndWiresOnlyAfterAllProjectsExist(t *testing.
 	if !reflect.DeepEqual(report.Configured, []string{"api", "repo"}) {
 		t.Fatalf("configured=%v", report.Configured)
 	}
+	if report.Projects[0].Status != StatusCreated || report.Projects[1].Status != StatusCreated {
+		t.Fatalf("project status=%+v", report.Projects)
+	}
 	if len(runner.addOrigins) != 2 || !strings.HasPrefix(runner.addOrigins[0], childPath+"=") {
 		t.Fatalf("origin wiring=%v", runner.addOrigins)
 	}
@@ -97,6 +104,27 @@ func TestProvisionCreatesChildFirstAndWiresOnlyAfterAllProjectsExist(t *testing.
 	}
 	if !strings.Contains(string(gitmodules), "url = git@example:acme/api.git") {
 		t.Fatalf("gitmodules=%s", gitmodules)
+	}
+}
+
+func TestProvisionReportsCreatedAndPendingOnWiringFailure(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &provisionRunner{origins: map[string]string{}, failAddDir: root}
+	projectProvider := &provisionProvider{}
+	report, err := Provision(context.Background(), provisionConfig(), root, runner, func(string, config.ProviderConfig, string) (provider.ProjectProvider, error) {
+		return projectProvider, nil
+	}, func(string) string { return "token" }, false)
+	if err == nil || !strings.Contains(err.Error(), "configure repository origin") {
+		t.Fatalf("error=%v", err)
+	}
+	if !reflect.DeepEqual(report.Configured, []string{"api"}) || !reflect.DeepEqual(report.Pending, []string{"repo"}) {
+		t.Fatalf("progress=%+v", report)
+	}
+	if report.Projects[0].Status != StatusCreated || report.Projects[1].Status != StatusCreated {
+		t.Fatalf("project status=%+v", report.Projects)
 	}
 }
 

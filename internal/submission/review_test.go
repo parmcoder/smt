@@ -28,6 +28,9 @@ func TestReviewLinkUsesProviderDefaultsAndCustomBases(t *testing.T) {
 	if got := ReviewLink("github", config.ProviderConfig{}, "acme/api", "feature/one", "main"); !strings.Contains(got, "github.com/acme/api/compare/main") {
 		t.Fatalf("github link=%q", got)
 	}
+	if got := ReviewLink("github", config.ProviderConfig{APIBaseURL: "https://api.github.com/"}, "acme/api", "feature/one", "main"); !strings.Contains(got, "https://github.com/acme/api/compare/main") {
+		t.Fatalf("github API link=%q", got)
+	}
 	if got := ReviewLink("gitlab", config.ProviderConfig{APIBaseURL: "https://gitlab.example/api/v4/"}, "group/api", "feature/one", "main"); !strings.Contains(got, "gitlab.example/group/api/-/merge_requests/new") || !strings.Contains(got, "source_branch%5D=feature%2Fone") {
 		t.Fatalf("gitlab link=%q", got)
 	}

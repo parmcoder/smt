@@ -35,7 +35,7 @@ type SubmissionPlan struct {
 }
 
 // Plan builds a push plan without pushing or calling a provider API.
-func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManifest, featureID, workspacePath string, runner git.Runner, checkExecutor checks.Executor) (SubmissionPlan, error) {
+func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManifest, featureID, workspacePath string, runner git.Runner, checkExecutor checks.Executor, dryRun bool) (SubmissionPlan, error) {
 	result := SubmissionPlan{Feature: featureID, Branch: manifest.Branch, Steps: []Step{}}
 	if runner == nil {
 		return result, errors.New("workspace submit: runner is required")
@@ -44,11 +44,17 @@ func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManif
 	if err != nil || filepath.Clean(manifest.WorkspacePath) != root {
 		return result, errors.New("workspace submit: prepared workspace path does not match")
 	}
-	if featureID == "" || manifest.Feature.ID != featureID || manifest.Branch == "" {
+	if manifest.SchemaVersion != 1 || featureID == "" || manifest.Feature.ID != featureID || manifest.Branch == "" {
 		return result, errors.New("workspace submit: prepared workspace manifest does not match feature")
 	}
 	byID := make(map[string]workspacepkg.ManifestRepository, len(manifest.Repositories))
 	for _, repository := range manifest.Repositories {
+		if repository.ID == "" || repository.Path == "" {
+			return result, errors.New("workspace submit: prepared manifest contains an invalid repository")
+		}
+		if _, exists := byID[repository.ID]; exists {
+			return result, errors.New("workspace submit: prepared manifest contains duplicate repositories")
+		}
 		byID[repository.ID] = repository
 	}
 	if len(byID) != len(cfg.Repositories) {
@@ -57,7 +63,7 @@ func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManif
 	selected := make(map[string]Step)
 	for _, repository := range cfg.Repositories {
 		entry, ok := byID[repository.ID]
-		if !ok || entry.Path != repository.Path {
+		if !ok || filepath.Clean(entry.Path) != filepath.Clean(repository.Path) {
 			return result, fmt.Errorf("workspace submit: prepared manifest does not match repository %s", repository.ID)
 		}
 		directory := filepath.Join(root, repository.Path)
@@ -101,7 +107,7 @@ func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManif
 			return result, fmt.Errorf("workspace submit: inspect repository %s changes", repository.ID)
 		}
 		if checksExist(repository, "submit") {
-			if err := checks.RunProfile(ctx, checkExecutor, repositoryWithDirectory(repository, directory), "submit", changedFiles, false, false); err != nil {
+			if err := checks.RunProfile(ctx, checkExecutor, repositoryWithDirectory(repository, directory), "submit", changedFiles, false, dryRun); err != nil {
 				return result, fmt.Errorf("workspace submit: repository %s submit checks failed", repository.ID)
 			}
 		}
@@ -109,6 +115,15 @@ func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManif
 	}
 
 	_, rootStep, hasRoot := findRoot(cfg, selected)
+	rootDirectory := ""
+	rootBaseCommit := ""
+	for _, repository := range cfg.Repositories {
+		if filepath.Clean(repository.Path) == "." {
+			rootDirectory = filepath.Join(root, repository.Path)
+			rootBaseCommit = byID[repository.ID].BaseCommit
+			break
+		}
+	}
 	for _, repository := range cfg.Repositories {
 		if filepath.Clean(repository.Path) == "." {
 			continue
@@ -119,7 +134,7 @@ func Plan(ctx context.Context, cfg config.Config, manifest workspacepkg.RunManif
 		if !hasRoot {
 			return result, fmt.Errorf("workspace submit: changed child %s has no root integration commit", repository.ID)
 		}
-		changed, err := pathChanged(ctx, runner, filepath.Join(root, cfg.Repositories[0].Path), manifest.Repositories[rootIndex(cfg)].BaseCommit, repository.Path)
+		changed, err := pathChanged(ctx, runner, rootDirectory, rootBaseCommit, repository.Path)
 		if err != nil || !changed {
 			return result, fmt.Errorf("workspace submit: root gitlink for child %s is not integrated", repository.ID)
 		}
@@ -162,15 +177,6 @@ func findRoot(cfg config.Config, selected map[string]Step) (string, Step, bool) 
 		}
 	}
 	return "", Step{}, false
-}
-
-func rootIndex(cfg config.Config) int {
-	for index, repository := range cfg.Repositories {
-		if filepath.Clean(repository.Path) == "." {
-			return index
-		}
-	}
-	return 0
 }
 
 func repositoryWithDirectory(repository config.Repository, directory string) config.Repository {

@@ -166,28 +166,30 @@ func Provision(ctx context.Context, cfg config.Config, workspaceRoot string, run
 		available[repository.ID] = created
 		setProjectResult(&report, repository.ID, projectResult(repository, StatusCreated, created))
 	}
+	// Every provider target is now available; pending should describe only
+	// subsequent local wiring failures.
+	report.Pending = nil
 
 	updated := cfg
 	for index := range updated.Repositories {
 		updated.Repositories[index].Remote.URL = available[updated.Repositories[index].ID].SSHURL
 	}
 	if err := writeConfig(filepath.Join(root, "smt.yaml"), updated); err != nil {
+		report.Pending = appendPending(report.Pending, targets)
 		return report, fmt.Errorf("remote provision: %w", err)
 	}
 	if err := writeGitmodules(filepath.Join(root, ".gitmodules"), updated.Repositories); err != nil {
+		report.Pending = appendPending(report.Pending, targets)
 		return report, fmt.Errorf("remote provision: %w", err)
 	}
-	for _, repository := range targets {
+	for index, repository := range targets {
 		directory := filepath.Join(root, repository.Path)
 		if err := setOrigin(ctx, runner, directory, available[repository.ID].SSHURL); err != nil {
 			report.WiringError = safeError(err)
-			report.Pending = append(report.Pending, repository.ID)
+			report.Pending = appendPending(report.Pending, targets[index:])
 			return report, fmt.Errorf("remote provision: %w", err)
 		}
 		report.Configured = append(report.Configured, repository.ID)
-	}
-	for index := range report.Projects {
-		report.Projects[index].Status = StatusWired
 	}
 	return report, nil
 }

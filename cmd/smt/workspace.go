@@ -125,14 +125,24 @@ func prepareStepOutputs(steps []git.WorktreeStep) []prepareStepOutput {
 }
 
 func writePrepareOutput(output prepareOutput, jsonOutput bool, out, errOut io.Writer) int {
-	if output.DryRun && !jsonOutput {
-		if len(output.Planned) == 0 {
-			fmt.Fprintln(out, "workspace prepare plan: no repositories")
-		} else {
-			fmt.Fprintln(out, "workspace prepare plan:")
-			for _, step := range output.Planned {
-				fmt.Fprintf(out, "%s: %s\n", step.Repository, step.Path)
+	if !jsonOutput {
+		if output.DryRun {
+			if len(output.Planned) == 0 {
+				fmt.Fprintln(out, "workspace prepare plan: no repositories")
+			} else {
+				fmt.Fprintln(out, "workspace prepare plan:")
+				for _, step := range output.Planned {
+					fmt.Fprintf(out, "%s: %s\n", step.Repository, step.Path)
+				}
 			}
+			return exitOK
+		}
+		fmt.Fprintf(out, "workspace prepared: %s\n", output.Manifest)
+		for _, step := range output.Created {
+			fmt.Fprintf(out, "created %s: %s\n", step.Repository, step.Path)
+		}
+		for _, step := range output.Pending {
+			fmt.Fprintf(out, "pending %s: %s\n", step.Repository, step.Path)
 		}
 		return exitOK
 	}

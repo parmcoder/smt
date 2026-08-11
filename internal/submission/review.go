@@ -100,11 +100,14 @@ func ReviewLink(providerName string, settings config.ProviderConfig, project, so
 		}
 	}
 	parsed, err := url.Parse(base)
-	if err != nil || parsed.Host == "" {
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return ""
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	if providerName == "github" {
+		if parsed.Host == "api.github.com" {
+			parsed.Host = "github.com"
+		}
 		parsed.Path = strings.TrimSuffix(parsed.Path, "/api/v3") + "/" + project + "/compare/" + url.PathEscape(targetBranch) + "..." + url.PathEscape(sourceBranch)
 		return parsed.String()
 	}

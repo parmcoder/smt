@@ -2,6 +2,7 @@ package provider
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/parmcoder/smt/internal/config"
@@ -29,5 +30,13 @@ func TestNewConfiguredUsesCustomAndDefaultEndpoints(t *testing.T) {
 				t.Fatalf("endpoint=%q want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestNewConfiguredRejectsCredentialBearingEndpoint(t *testing.T) {
+	for _, endpoint := range []string{"https://user:pass@example.test/api", "https://example.test/api?token=secret", "https://example.test/api#secret"} {
+		if _, _, err := NewConfigured("github", config.ProviderConfig{APIBaseURL: endpoint}, "token", &http.Client{}); err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "pass") {
+			t.Fatalf("endpoint=%q err=%v", endpoint, err)
+		}
 	}
 }

@@ -55,7 +55,7 @@ func runWorkspaceSubmit(ctx context.Context, cfg config.Config, root, featureID 
 	if logger != nil {
 		checkExecutor = commandExecutor{logger: logger.WithField("profile", "submit")}
 	}
-	plan, err := submissionpkg.Plan(ctx, cfg, manifest, featureID, root, runner, checkExecutor)
+	plan, err := submissionpkg.Plan(ctx, cfg, manifest, featureID, root, runner, checkExecutor, dryRun)
 	if err != nil {
 		fmt.Fprintf(errOut, "%v\n", err)
 		return exitValidation

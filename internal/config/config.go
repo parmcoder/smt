@@ -345,6 +345,35 @@ func validateProjectIdentity(provider, project string) error {
 	return nil
 }
 
+// MarshalYAML preserves the legacy checks list and named check profiles that
+// are intentionally kept out of the runtime-only Repository fields. Commands
+// that update remote URLs must not silently erase local readiness checks.
+func (r Repository) MarshalYAML() (interface{}, error) {
+	type repositoryFields struct {
+		ID         string `yaml:"id"`
+		Path       string `yaml:"path"`
+		Component  string `yaml:"component,omitempty"`
+		Technology string `yaml:"technology,omitempty"`
+		Remote     Remote `yaml:"remote"`
+		Provider   string `yaml:"provider,omitempty"`
+		Project    string `yaml:"project,omitempty"`
+		Visibility string `yaml:"visibility,omitempty"`
+		Scope      string `yaml:"scope"`
+		Checks     any    `yaml:"checks,omitempty"`
+	}
+	var checks any
+	if r.Profiles != nil {
+		checks = r.Profiles
+	} else if r.HasChecks || len(r.Checks) > 0 {
+		checks = r.Checks
+	}
+	return repositoryFields{
+		ID: r.ID, Path: r.Path, Component: r.Component, Technology: r.Technology,
+		Remote: r.Remote, Provider: r.Provider, Project: r.Project,
+		Visibility: r.Visibility, Scope: r.Scope, Checks: checks,
+	}, nil
+}
+
 func (c *Config) validateWorkflow() error {
 	if c.Workflow == nil {
 		return nil

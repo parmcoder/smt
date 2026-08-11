@@ -1045,6 +1045,9 @@ func TestRunPrepareWritesManifestOnlyAfterWorktreeCreation(t *testing.T) {
 	if err != nil || manifest.Repositories[0].Tasks[0].ID != "task" {
 		t.Fatalf("manifest=%+v err=%v", manifest, err)
 	}
+	if !strings.Contains(out.String(), "workspace prepared:") || strings.Contains(out.String(), `"manifest"`) {
+		t.Fatalf("human prepare output=%q", out.String())
+	}
 }
 
 func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {

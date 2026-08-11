@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadAndValidate(t *testing.T) {
@@ -135,6 +137,48 @@ repositories:
 				t.Fatal("invalid provider configuration accepted")
 			}
 		})
+	}
+}
+
+func TestRepositoryMarshalPreservesCheckProfiles(t *testing.T) {
+	raw := `version: 1
+commit: {types: [feat], scopes: [repo, api]}
+repositories:
+  - id: repo
+    path: .
+    scope: repo
+    checks:
+      hook:
+        - kind: command
+          argv: [task, hook]
+      submit:
+        - kind: command
+          argv: [task, verify]
+  - id: api
+    path: api
+    scope: api
+    checks:
+      - kind: command
+        argv: [task, api]
+`
+	path := writeConfig(t, raw)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadBytes(encoded, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Repositories[0].Profiles["hook"]) != 1 || len(got.Repositories[0].Profiles["submit"]) != 1 {
+		t.Fatalf("profiles were not preserved: %+v", got.Repositories[0].Profiles)
+	}
+	if len(got.Repositories[1].Checks) != 1 || got.Repositories[1].Checks[0].Argv[0] != "task" {
+		t.Fatalf("legacy checks were not preserved: %+v", got.Repositories[1].Checks)
 	}
 }
 
