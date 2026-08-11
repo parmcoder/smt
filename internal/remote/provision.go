@@ -154,13 +154,14 @@ func Provision(ctx context.Context, cfg config.Config, workspaceRoot string, run
 	if dryRun {
 		return report, nil
 	}
+	// Missing projects are pending in a dry-run plan, but once creation starts
+	// the pending list must contain only projects not yet available.
+	report.Pending = nil
 	for index, repository := range missing {
 		created, createErr := providers[repository.Provider].CreateProject(ctx, provider.ProjectSpec{Project: repository.Project, Visibility: repository.EffectiveVisibility()})
 		if createErr != nil {
 			setProjectResult(&report, repository.ID, ProjectResult{ID: repository.ID, Project: repository.Project, Status: StatusPending, Error: safeError(createErr)})
-			if index+1 < len(missing) {
-				report.Pending = appendPending(report.Pending, missing[index+1:])
-			}
+			report.Pending = appendPending(report.Pending, missing[index:])
 			return report, fmt.Errorf("remote provision: create repository %s: %w", repository.ID, createErr)
 		}
 		available[repository.ID] = created
