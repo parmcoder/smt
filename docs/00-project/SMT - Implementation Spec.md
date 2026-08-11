@@ -356,6 +356,28 @@ completed and pending progress without remote rollback. Real GitHub/GitLab
 provisioning and mixed-provider review acceptance remain the human-owned
 `smt-5w0.13.6` release gate.
 
+## Traceability and provider release gates
+
+The agent-owned implementation is covered by focused tests, full Go gates,
+and the command recipes. Final acceptance still requires two human reviews in
+disposable workspaces:
+
+- `smt-5w0.11.7` must verify the prepared manifest's base branch, repository
+  ownership, assigned Beads/Jira references, dry-run immutability, rejection
+  of missing/arbitrary/cross-repository IDs, valid child commits, and the root
+  feature integration commit. Corrupt, missing, ambiguous, or stale manifest
+  state must fail closed. Agents must not close this ticket.
+- `smt-5w0.13.6` must verify real mixed-provider project creation or exact
+  reuse, SSH wiring, child-first/root-last submission, missing-token handoff,
+  draft and ready review behavior, idempotent review reuse, `Closes` lines,
+  child links in the root review, and secret-safe failures. Agents must not
+  close this ticket.
+
+The exact commands and evidence expectations are in the
+[[../10-development/SMT - Command Recipes#Traceable workspace release-gate handoff]]
+section. Record failures as linked Beads bugs and leave the corresponding
+review and parent feature open.
+
 ## Local requirements and verification
 
 Go 1.26.4 or newer and `git` are required. The SMT source checkout's

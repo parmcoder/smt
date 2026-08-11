@@ -203,6 +203,55 @@ prints a provider creation link with copy-ready title/body content and exact
 `Closes \`WORK-ID\`` lines. A root review waits until selected child review
 URLs are available. Repeating the command reuses matching open reviews.
 
+## Traceable workspace release-gate handoff
+
+The following checks remain human-owned release evidence. Run them in
+disposable workspaces with representative root and child repositories. Do not
+put tokens in commands, terminal captures, Beads notes, or committed files.
+
+### `smt-5w0.11.7` — prepared workspace traceability
+
+1. Create or select a real feature with one repository-scoped Beads child in
+   the root and one child repository, plus one assigned Beads task with a
+   Jira-shaped `external_ref`.
+2. Run `smt workspace prepare FEATURE PATH --branch BRANCH` and retain the
+   exact output. Inspect the ignored `.smt/runs/FEATURE.json` manifest and
+   confirm the base branch and commit, repository configuration order,
+   ownership, assigned Beads IDs, and Jira alias are present and secret-free.
+3. In the child repository, attempt an empty commit with a missing ID and a
+   commit using the other repository's assigned ID. Both must fail before a
+   commit is created. Repeat with the assigned Beads ID and assigned Jira
+   alias; both must succeed.
+4. In the root repository, create the valid integration/gitlink commit using
+   the parent feature ID. Confirm that an arbitrary valid-looking ID is
+   rejected and that a corrupt, missing, or ambiguous manifest fails closed.
+5. Repeat one preparation as `--dry-run` and confirm it creates no worktree or
+   manifest. Record the exact commands, exit statuses, manifest inspection,
+   and hook output in `smt-5w0.11.7`; agents must not close that ticket.
+
+### `smt-5w0.13.6` — mixed-provider delivery
+
+1. Use disposable private GitHub and GitLab projects or approved sandbox
+   namespaces. Configure fully qualified projects, leave visibility private,
+   and export provider tokens only in the current shell.
+2. Run `smt remote provision --dry-run`, then the real command. Confirm
+   child-first discovery/creation or exact compatible reuse, SSH origins,
+   `.gitmodules`, persisted `remote.url` values, and safe created/existing/
+   configured/pending reporting. Repeat it to verify idempotency.
+3. Prepare a feature and repeat the invalid, cross-repository, assigned
+   Beads, assigned Jira-alias, and root integration commit checks from the
+   `.11.7` handoff. Create changes in an assigned child and the required root
+   gitlink commit only.
+4. Unset one provider token and run `smt workspace submit FEATURE`. Confirm
+   child-first pushes succeed, the missing provider is reported as a warning,
+   copy-ready review text and a safe provider link are printed, and the root
+   review is deferred until child review URLs exist.
+5. Restore the token and run submission again, once normally and once with
+   `--ready`. Confirm draft review creation or reuse, exact `Closes` lines,
+   child links in the root review, and no duplicate reviews on rerun. Record
+   exact commands and review URLs without credentials; agents must not close
+   `smt-5w0.13.6`.
+
 ## Inspect and install workspace hooks
 
 ```sh
