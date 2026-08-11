@@ -188,8 +188,8 @@ func submitManifest(root string) workspacepkg.RunManifest {
 		WorkspacePath: root,
 		Branch:        "feature/one",
 		Repositories: []workspacepkg.ManifestRepository{
-			{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "repo-base"},
-			{ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-base", Tasks: []workspacepkg.TaskAssignment{{ID: "smt-api-1", Title: "API task", Description: "API summary", AcceptanceCriteria: "API criteria", AllowedReferences: []string{"smt-api-1"}}}},
+			{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "repo-base", Ownership: "integration-worker", IntegrationGate: "root"},
+			{ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-base", Ownership: "repository-worker", IntegrationGate: "root-gitlink", Tasks: []workspacepkg.TaskAssignment{{ID: "smt-api-1", Title: "API task", Description: "API summary", AcceptanceCriteria: "API criteria", AllowedReferences: []string{"smt-api-1"}}}},
 		},
 	}
 }

@@ -321,14 +321,14 @@ human end-to-end review across every launch environment.
 
 Prepared feature workspaces use `.smt/runs/<feature-id>.json` as an ignored,
 secret-free snapshot of the feature, base branches/commits, repository paths,
-ownership, and assigned work-item context. The file is written only after the
-root and child linked worktrees are created successfully. A prepared child
-accepts only its assigned Beads IDs or Jira-shaped aliases. The root accepts
-the feature ID and its assigned root-task references for integration/gitlink
-commits. Missing, malformed, cross-repository, ambiguous, corrupt, or
-out-of-date manifests fail closed; outside a prepared workspace the existing
-conventional-commit behavior is unchanged. Dry-run preparation performs no
-Git, Beads, or manifest write.
+ownership boundaries, check-profile names, integration gates, and assigned
+work-item context. The file is written only after the root and child linked
+worktrees are created successfully. A prepared child accepts only its assigned
+Beads IDs or Jira-shaped aliases. The root accepts the feature ID and its
+assigned root-task references for integration/gitlink commits. Missing,
+malformed, cross-repository, ambiguous, corrupt, or out-of-date manifests fail
+closed; outside a prepared workspace the existing conventional-commit behavior
+is unchanged. Dry-run preparation performs no Git, Beads, or manifest write.
 
 ## Provider remotes and workspace submission
 

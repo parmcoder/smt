@@ -165,7 +165,10 @@ their titles, descriptions, designs, acceptance criteria, Beads IDs, and
 optional Jira-shaped aliases. It creates the root worktree before children and
 writes `.smt/runs/smt-feature.json` only after all worktrees succeed. The run
 manifest is ignored, contains no credentials, and is the authority for
-repository ownership and accepted commit references.
+repository ownership, check-profile names, integration gates, and accepted
+commit references. The root records `ownership: integration-worker` and
+`integration_gate: root`; children record `ownership: repository-worker` and
+`integration_gate: root-gitlink`.
 
 Inside that prepared workspace, commit subjects must use:
 

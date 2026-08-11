@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/parmcoder/smt/internal/config"
@@ -22,11 +23,14 @@ type BaseState struct {
 
 // ManifestRepository is one configured repository in a prepared run.
 type ManifestRepository struct {
-	ID         string           `json:"id"`
-	Path       string           `json:"path"`
-	BaseBranch string           `json:"base_branch"`
-	BaseCommit string           `json:"base_commit"`
-	Tasks      []TaskAssignment `json:"tasks,omitempty"`
+	ID              string           `json:"id"`
+	Path            string           `json:"path"`
+	BaseBranch      string           `json:"base_branch"`
+	BaseCommit      string           `json:"base_commit"`
+	Ownership       string           `json:"ownership"`
+	CheckProfiles   []string         `json:"check_profiles,omitempty"`
+	IntegrationGate string           `json:"integration_gate"`
+	Tasks           []TaskAssignment `json:"tasks,omitempty"`
 }
 
 // RunManifest is the secret-free authority for one prepared feature workspace.
@@ -67,14 +71,47 @@ func BuildRunManifest(assignments FeatureAssignments, cfg config.Config, workspa
 			return RunManifest{}, fmt.Errorf("manifest base state is missing for repository %s", repository.ID)
 		}
 		manifest.Repositories = append(manifest.Repositories, ManifestRepository{
-			ID:         repository.ID,
-			Path:       repository.Path,
-			BaseBranch: base.Branch,
-			BaseCommit: base.Commit,
-			Tasks:      byRepository[repository.ID],
+			ID:              repository.ID,
+			Path:            repository.Path,
+			BaseBranch:      base.Branch,
+			BaseCommit:      base.Commit,
+			Ownership:       manifestOwnership(repository),
+			CheckProfiles:   manifestCheckProfiles(repository),
+			IntegrationGate: manifestIntegrationGate(repository),
+			Tasks:           byRepository[repository.ID],
 		})
 	}
 	return manifest, nil
+}
+
+func manifestOwnership(repository config.Repository) string {
+	if filepath.Clean(repository.Path) == "." {
+		return "integration-worker"
+	}
+	return "repository-worker"
+}
+
+func manifestIntegrationGate(repository config.Repository) string {
+	if filepath.Clean(repository.Path) == "." {
+		return "root"
+	}
+	return "root-gitlink"
+}
+
+func manifestCheckProfiles(repository config.Repository) []string {
+	profiles := repository.Profiles
+	if profiles == nil && (repository.HasChecks || len(repository.Checks) > 0) {
+		profiles = config.CheckProfiles{"legacy": repository.Checks}
+	}
+	if len(profiles) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // WriteRunManifest atomically writes the ignored run manifest after preparation.
@@ -229,6 +266,29 @@ func validateManifest(manifest RunManifest, root string) error {
 			return errors.New("manifest contains duplicate repository paths")
 		}
 		seenPaths[cleanedPath] = struct{}{}
+		if repository.Ownership != "repository-worker" && repository.Ownership != "integration-worker" {
+			return errors.New("manifest repository ownership is invalid")
+		}
+		if repository.IntegrationGate != "root" && repository.IntegrationGate != "root-gitlink" {
+			return errors.New("manifest integration gate is invalid")
+		}
+		wantOwnership := "repository-worker"
+		wantGate := "root-gitlink"
+		if cleanedPath == "." {
+			wantOwnership = "integration-worker"
+			wantGate = "root"
+		}
+		if repository.Ownership != wantOwnership || repository.IntegrationGate != wantGate {
+			return errors.New("manifest repository ownership boundary is invalid")
+		}
+		if !sort.StringsAreSorted(repository.CheckProfiles) {
+			return errors.New("manifest check profiles are not deterministic")
+		}
+		for index, profile := range repository.CheckProfiles {
+			if strings.TrimSpace(profile) == "" || (index > 0 && profile == repository.CheckProfiles[index-1]) {
+				return errors.New("manifest check profiles are invalid")
+			}
+		}
 		for _, task := range repository.Tasks {
 			if !manifestIDPattern.MatchString(task.ID) || (task.ExternalRef != "" && !externalReferencePattern.MatchString(task.ExternalRef)) {
 				return errors.New("manifest task is invalid")

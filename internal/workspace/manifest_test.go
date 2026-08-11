@@ -9,10 +9,13 @@ import (
 	"testing"
 
 	"github.com/parmcoder/smt/internal/beads"
+	"github.com/parmcoder/smt/internal/config"
 )
 
 func TestBuildRunManifestRecordsEveryRepositoryAndBaseStateInConfigOrder(t *testing.T) {
 	cfg := assignmentConfig()
+	cfg.Repositories[0].Path = "."
+	cfg.Repositories[0].Profiles = config.CheckProfiles{"submit": {}, "hook": {}}
 	assignments, err := ResolveAssignments(
 		beads.Issue{ID: "feature", Title: "Feature", Status: "open", Type: "feature"},
 		cfg,
@@ -39,6 +42,21 @@ func TestBuildRunManifestRecordsEveryRepositoryAndBaseStateInConfigOrder(t *test
 	}
 	if got := manifest.Repositories[0].BaseCommit; got != "api-sha" {
 		t.Fatalf("api base commit=%q", got)
+	}
+	if got, want := manifest.Repositories[0].Ownership, "integration-worker"; got != want {
+		t.Fatalf("root ownership=%q, want %q", got, want)
+	}
+	if got, want := manifest.Repositories[0].IntegrationGate, "root"; got != want {
+		t.Fatalf("root integration gate=%q, want %q", got, want)
+	}
+	if got, want := manifest.Repositories[1].Ownership, "repository-worker"; got != want {
+		t.Fatalf("child ownership=%q, want %q", got, want)
+	}
+	if got, want := manifest.Repositories[1].IntegrationGate, "root-gitlink"; got != want {
+		t.Fatalf("child integration gate=%q, want %q", got, want)
+	}
+	if got, want := manifest.Repositories[0].CheckProfiles, []string{"hook", "submit"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("root check profiles=%v, want %v", got, want)
 	}
 }
 
@@ -98,7 +116,10 @@ func TestFindPreparedRepositoryMatchesCurrentPathAndBranch(t *testing.T) {
 		Feature:       FeatureContext{ID: "feature", Title: "Feature"},
 		WorkspacePath: root,
 		Branch:        "feature/one",
-		Repositories:  []ManifestRepository{{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "root-sha"}, {ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-sha", Tasks: []TaskAssignment{{ID: "task", AllowedReferences: []string{"task"}}}}},
+		Repositories: []ManifestRepository{
+			{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "root-sha", Ownership: "integration-worker", IntegrationGate: "root"},
+			{ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-sha", Ownership: "repository-worker", IntegrationGate: "root-gitlink", Tasks: []TaskAssignment{{ID: "task", AllowedReferences: []string{"task"}}}},
+		},
 	}
 	if _, err := WriteRunManifest(root, manifest); err != nil {
 		t.Fatal(err)
@@ -115,7 +136,7 @@ func TestFindPreparedRepositoryMatchesCurrentPathAndBranch(t *testing.T) {
 func TestFindPreparedRepositoryFailsClosedForAmbiguousOrCorruptRuns(t *testing.T) {
 	root := t.TempDir()
 	for _, feature := range []string{"feature-a", "feature-b"} {
-		manifest := RunManifest{SchemaVersion: 1, Feature: FeatureContext{ID: feature}, WorkspacePath: root, Branch: "feature/one", Repositories: []ManifestRepository{{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: feature + "-sha"}}}
+		manifest := RunManifest{SchemaVersion: 1, Feature: FeatureContext{ID: feature}, WorkspacePath: root, Branch: "feature/one", Repositories: []ManifestRepository{{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: feature + "-sha", Ownership: "integration-worker", IntegrationGate: "root"}}}
 		if _, err := WriteRunManifest(root, manifest); err != nil {
 			t.Fatal(err)
 		}
