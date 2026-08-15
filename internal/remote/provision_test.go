@@ -40,6 +40,10 @@ func (r *provisionRunner) Run(_ context.Context, dir string, args ...string) (gi
 			return git.Result{ExitCode: 1}, errors.New("origin add failed")
 		}
 		r.addOrigins = append(r.addOrigins, dir+"="+args[3])
+		r.origins[dir] = args[3]
+	}
+	if len(args) >= 3 && args[0] == "remote" && args[1] == "set-url" {
+		r.origins[dir] = args[3]
 	}
 	return git.Result{}, nil
 }
@@ -49,10 +53,14 @@ type provisionProvider struct {
 	specs      []provider.ProjectSpec
 	inspect    []string
 	failCreate string
+	existing   map[string]bool
 }
 
 func (p *provisionProvider) InspectProject(_ context.Context, project string) (provider.ProjectInfo, error) {
 	p.inspect = append(p.inspect, project)
+	if p.existing[project] {
+		return provider.ProjectInfo{Exists: true, Project: project, SSHURL: "git@example:" + project + ".git", WebURL: "https://example/" + project}, nil
+	}
 	return provider.ProjectInfo{Project: project}, nil
 }
 
@@ -160,6 +168,42 @@ func TestProvisionReportsCreatedAndPendingOnProviderCreateFailure(t *testing.T) 
 	}
 	if report.Projects[0].Status != StatusCreated || report.Projects[1].Status != StatusPending {
 		t.Fatalf("project status=%+v", report.Projects)
+	}
+}
+
+func TestProvisionReusesCompatibleProjectsAndIsIdempotent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := provisionConfig()
+	runner := &provisionRunner{origins: map[string]string{}}
+	projectProvider := &provisionProvider{}
+	if _, err := Provision(context.Background(), cfg, root, runner, func(string, config.ProviderConfig, string) (provider.ProjectProvider, error) {
+		return projectProvider, nil
+	}, func(string) string { return "token" }, false); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(filepath.Join(root, "smt.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectProvider.existing = map[string]bool{"acme/api": true, "acme/root": true}
+	createdBefore := len(projectProvider.created)
+	report, err := Provision(context.Background(), *loaded, root, runner, func(string, config.ProviderConfig, string) (provider.ProjectProvider, error) {
+		return projectProvider, nil
+	}, func(string) string { return "token" }, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projectProvider.created) != createdBefore {
+		t.Fatalf("rerun created projects=%v", projectProvider.created)
+	}
+	if report.Projects[0].Status != StatusExisting || report.Projects[1].Status != StatusExisting {
+		t.Fatalf("rerun project status=%+v", report.Projects)
+	}
+	if !reflect.DeepEqual(report.Configured, []string{"api", "repo"}) || len(report.Pending) != 0 {
+		t.Fatalf("rerun progress=%+v", report)
 	}
 }
 

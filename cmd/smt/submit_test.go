@@ -26,10 +26,11 @@ type submitCall struct {
 }
 
 type submitRunner struct {
-	counts map[string]int
-	logs   map[string]string
-	origin string
-	calls  []submitCall
+	counts      map[string]int
+	logs        map[string]string
+	origin      string
+	calls       []submitCall
+	failPushDir string
 }
 
 func (r *submitRunner) Run(_ context.Context, dir string, args ...string) (git.Result, error) {
@@ -60,6 +61,9 @@ func (r *submitRunner) Run(_ context.Context, dir string, args ...string) (git.R
 		}
 		return git.Result{Stdout: "file.go\n"}, nil
 	case "push":
+		if dir == r.failPushDir {
+			return git.Result{ExitCode: 1}, errors.New("push failed")
+		}
 		return git.Result{}, nil
 	}
 	return git.Result{}, errors.New("unexpected git command")
@@ -223,6 +227,96 @@ func TestWorkspaceSubmitSkipsLocalOnlyReviewsAndStillCreatesRootReview(t *testin
 		t.Fatalf("warnings=%v", report.Warnings)
 	}
 	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%s", errOut)
+	}
+}
+
+func TestWorkspaceSubmitReusesDraftAndPromotesReadyReview(t *testing.T) {
+	root := t.TempDir()
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/root/pulls":
+			_, _ = io.WriteString(w, `[{"number":7,"html_url":"https://reviews.example/7","title":"Draft","body":"body","draft":true,"head":{"ref":"feature/one"},"base":{"ref":"main"}}]`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/root/pulls/7":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["draft"] != false {
+				t.Fatalf("ready body=%v err=%v", body, err)
+			}
+			_, _ = io.WriteString(w, `{"number":7,"html_url":"https://reviews.example/7","title":"Draft","body":"body","draft":false,"head":{"ref":"feature/one"},"base":{"ref":"main"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("SMT_GITHUB_TOKEN", "submit-secret")
+	cfg := submitConfig(server.URL)
+	manifest := submitManifest(root)
+	if _, err := workspacepkg.WriteRunManifest(root, manifest); err != nil {
+		t.Fatal(err)
+	}
+	runner := submitRunner{
+		counts: map[string]int{root: 1, filepath.Join(root, "api"): 0},
+		origin: "git@example:acme/root.git",
+		logs:   map[string]string{root: "root-sha\x00feat(repo): [feature] integrate api\x00"},
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWorkspaceSubmit(context.Background(), cfg, root, "feature", &runner, true, false, true, out, errOut, logrus.New()); code != exitOK {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out, errOut)
+	}
+	var report submitOutput
+	if err := json.Unmarshal([]byte(out.String()), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Reviews) != 1 || report.Reviews[0].Status != "reused" || report.Reviews[0].URL != "https://reviews.example/7" {
+		t.Fatalf("reviews=%+v", report.Reviews)
+	}
+	if !reflect.DeepEqual(requests, []string{"GET /repos/acme/root/pulls", "PATCH /repos/acme/root/pulls/7"}) {
+		t.Fatalf("provider requests=%v", requests)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%s", errOut)
+	}
+}
+
+func TestWorkspaceSubmitReportsPushedAndPendingAfterPushFailure(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "api")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SMT_GITHUB_TOKEN", "")
+	cfg := submitConfig("")
+	manifest := submitManifest(root)
+	if _, err := workspacepkg.WriteRunManifest(root, manifest); err != nil {
+		t.Fatal(err)
+	}
+	runner := submitRunner{
+		counts:      map[string]int{root: 1, child: 1},
+		origin:      "git@example:acme/root.git",
+		failPushDir: root,
+		logs: map[string]string{
+			root:  "root-sha\x00feat(repo): [feature] integrate api\x00",
+			child: "child-sha\x00feat(api): [smt-api-1] add endpoint\x00",
+		},
+	}
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWorkspaceSubmit(context.Background(), cfg, root, "feature", &runner, false, false, true, out, errOut, logrus.New()); code != exitValidation {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, out, errOut)
+	}
+	var report submitOutput
+	if err := json.Unmarshal([]byte(out.String()), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(report.Pushed, []string{"api"}) || len(report.Pending) != 0 {
+		t.Fatalf("progress=%+v", report)
+	}
+	if len(report.Reviews) != 1 || report.Reviews[0].Repository != "api" || report.Reviews[0].Status != "handoff" {
+		t.Fatalf("reviews=%+v", report.Reviews)
+	}
+	if !strings.Contains(errOut.String(), "push repository repo") {
 		t.Fatalf("stderr=%s", errOut)
 	}
 }
