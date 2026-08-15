@@ -28,6 +28,11 @@ correctness, safety, ordering, dry-run immutability, error redaction, and
 coverage. Do not accept a task with blocking findings; route those findings to
 the same `backend_worker` and re-review only after material remediation.
 
+Prepared-workspace assignments must require commit subjects in the exact form
+`type(scope): [WORK-ID] summary`, with repository-scoped Beads IDs or Jira
+aliases sourced from the prepared workspace manifest. Integration commits may
+use only the root feature ID or assigned root-task references.
+
 Use `$godex:godex-go-backend` for Go architecture, safety review, and test
 planning, but not to write Go code. Keep `doc_writer` aligned with accepted
 contracts after behavior is reviewed; preserve its high-level-only boundary.

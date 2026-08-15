@@ -63,3 +63,18 @@ Use the Go standard library and the existing package boundaries. Preserve user
 changes. Add focused tests for every new behavior, run the narrowest useful
 checks, then run the repository verification command. Report changed paths,
 commands and results, assumptions, unresolved risks, and unverified behavior.
+
+## Prepared workspace commit contract
+
+When a workspace was prepared for a feature, every commit subject must use:
+
+```text
+type(scope): [WORK-ID] summary
+```
+
+The bracketed ID must be immediately after the conventional prefix and must be
+assigned to the current repository in the prepared run manifest. A child may
+use its assigned Beads ID or Jira-shaped alias; the root may additionally use
+the feature ID and assigned root-task IDs for integration/gitlink commits.
+Outside a prepared workspace, retain the normal configured conventional-commit
+validation.

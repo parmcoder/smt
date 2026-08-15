@@ -27,15 +27,19 @@ func (CommandRunner) Run(ctx context.Context, dir, name string, args ...string) 
 }
 
 type Issue struct {
-	ID             string   `json:"id"`
-	Title          string   `json:"title"`
-	Status         string   `json:"status"`
-	Type           string   `json:"issue_type"`
-	Labels         []string `json:"labels"`
-	Parent         string   `json:"parent"`
-	Dependencies   []Issue  `json:"dependencies"`
-	DependencyType string   `json:"dependency_type"`
-	ReviewState    string   `json:"-"`
+	ID                 string   `json:"id"`
+	Title              string   `json:"title"`
+	Description        string   `json:"description"`
+	Design             string   `json:"design"`
+	AcceptanceCriteria string   `json:"acceptance_criteria"`
+	ExternalRef        string   `json:"external_ref"`
+	Status             string   `json:"status"`
+	Type               string   `json:"issue_type"`
+	Labels             []string `json:"labels"`
+	Parent             string   `json:"parent"`
+	Dependencies       []Issue  `json:"dependencies"`
+	DependencyType     string   `json:"dependency_type"`
+	ReviewState        string   `json:"-"`
 }
 type QueueResult struct{ FeatureID, ReviewID, Recovery string }
 type Recovery struct{ ReviewID, BugID, Recovery string }
@@ -152,6 +156,23 @@ func (s *Service) show(ctx context.Context, id string) (Issue, error) {
 		return Issue{}, errors.New("invalid Beads issue response")
 	}
 	return xs[0], nil
+}
+
+// ShowIssue returns one safe issue record for read-only workspace planning.
+func (s *Service) ShowIssue(ctx context.Context, id string) (Issue, error) {
+	return s.show(ctx, id)
+}
+
+// ListOpenChildren returns direct open children without changing Beads state.
+func (s *Service) ListOpenChildren(ctx context.Context, parent string) ([]Issue, error) {
+	if !validID(parent) {
+		return nil, errors.New("invalid feature ID")
+	}
+	raw, err := s.client.run(ctx, "list", "--parent", parent, "--status", "open")
+	if err != nil {
+		return nil, err
+	}
+	return decode(raw)
 }
 func (s *Service) ReadyWork(ctx context.Context) ([]Issue, error) {
 	raw, err := s.client.run(ctx, "list", "--ready")

@@ -31,6 +31,13 @@ can copy or register them in its native agent directory if required.
 | `doc_writer` | `gpt-5.6-luna`, low | `docs/`, `prompts/`, durable decisions, handoffs, Mermaid | Go implementation and behavior changes |
 | `backend_agent` | `gpt-5.6-terra`, high | Direct, explicitly requested architecture review outside a work-manager delivery | A concurrent work-manager delivery or `backend_worker` assignment |
 
+`integration_worker` is a generated, host-neutral root-integration contract for
+prepared workspaces. It owns only root gitlink and integration artifacts; it is
+not a third downstream delegate. The active work-manager topology remains
+`work_manager -> backend_worker` plus the coordinated documentation worker.
+The integration contract makes the root ownership boundary and feature-ID
+commit rule explicit for whichever host performs the integration step.
+
 `work_manager` and `backend_agent` use `$godex:godex-go-backend` for Go
 architecture and review. `backend_worker` uses it for its assigned
 implementation. The documentation worker uses `$codex-obsidian-writer` and

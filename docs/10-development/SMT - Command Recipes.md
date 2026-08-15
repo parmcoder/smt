@@ -80,9 +80,34 @@ repositories:
       url: git@github.com:example/web-app.git
 ```
 
-The generated `.gitmodules` records local bootstrap URLs. SMT pushes through
-`remote.url` but does not yet synchronize those values into `.gitmodules` for
-fresh external clones.
+The generated `.gitmodules` initially records local bootstrap URLs. For
+provider-backed delivery, declare exact projects and let SMT discover/create
+and wire them:
+
+```yaml
+providers:
+  github:
+    api_base_url: https://api.github.com/
+repositories:
+  - id: repo
+    path: .
+    provider: github
+    project: acme/platform
+    scope: repo
+    visibility: private
+```
+
+```sh
+export SMT_GITHUB_TOKEN=...
+bin/smt remote provision --dry-run
+bin/smt remote provision --json
+```
+
+Provisioning uses child-first provider discovery/creation and private
+visibility by default. It refuses incompatible existing projects or occupied
+local origins, never deletes remote projects, and only updates `smt.yaml`,
+`.gitmodules`, and Git origins after every target is available. Tokens are read
+from `SMT_GITHUB_TOKEN` or `SMT_GITLAB_TOKEN` and are never written to disk.
 
 ## Discover commands and enable completion
 
@@ -124,6 +149,112 @@ creating the root worktree and then nested child worktrees. If an unexpected
 child creation fails, SMT reports the created and pending paths for manual
 recovery; it does not delete worktrees automatically.
 
+## Prepare an assigned feature workspace
+
+Resolve one active Beads feature and prepare its synchronized workspace before
+starting implementation:
+
+```sh
+smt workspace prepare smt-feature ../platform-feature --branch feature/demo --dry-run
+smt workspace prepare smt-feature ../platform-feature --branch feature/demo
+```
+
+Preparation selects direct active dependency-ready children with exactly one
+matching `repo:<id>` label, groups them in configuration order, and records
+their titles, descriptions, designs, acceptance criteria, Beads IDs, and
+optional Jira-shaped aliases. It creates the root worktree before children and
+writes `.smt/runs/smt-feature.json` only after all worktrees succeed. The run
+manifest is ignored, contains no credentials, and is the authority for
+repository ownership, check-profile names, integration gates, and accepted
+commit references. The root records `ownership: integration-worker` and
+`integration_gate: root`; children record `ownership: repository-worker` and
+`integration_gate: root-gitlink`.
+
+Inside that prepared workspace, commit subjects must use:
+
+```text
+feat(api): [smt-123] add endpoint
+fix(web): [WEB-456] handle empty response
+```
+
+The bracketed ID is mandatory immediately after the conventional prefix.
+Child commits accept only their assigned Beads ID or Jira alias. Root
+integration/gitlink commits may additionally use the feature ID and assigned
+root-task IDs. Missing, malformed, wrong-repository, ambiguous, or corrupt
+manifest state fails closed with safe remediation. Outside a prepared
+workspace, normal configured conventional-commit validation remains unchanged.
+
+## Submit a prepared workspace
+
+```sh
+bin/smt workspace submit smt-feature --dry-run --json
+bin/smt workspace submit smt-feature
+bin/smt workspace submit smt-feature --ready
+```
+
+Submission selects only assigned commits ahead of each manifest base and
+requires clean attached worktrees, matching configured origins, reachable
+target branches, valid assigned references, and passing `submit` checks before
+the first push. Child repositories are pushed before the root; a changed child
+must have its gitlink integrated by a root commit. Pushes never force-update or
+roll back remote state.
+
+With a configured provider token, SMT reuses an open review with the same
+source/target branches or creates a draft PR/MR. `--ready` creates or promotes
+a ready review. If a token is absent, the push still succeeds and the command
+prints a provider creation link with copy-ready title/body content and exact
+`Closes \`WORK-ID\`` lines. A root review waits until selected child review
+URLs are available. Repeating the command reuses matching open reviews.
+
+## Traceable workspace release-gate handoff
+
+The following checks remain human-owned release evidence. Run them in
+disposable workspaces with representative root and child repositories. Do not
+put tokens in commands, terminal captures, Beads notes, or committed files.
+
+### `smt-5w0.11.7` — prepared workspace traceability
+
+1. Create or select a real feature with one repository-scoped Beads child in
+   the root and one child repository, plus one assigned Beads task with a
+   Jira-shaped `external_ref`.
+2. Run `smt workspace prepare FEATURE PATH --branch BRANCH` and retain the
+   exact output. Inspect the ignored `.smt/runs/FEATURE.json` manifest and
+   confirm the base branch and commit, repository configuration order,
+   ownership, assigned Beads IDs, and Jira alias are present and secret-free.
+3. In the child repository, attempt an empty commit with a missing ID and a
+   commit using the other repository's assigned ID. Both must fail before a
+   commit is created. Repeat with the assigned Beads ID and assigned Jira
+   alias; both must succeed.
+4. In the root repository, create the valid integration/gitlink commit using
+   the parent feature ID. Confirm that an arbitrary valid-looking ID is
+   rejected and that a corrupt, missing, or ambiguous manifest fails closed.
+5. Repeat one preparation as `--dry-run` and confirm it creates no worktree or
+   manifest. Record the exact commands, exit statuses, manifest inspection,
+   and hook output in `smt-5w0.11.7`; agents must not close that ticket.
+
+### `smt-5w0.13.6` — mixed-provider delivery
+
+1. Use disposable private GitHub and GitLab projects or approved sandbox
+   namespaces. Configure fully qualified projects, leave visibility private,
+   and export provider tokens only in the current shell.
+2. Run `smt remote provision --dry-run`, then the real command. Confirm
+   child-first discovery/creation or exact compatible reuse, SSH origins,
+   `.gitmodules`, persisted `remote.url` values, and safe created/existing/
+   configured/pending reporting. Repeat it to verify idempotency.
+3. Prepare a feature and repeat the invalid, cross-repository, assigned
+   Beads, assigned Jira-alias, and root integration commit checks from the
+   `.11.7` handoff. Create changes in an assigned child and the required root
+   gitlink commit only.
+4. Unset one provider token and run `smt workspace submit FEATURE`. Confirm
+   child-first pushes succeed, the missing provider is reported as a warning,
+   copy-ready review text and a safe provider link are printed, and the root
+   review is deferred until child review URLs exist.
+5. Restore the token and run submission again, once normally and once with
+   `--ready`. Confirm draft review creation or reuse, exact `Closes` lines,
+   child links in the root review, and no duplicate reviews on rerun. Record
+   exact commands and review URLs without credentials; agents must not close
+   `smt-5w0.13.6`.
+
 ## Inspect and install workspace hooks
 
 ```sh
@@ -145,10 +276,43 @@ form is for automation and returns the repository entries, profiles, and
 contract counts. When no profiles are configured, the human report says
 `profiles: none`; JSON retains `profiles: []`.
 
-`doctor` is read-only and groups repository, hook, tool, and credential
-readiness. It always checks Git, bare `smt`, and Lefthook, reports token
-presence only, never token values, and gives the build/PATH or
-Lefthook-install remediation before suggesting hook installation.
+`doctor` is read-only and renders a repository-first readiness tree. Each
+configured repository is expanded in configuration order with `worktree`,
+`hook`, `remote`, and `provider` nodes; `tools` and `credentials` are separate
+roots. It reports token presence only, never token values, and places the
+remediation directly beneath the affected warning or error. Missing remotes
+and provider tokens are warnings; absent providers are valid local-only state.
+
+For example, a safe redirected report is shaped like this:
+
+```text
+DOCTOR ! WARN
+workspace
+├─ repo ✓ ready
+│  ├─ worktree ✓ initialized
+│  ├─ hook ✓ current
+│  ├─ remote ✓ configured
+│  └─ provider ✓ github · acme/repo
+└─ api ! warning
+   ├─ worktree ✓ initialized
+   ├─ hook ! absent
+   │  └─ fix: run smt hooks install
+   ├─ remote ! not configured
+   │  └─ fix: configure remote.url before remote operations
+   └─ provider ✓ local-only
+tools
+└─ git ✓ available
+credentials
+└─ github ! token missing
+   └─ fix: set SMT_GITHUB_TOKEN before provider operations
+```
+
+`READY` means all checks passed, `WARN` means work can continue with a
+non-blocking issue, and `ERROR` means a required local check failed. A
+worktree is the Git checkout SMT inspects; a hook is the commit-msg validation
+installed there; a remote is the configured Git destination; a provider is the
+optional GitHub/GitLab project; and a credential is the environment token used
+for provider APIs. `NO_COLOR` and redirected output remain deterministic.
 
 `task build` creates `bin/smt` in the SMT source checkout; it does not put bare
 `smt` on `PATH`. Keep that inherited PATH while returning to the target
