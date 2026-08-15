@@ -136,6 +136,27 @@ missing remote URLs, dirty or detached repositories, and uninitialized paths;
 it pushes child repositories first and the root last. SMT never stages,
 commits, force-pushes, or rolls back a successful child push.
 
+## Beads branch lifecycle
+
+```sh
+bin/smt prepare
+bin/smt switch smt-123
+bin/smt pull
+```
+
+`prepare` has no positional arguments and runs complete preflight before
+creating the active Beads-ID branch. It stashes tracked and untracked changes
+but leaves ignored files in place. `switch BEAD_ID` uses only an existing local
+branch and never creates, auto-pops, or rolls back. `pull` fast-forwards child
+repositories before the root. The effective default branch is per-repository
+`remote.default_branch`, then `main`.
+Default branches use ordinary conventional-commit syntax; non-default active
+Beads branches require the exact branch ID as `type(scope): [BEAD-ID] summary`.
+The root has no special manifest exception. Hooks require Beads readiness.
+
+The former workspace `prepare/submit` manifest flow, Jira aliases, assignment
+waves, and provider review automation are removed from the active CLI.
+
 ## Create a synchronized linked worktree
 
 ```sh
@@ -149,6 +170,7 @@ creating the root worktree and then nested child worktrees. If an unexpected
 child creation fails, SMT reports the created and pending paths for manual
 recovery; it does not delete worktrees automatically.
 
+<!-- INACTIVE HISTORICAL WORKSPACE PREPARE/SUBMIT AND PROVIDER REVIEW RECIPES
 ## Prepare an assigned feature workspace
 
 Resolve one active Beads feature and prepare its synchronized workspace before
@@ -254,6 +276,8 @@ put tokens in commands, terminal captures, Beads notes, or committed files.
    child links in the root review, and no duplicate reviews on rerun. Record
    exact commands and review URLs without credentials; agents must not close
    `smt-5w0.13.6`.
+
+## Inspect and install workspace hooks -->
 
 ## Inspect and install workspace hooks
 

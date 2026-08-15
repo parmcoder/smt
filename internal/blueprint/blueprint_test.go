@@ -60,7 +60,7 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	}
 	for i, want := range wantRepositories {
 		repository := cfg.Repositories[i]
-		if repository.ID != want.id || repository.Path != want.path || repository.Component != want.component || repository.Technology != want.technology || repository.Scope != want.scope || repository.Remote.URL != "" {
+		if repository.ID != want.id || repository.Path != want.path || repository.Component != want.component || repository.Technology != want.technology || repository.Scope != want.scope || repository.Remote.URL != "" || repository.Remote.DefaultBranch != "main" {
 			t.Fatalf("repository %d = %#v, want %#v with empty remote", i, repository, want)
 		}
 	}

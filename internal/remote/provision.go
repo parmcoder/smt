@@ -173,7 +173,14 @@ func Provision(ctx context.Context, cfg config.Config, workspaceRoot string, run
 
 	updated := cfg
 	for index := range updated.Repositories {
-		updated.Repositories[index].Remote.URL = available[updated.Repositories[index].ID].SSHURL
+		info := available[updated.Repositories[index].ID]
+		updated.Repositories[index].Remote.URL = info.SSHURL
+		if strings.TrimSpace(updated.Repositories[index].Remote.DefaultBranch) == "" {
+			updated.Repositories[index].Remote.DefaultBranch = info.DefaultBranch
+			if strings.TrimSpace(updated.Repositories[index].Remote.DefaultBranch) == "" {
+				updated.Repositories[index].Remote.DefaultBranch = "main"
+			}
+		}
 	}
 	if err := writeConfig(filepath.Join(root, "smt.yaml"), updated); err != nil {
 		report.Pending = appendPending(report.Pending, targets)

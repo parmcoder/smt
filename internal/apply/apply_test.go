@@ -232,7 +232,7 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(contents), "type(scope): [WORK-ID] summary") || !strings.Contains(string(contents), "prepared workspace") {
+		if !strings.Contains(string(contents), "type(scope): [BEAD-ID] summary") || !strings.Contains(string(contents), "Beads-ID") {
 			t.Fatalf("generated contract %s=%q", path, contents)
 		}
 	}

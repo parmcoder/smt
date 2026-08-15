@@ -151,7 +151,8 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 	root.PersistentFlags().Bool("verbose", false, "write diagnostic command details to stderr")
 	root.AddGroup(
 		&cobra.Group{ID: "getting-started", Title: "Getting Started"},
-		&cobra.Group{ID: "workspace", Title: "Workspace"},
+		&cobra.Group{ID: "general", Title: "General"},
+		&cobra.Group{ID: "local-ci", Title: "Local CI"},
 		&cobra.Group{ID: "review-workflow", Title: "Review Workflow"},
 		&cobra.Group{ID: "developer-tools", Title: "Developer Tools"},
 	)
@@ -195,9 +196,31 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		return runApply(applyConfig, args[0], out, errOut)
 	})
 	applyCommand.Flags().StringVar(&applyConfig, "config", "./smt.yaml", "configuration file")
+	topPrepareCommand := nativeLeaf("prepare", "Prepare a Beads-ID branch across repositories", "general", "prepare", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		service := newLifecycleBeadsService(root)
+		if verbose {
+			service = newVerboseLifecycleBeadsService(root, errOut)
+		}
+		return runRepositoryPrepare(context.Background(), *cfg, root, service, git.ExecRunner{}, out, errOut)
+	})
+	topSwitchCommand := nativeLeaf("switch BEAD_ID", "Switch every repository to an existing Beads-ID branch", "general", "switch", cobra.ExactArgs(1), func(args []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		service := newLifecycleBeadsService(root)
+		if verbose {
+			service = newVerboseLifecycleBeadsService(root, errOut)
+		}
+		return runRepositorySwitch(context.Background(), *cfg, root, args[0], service, git.ExecRunner{}, out, errOut)
+	})
 
 	var pushDryRun bool
-	pushCommand := nativeLeaf("push", "Push configured repositories", "workspace", "push", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+	pushCommand := nativeLeaf("push", "Push configured repositories", "general", "push", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
 		cfg, _, code := loadConfig(errOut)
 		if code != exitOK {
 			return code
@@ -205,11 +228,18 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		return runPush(context.Background(), *cfg, git.ExecRunner{}, pushDryRun, out, errOut)
 	})
 	pushCommand.Flags().BoolVar(&pushDryRun, "dry-run", false, "validate and print the push plan")
+	pullCommand := nativeLeaf("pull", "Fast-forward configured repositories", "general", "pull", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+		cfg, root, code := loadConfig(errOut)
+		if code != exitOK {
+			return code
+		}
+		return runPull(context.Background(), *cfg, root, git.ExecRunner{}, out, errOut)
+	})
 
 	worktreeCommand := &cobra.Command{
 		Use:     "worktree",
 		Short:   "Manage linked worktrees",
-		GroupID: "workspace",
+		GroupID: "general",
 		Long: `Create synchronized linked worktrees across the configured root and submodules.
 
 Run smt worktree add PATH --branch NAME [--dry-run]. The branch must be new in every configured repository, and PATH must be outside the configured workspace. SMT completes every root and submodule preflight before creating anything, then creates the root worktree before nested child worktrees. Use --dry-run to inspect the plan without changing Git state. If a child creation fails after the root succeeds, use the reported paths for manual recovery; SMT does not remove worktrees automatically.`,
@@ -234,52 +264,10 @@ Run smt worktree add PATH --branch NAME [--dry-run]. The branch must be new in e
 	_ = worktreeAddCommand.MarkFlagRequired("branch")
 	worktreeCommand.AddCommand(worktreeAddCommand)
 
-	workspaceCommand := &cobra.Command{
-		Use:     "workspace",
-		Short:   "Prepare and submit feature workspaces",
-		GroupID: "workspace",
-		Args:    cobra.NoArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
-			return command.Help()
-		},
-	}
-	var prepareBranch string
-	var prepareDryRun, prepareJSON bool
-	prepareCommand := nativeLeaf("prepare FEATURE PATH", "Prepare an assigned feature workspace", "", "workspace prepare", cobra.MatchAll(cobra.ExactArgs(2), requireNonEmptyFlag("branch", &prepareBranch)), func(args []string, _ *logrus.Logger) int {
-		cfg, root, code := loadConfig(errOut)
-		if code != exitOK {
-			return code
-		}
-		return runPrepare(context.Background(), *cfg, root, newPrepareBeadsService(root), git.ExecRunner{}, args[0], args[1], prepareBranch, prepareDryRun, prepareJSON, out, errOut)
-	})
-	prepareCommand.Flags().StringVar(&prepareBranch, "branch", "", "new feature branch name")
-	prepareCommand.Flags().BoolVar(&prepareDryRun, "dry-run", false, "resolve and print the preparation plan without changing state")
-	prepareCommand.Flags().BoolVar(&prepareJSON, "json", false, "write JSON output")
-	_ = prepareCommand.MarkFlagRequired("branch")
-	workspaceCommand.AddCommand(prepareCommand)
-	var submitReady, submitDryRun, submitJSON bool
-	submitCommand := nativeLeaf("submit FEATURE", "Submit prepared workspace branches", "", "workspace submit", cobra.MatchAll(cobra.ExactArgs(1)), func(args []string, logger *logrus.Logger) int {
-		cfg, root, code := loadConfig(errOut)
-		if code != exitOK {
-			return code
-		}
-		return runWorkspaceSubmit(context.Background(), *cfg, root, args[0], git.ExecRunner{}, submitReady, submitDryRun, submitJSON, out, errOut, logger)
-	})
-	submitCommand.Long = `Submit only assigned commits from a prepared workspace.
-
-Children are pushed before the root. An existing open PR/MR is reused when its
-source and target branches match; otherwise SMT creates a draft. --ready opts
-into ready-for-review. A missing provider token still permits Git pushes and
-prints copy-ready review handoff content.`
-	submitCommand.Flags().BoolVar(&submitReady, "ready", false, "create or promote reviews as ready for review")
-	submitCommand.Flags().BoolVar(&submitDryRun, "dry-run", false, "plan without pushing or creating reviews")
-	submitCommand.Flags().BoolVar(&submitJSON, "json", false, "write JSON output")
-	workspaceCommand.AddCommand(submitCommand)
-
 	remoteCommand := &cobra.Command{
 		Use:     "remote",
 		Short:   "Manage provider-backed remotes",
-		GroupID: "workspace",
+		GroupID: "getting-started",
 		Long:    "Provision empty GitHub or GitLab projects and wire their SSH remotes after every configured target is available. Tokens are read only from SMT_GITHUB_TOKEN and SMT_GITLAB_TOKEN.",
 		Args:    cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -307,7 +295,7 @@ origins are changed. --dry-run performs no provider creation or local wiring.`
 	hooksCommand := &cobra.Command{
 		Use:     "hooks",
 		Short:   "Manage workspace Git hooks",
-		GroupID: "workspace",
+		GroupID: "local-ci",
 		Long:    "Install commit-msg hooks safely across the configured root and submodules. smt and lefthook must both be on PATH; from the SMT source checkout, run task build then export PATH=\"$PWD/bin:$PATH\". Return to the target workspace before installation.",
 		Args:    cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -326,7 +314,7 @@ origins are changed. --dry-run performs no provider creation or local wiring.`
 	hooksCommand.AddCommand(hooksInstallCommand)
 
 	var statusJSON bool
-	statusCommand := nativeLeaf("status", "Show workspace status", "workspace", "status", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+	statusCommand := nativeLeaf("status", "Show workspace status", "getting-started", "status", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
 		cfg, root, code := loadConfig(errOut)
 		if code != exitOK {
 			return code
@@ -336,22 +324,29 @@ origins are changed. --dry-run performs no provider creation or local wiring.`
 	statusCommand.Flags().BoolVar(&statusJSON, "json", false, "write JSON output")
 	statusCommand.Long = "Show Git state, commit-msg hook state, configured check profiles, and contract findings."
 
-	doctorCommand := nativeLeaf("doctor", "Check local readiness", "workspace", "doctor", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
-		cfg, _, code := loadConfig(errOut)
-		if code != exitOK {
-			return code
-		}
-		return runDoctor(context.Background(), cfg, git.ExecRunner{}, out, errOut)
-	})
-	doctorCommand.Long = `Check local readiness as a repository-first tree.
+	var doctorTree bool
+	doctorCommand := &cobra.Command{Use: "doctor", Short: "Check local readiness", GroupID: "getting-started", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		return runNativeCommandWithVerbose("doctor", errOut, verbose, func(_ *logrus.Logger) int {
+			cfg, root, code := loadConfig(errOut)
+			if code != exitOK {
+				return code
+			}
+			return runDoctor(context.Background(), cfg, root, git.ExecRunner{}, doctorTree, out, errOut)
+		})
+	},
+	}
+	doctorCommand.Flags().BoolVar(&doctorTree, "tree", false, "render the complete repository hierarchy")
+	doctorCommand.Long = `Check local readiness with an action-first summary.
 
-Each repository contains worktree, hook, remote, and provider readiness. Tools
-and credentials are shown as separate roots. READY means all checks passed,
-WARN means work can continue with a non-blocking issue, and ERROR means a
-required local check failed. A worktree is the Git checkout SMT inspects; a
-hook is the commit-msg validation installed in that checkout; a remote is the
-configured Git destination; a provider is the optional GitHub or GitLab
-project; and a credential is the environment token used for provider APIs.
+The default view lists safe remediation actions first. Use --tree to render the
+complete repository hierarchy. Each repository contains worktree, hook, remote,
+default-branch, state, and provider readiness. Tools and credentials are shown
+as separate roots. READY means all checks passed, WARN means work can continue
+with a non-blocking issue, and ERROR means a required local check failed. A
+worktree is the Git checkout SMT inspects; a hook is the commit-msg validation
+installed in that checkout; a remote is the configured Git destination; a
+provider is the optional GitHub or GitLab project; and a credential is the
+environment token used for provider APIs.
 
 Warnings and errors include their remediation below the affected node. Output
 is safe for terminals, redirected logs, and NO_COLOR environments.`
@@ -473,7 +468,7 @@ is safe for terminals, redirected logs, and NO_COLOR environments.`
 	})
 	releaseCheckCommand.Flags().BoolVar(&releaseCheckJSON, "json", false, "write JSON output")
 	releaseCommand.AddCommand(releaseCheckCommand)
-	root.AddCommand(newCommand, applyCommand, pushCommand, worktreeCommand, workspaceCommand, remoteCommand, hooksCommand, statusCommand, doctorCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
+	root.AddCommand(applyCommand, newCommand, remoteCommand, statusCommand, doctorCommand, pushCommand, pullCommand, worktreeCommand, topPrepareCommand, topSwitchCommand, hooksCommand, validateCommand, checkCommand, contractsCommand, ciCommand, workCommand, reviewCommand, releaseCommand)
 	return root
 }
 
@@ -622,6 +617,31 @@ func runPush(ctx context.Context, cfg config.Config, runner git.Runner, dryRun b
 	return exitValidation
 }
 
+func runPull(ctx context.Context, cfg config.Config, root string, runner git.Runner, out, errOut io.Writer) int {
+	targets := make([]git.PullTarget, 0, len(cfg.Repositories))
+	for _, repository := range cfg.Repositories {
+		dir := filepath.Join(root, repository.Path)
+		targets = append(targets, git.PullTarget{Repository: git.Repository{ID: repository.ID, Dir: dir, IsRoot: filepath.Clean(repository.Path) == "."}, DefaultBranch: repository.EffectiveDefaultBranch()})
+	}
+	plan, err := git.PlanPull(ctx, runner, targets)
+	if err != nil {
+		fmt.Fprintf(errOut, "pull: %v\n", err)
+		return exitValidation
+	}
+	completed, err := git.ExecutePull(ctx, runner, plan)
+	for _, target := range completed {
+		fmt.Fprintf(out, "pulled %s\n", target.Repository.ID)
+	}
+	if err == nil {
+		return exitOK
+	}
+	for _, target := range plan.Targets[len(completed):] {
+		fmt.Fprintf(out, "pending %s\n", target.Repository.ID)
+	}
+	fmt.Fprintf(errOut, "pull: %v\n", err)
+	return exitValidation
+}
+
 func runWorktree(ctx context.Context, cfg config.Config, root string, runner git.Runner, destination, branch string, dryRun bool, out, errOut io.Writer) int {
 	targets := make([]git.WorktreeTarget, 0, len(cfg.Repositories))
 	for _, repository := range cfg.Repositories {
@@ -635,7 +655,8 @@ func runWorktree(ctx context.Context, cfg config.Config, root string, runner git
 				Dir:    dir,
 				IsRoot: filepath.Clean(repository.Path) == ".",
 			},
-			Path: repository.Path,
+			Path:          repository.Path,
+			DefaultBranch: repository.EffectiveDefaultBranch(),
 		})
 	}
 	plan, err := git.PlanWorktree(ctx, runner, targets, destination, branch)
@@ -831,17 +852,30 @@ func runValidateMessage(configPath, path string, out, errOut io.Writer) int {
 		return exitInternal
 	}
 	policy := commit.Policy{Types: cfg.Commit.Types, Scopes: cfg.Commit.Scopes}
-	allowed, prepared, preparedErr := preparedCommitReferences(context.Background(), configPath, git.ExecRunner{})
-	if preparedErr != nil {
-		fmt.Fprintf(errOut, "prepared workspace validation: %v\n", preparedErr)
+	currentDir, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		fmt.Fprintln(errOut, "branch validation: resolve current directory")
 		return exitValidation
 	}
-	var validationErr error
-	if prepared {
-		validationErr = commit.ValidatePreparedMessage(string(message), policy, allowed)
-	} else {
-		validationErr = commit.ValidateMessage(string(message), policy)
+	current, inspectErr := git.Inspect(context.Background(), git.ExecRunner{}, git.Repository{ID: "current", Dir: currentDir})
+	defaultBranch := "main"
+	for _, repository := range cfg.Repositories {
+		if filepath.Clean(repository.Path) == "." {
+			defaultBranch = repository.EffectiveDefaultBranch()
+			break
+		}
 	}
+	if inspectErr != nil || !current.Initialized || current.Detached || current.Branch == "" {
+		current.Branch = defaultBranch
+	}
+	if current.Branch != defaultBranch {
+		issue, issueErr := beads.New(currentDir, beads.CommandRunner{}).ShowIssue(context.Background(), current.Branch)
+		if issueErr != nil || issue.ID != current.Branch || (issue.Status != "open" && issue.Status != "in_progress") {
+			fmt.Fprintln(errOut, "branch validation: active Beads task is required")
+			return exitValidation
+		}
+	}
+	validationErr := commit.ValidateBranchMessage(string(message), policy, current.Branch, defaultBranch)
 	if validationErr != nil {
 		fmt.Fprintln(errOut, validationErr)
 		return exitValidation
@@ -905,19 +939,40 @@ func runStatus(ctx context.Context, cfg *config.Config, root string, runner git.
 	return exitOK
 }
 
-func runDoctor(ctx context.Context, cfg *config.Config, runner git.Runner, out, errOut io.Writer) int {
+func runDoctor(ctx context.Context, cfg *config.Config, root string, runner git.Runner, tree bool, out, errOut io.Writer) int {
+	beadsService := beads.New(root, beads.CommandRunner{})
 	doctor := operations.NewDoctorWithHookInspector(*cfg, doctorLookup, func(name string) bool {
 		_, ok := os.LookupEnv(name)
 		return ok
 	}, func(ctx context.Context, dir string) (git.State, error) {
 		return git.Inspect(ctx, runner, git.Repository{Dir: dir})
 	}, hooks.InspectCommitMsg)
+	doctor = operations.NewDoctorWithBeads(*cfg, doctorLookup, func(name string) bool {
+		_, ok := os.LookupEnv(name)
+		return ok
+	}, func(ctx context.Context, dir string) (git.State, error) {
+		return git.Inspect(ctx, runner, git.Repository{Dir: dir})
+	}, func(ctx context.Context) error {
+		result, err := (beads.CommandRunner{}).Run(ctx, root, "bd", "where")
+		if err != nil || result.ExitCode != 0 {
+			return fmt.Errorf("Beads workspace unavailable")
+		}
+		return nil
+	})
+	doctor.SetActiveBranchLookup(func(ctx context.Context, branch string) (bool, error) {
+		issue, err := beadsService.ShowIssue(ctx, branch)
+		return err == nil && (issue.Status == "open" || issue.Status == "in_progress"), nil
+	})
 	result, err := doctor.Run(ctx)
 	if err != nil {
 		fmt.Fprintf(errOut, "doctor: %v\n", err)
 		return exitInternal
 	}
-	renderDoctor(out, *cfg, result)
+	if tree {
+		renderDoctorReport(out, operations.BuildDoctorReport(*cfg, result))
+	} else {
+		renderDoctor(out, *cfg, result)
+	}
 	for _, check := range result.Checks {
 		if check.Status == "error" {
 			return exitValidation
@@ -1013,32 +1068,85 @@ func printSteps(out io.Writer, set map[string]bool) {
 }
 
 func renderDoctorReport(out io.Writer, report operations.DoctorReport) {
-	fmt.Fprintf(out, "DOCTOR %s %s\n", doctorMark(report.Status), doctorOverall(report.Status))
+	color := doctorColorEnabled(out)
+	mark := doctorMark(report.Status)
+	if color {
+		mark = colorDoctorMark(mark, report.Status)
+	}
+	fmt.Fprintf(out, "DOCTOR %s %s\n", mark, doctorOverall(report.Status))
 	hookInstallReady := true
 	for _, node := range report.Tools {
 		if (node.ID == "tool:smt" || node.ID == "tool:lefthook") && node.Status != operations.DoctorStatusOK {
 			hookInstallReady = false
 		}
 	}
+	actions := doctorActions(report, hookInstallReady)
+	if len(actions) > 0 {
+		fmt.Fprintln(out, "\nactions")
+		for _, action := range actions {
+			fmt.Fprintf(out, "• %s\n", action)
+		}
+	}
 	if len(report.Repositories) > 0 {
 		fmt.Fprintln(out, "workspace")
-		renderDoctorNodes(out, report.Repositories, "", hookInstallReady)
+		renderDoctorNodes(out, report.Repositories, "", hookInstallReady, color)
 	}
 	if len(report.Tools) > 0 {
 		fmt.Fprintln(out, "tools")
-		renderDoctorNodes(out, report.Tools, "", hookInstallReady)
+		renderDoctorNodes(out, report.Tools, "", hookInstallReady, color)
 	}
 	if len(report.Credentials) > 0 {
 		fmt.Fprintln(out, "credentials")
-		renderDoctorNodes(out, report.Credentials, "", hookInstallReady)
+		renderDoctorNodes(out, report.Credentials, "", hookInstallReady, color)
 	}
 	if len(report.Unmapped) > 0 {
 		fmt.Fprintln(out, "unmapped")
-		renderDoctorNodes(out, report.Unmapped, "", hookInstallReady)
+		renderDoctorNodes(out, report.Unmapped, "", hookInstallReady, color)
 	}
 }
 
-func renderDoctorNodes(out io.Writer, nodes []operations.DoctorNode, prefix string, hookInstallReady bool) {
+func doctorActions(report operations.DoctorReport, hookInstallReady bool) []string {
+	type action struct {
+		severity int
+		text     string
+	}
+	var actions []action
+	var visit func([]operations.DoctorNode)
+	visit = func(nodes []operations.DoctorNode) {
+		for _, node := range nodes {
+			if remediation := doctorRemediation(node, hookInstallReady); remediation != "" {
+				severity := 1
+				if node.Status == operations.DoctorStatusError {
+					severity = 0
+				}
+				actions = append(actions, action{severity: severity, text: remediation})
+			}
+			visit(node.Children)
+		}
+	}
+	visit(report.Repositories)
+	visit(report.Tools)
+	visit(report.Credentials)
+	visit(report.Unmapped)
+	sort.SliceStable(actions, func(i, j int) bool {
+		if actions[i].severity != actions[j].severity {
+			return actions[i].severity < actions[j].severity
+		}
+		return actions[i].text < actions[j].text
+	})
+	result := make([]string, 0, len(actions))
+	seen := make(map[string]struct{})
+	for _, item := range actions {
+		if _, ok := seen[item.text]; ok {
+			continue
+		}
+		seen[item.text] = struct{}{}
+		result = append(result, item.text)
+	}
+	return result
+}
+
+func renderDoctorNodes(out io.Writer, nodes []operations.DoctorNode, prefix string, hookInstallReady, color bool) {
 	for i, node := range nodes {
 		last := i == len(nodes)-1
 		connector := "├─ "
@@ -1047,14 +1155,26 @@ func renderDoctorNodes(out io.Writer, nodes []operations.DoctorNode, prefix stri
 			connector = "└─ "
 			continuation = "   "
 		}
-		fmt.Fprintf(out, "%s%s%s\n", prefix, connector, doctorNodeLabel(node))
+		fmt.Fprintf(out, "%s%s%s\n", prefix, connector, doctorNodeLabelColor(node, color))
 		if len(node.Children) > 0 {
-			renderDoctorNodes(out, node.Children, prefix+continuation, hookInstallReady)
+			renderDoctorNodes(out, node.Children, prefix+continuation, hookInstallReady, color)
 		}
 		if remediation := doctorRemediation(node, hookInstallReady); remediation != "" {
 			fmt.Fprintf(out, "%s%s└─ fix: %s\n", prefix, continuation, remediation)
 		}
 	}
+}
+
+func doctorColorEnabled(out io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	file, ok := out.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func doctorOverall(status string) string {
@@ -1080,7 +1200,14 @@ func doctorMark(status string) string {
 }
 
 func doctorNodeLabel(node operations.DoctorNode) string {
+	return doctorNodeLabelColor(node, false)
+}
+
+func doctorNodeLabelColor(node operations.DoctorNode, color bool) string {
 	mark := doctorMark(node.Status)
+	if color {
+		mark = colorDoctorMark(mark, node.Status)
+	}
 	switch {
 	case strings.HasPrefix(node.ID, "repo:") && !strings.Contains(strings.TrimPrefix(node.ID, "repo:"), ":"):
 		return strings.TrimPrefix(node.ID, "repo:") + " " + mark + " " + doctorState(node.Status)
@@ -1089,6 +1216,16 @@ func doctorNodeLabel(node operations.DoctorNode) string {
 			return "worktree " + mark + " initialized"
 		}
 		return "worktree " + mark + " not initialized"
+	case strings.HasSuffix(node.ID, ":default"):
+		return "default branch " + mark + " configured"
+	case strings.HasSuffix(node.ID, ":state"):
+		if node.Status == operations.DoctorStatusError {
+			return "state " + mark + " detached"
+		}
+		if node.Status == operations.DoctorStatusWarning {
+			return "state " + mark + " dirty"
+		}
+		return "state " + mark + " clean and attached"
 	case strings.HasPrefix(node.ID, "hook:"):
 		return "hook " + mark + " " + doctorHookState(node.Message)
 	case strings.HasPrefix(node.ID, "remote:"):
@@ -1107,8 +1244,24 @@ func doctorNodeLabel(node operations.DoctorNode) string {
 			state = "token missing"
 		}
 		return provider + " " + mark + " " + state
+	case node.ID == "beads:workspace":
+		return "Beads workspace " + mark + " " + doctorState(node.Status)
+	case node.ID == "workspace:branches":
+		return "branch alignment " + mark + " " + doctorState(node.Status)
 	default:
 		return "check " + node.ID + " " + mark + " " + doctorState(node.Status)
+	}
+}
+
+func colorDoctorMark(mark, status string) string {
+	const reset = "\x1b[0m"
+	switch status {
+	case operations.DoctorStatusError:
+		return "\x1b[31m" + mark + reset
+	case operations.DoctorStatusWarning:
+		return "\x1b[33m" + mark + reset
+	default:
+		return "\x1b[32m" + mark + reset
 	}
 }
 
@@ -1182,6 +1335,16 @@ func doctorRemediation(node operations.DoctorNode, hookInstallReady bool) string
 		return "configure remote.url before remote operations"
 	case strings.HasPrefix(node.ID, "token:"):
 		return "set SMT_" + strings.ToUpper(strings.TrimPrefix(node.ID, "token:")) + "_TOKEN before provider operations"
+	case node.ID == "beads:workspace":
+		return "run bd where and initialize the Beads workspace before repository operations"
+	case node.ID == "workspace:branches":
+		return "switch every repository to its effective default or one active Beads-ID branch"
+	case strings.HasSuffix(node.ID, ":state") && node.Status == operations.DoctorStatusError:
+		return "switch the detached repository to a branch"
+	case strings.HasSuffix(node.ID, ":state") && node.Status == operations.DoctorStatusWarning:
+		return "commit or stash local changes before workspace operations"
+	case strings.HasSuffix(node.ID, ":default"):
+		return "inspect the configured effective default branch"
 	case node.ID == "tool:lefthook":
 		return "install lefthook and rerun smt doctor"
 	case node.ID == "tool:smt":

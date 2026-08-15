@@ -358,20 +358,20 @@ func copyDirectory(source, destination string) error {
 
 func writeArtifacts(root string, cs []component) error {
 	files := map[string]string{
-		".gitignore":               "**/.DS_Store\n**/Thumbs.db\n**/desktop.ini\n\n.smt/\n",
-		"README.md":                "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n",
-		".tool-versions":           toolVersions(cs),
-		"AGENTS.md":                "# Project Agent Operating Agreement\n\nGo work uses `$godex:godex-go-backend`. Beads (`bd`) is the canonical task and issue state. The `work_manager` owns delivery decisions.\n\nWorkflow: `work_manager -> component worker -> tests -> manager review -> durable handoff/docs -> human E2E review -> release gate`.\n\nPrepared workspace commits must use `type(scope): [WORK-ID] summary`, with the bracketed Beads ID or assigned Jira alias immediately after the conventional prefix. The prepared workspace manifest is authoritative for repository ownership and allowed work-item references.\n",
-		"agents/work_manager.toml": "name = \"work_manager\"\nmodel_reasoning_effort = \"high\"\n\n# Prepared workspace contract\ncommit_format = \"type(scope): [WORK-ID] summary\"\nmanifest_authority = \"prepared workspace\"\n",
-		"agents/integration_worker.toml": "name = \"integration_worker\"\nmodel_reasoning_effort = \"medium\"\n\n# Root-only integration contract; this is not a third delivery delegate.\nownership = \"root integration and gitlink updates only\"\ncommit_format = \"type(scope): [WORK-ID] summary\"\nmanifest_authority = \"prepared workspace\"\n",
-		"agents/doc_writer.toml":   "name = \"doc_writer\"\nmodel_reasoning_effort = \"low\"\n",
-		"prompts/build.md":         "# Build workflow\n\nUse `bd` for canonical task state.\n\nFor a prepared workspace, commits must use `type(scope): [WORK-ID] summary`. Use only the repository's assigned Beads IDs or Jira aliases from the prepared workspace manifest; the manifest is authoritative for ownership and integration work.\n",
-		"docs/README.md":           "---\ntitle: Documentation Workspace\n---\n# Documentation Workspace\n\nUse [[00-project/Agentic Development Workflow]].\n",
+		".gitignore":                     "**/.DS_Store\n**/Thumbs.db\n**/desktop.ini\n\n.smt/\n",
+		"README.md":                      "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n",
+		".tool-versions":                 toolVersions(cs),
+		"AGENTS.md":                      "# Project Agent Operating Agreement\n\nGo work uses `$godex:godex-go-backend`. Beads (`bd`) is the canonical task and issue state. The `work_manager` owns delivery decisions.\n\nWorkflow: `work_manager -> component worker -> tests -> manager review -> durable handoff/docs -> human E2E review -> release gate`.\n\nOn the default branch, use ordinary `type(scope): summary` commits. On a Beads-ID branch, commits must use `type(scope): [BEAD-ID] summary`, with the ID exactly matching the branch.\n",
+		"agents/work_manager.toml":       "name = \"work_manager\"\nmodel_reasoning_effort = \"high\"\n\n# Prepared workspace contract\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",
+		"agents/integration_worker.toml": "name = \"integration_worker\"\nmodel_reasoning_effort = \"medium\"\n\n# Root-only integration contract; this is not a third delivery delegate.\nownership = \"root integration and gitlink updates only\"\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",
+		"agents/doc_writer.toml":         "name = \"doc_writer\"\nmodel_reasoning_effort = \"low\"\n",
+		"prompts/build.md":               "# Build workflow\n\nUse `bd` for canonical task state.\n\nOn the default branch use `type(scope): summary`; on a Beads-ID branch use `type(scope): [BEAD-ID] summary` with the ID exactly matching the branch.\n",
+		"docs/README.md":                 "---\ntitle: Documentation Workspace\n---\n# Documentation Workspace\n\nUse [[00-project/Agentic Development Workflow]].\n",
 		"docs/00-project/Agentic Development Workflow.md": "---\ntitle: Agentic Development Workflow\n---\n# Agentic Development Workflow\n\nBeads is canonical state.\n",
 		"docs/Review Queue.base":                          "# View-only human-review evidence; Beads remains canonical state.\n",
 	}
 	for _, c := range cs {
-		files["agents/"+c.id+"_worker.toml"] = "name = \"" + c.id + "_worker\"\nmodel_reasoning_effort = \"medium\"\n\ncommit_format = \"type(scope): [WORK-ID] summary\"\nprepared_workspace = \"Use assigned references from the prepared workspace manifest.\"\n"
+		files["agents/"+c.id+"_worker.toml"] = "name = \"" + c.id + "_worker\"\nmodel_reasoning_effort = \"medium\"\n\ncommit_format = \"type(scope): [BEAD-ID] summary on a matching Beads-ID branch\"\nprepared_workspace = \"Use the active branch Beads ID.\"\n"
 	}
 	for _, d := range []string{"docs/10-decisions", "docs/20-features", "docs/30-reviews", "docs/templates"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -24,6 +23,7 @@ type gitlabProjectResponse struct {
 	PathWithNamespace string `json:"path_with_namespace"`
 	SSHURLToRepo      string `json:"ssh_url_to_repo"`
 	WebURL            string `json:"web_url"`
+	DefaultBranch     string `json:"default_branch"`
 }
 
 func (g *GitLab) InspectProject(ctx context.Context, project string) (ProjectInfo, error) {
@@ -47,7 +47,7 @@ func (g *GitLab) InspectProject(ctx context.Context, project string) (ProjectInf
 	if value.PathWithNamespace != project || value.SSHURLToRepo == "" || value.WebURL == "" {
 		return ProjectInfo{}, errProviderResponse
 	}
-	return ProjectInfo{Exists: true, Project: value.PathWithNamespace, SSHURL: value.SSHURLToRepo, WebURL: value.WebURL}, nil
+	return ProjectInfo{Exists: true, Project: value.PathWithNamespace, SSHURL: value.SSHURLToRepo, WebURL: value.WebURL, DefaultBranch: value.DefaultBranch}, nil
 }
 
 type gitlabNamespaceResponse struct {
@@ -86,74 +86,5 @@ func (g *GitLab) CreateProject(ctx context.Context, spec ProjectSpec) (ProjectIn
 	if value.PathWithNamespace != spec.Project || value.SSHURLToRepo == "" || value.WebURL == "" {
 		return ProjectInfo{}, errProviderResponse
 	}
-	return ProjectInfo{Exists: true, Project: value.PathWithNamespace, SSHURL: value.SSHURLToRepo, WebURL: value.WebURL}, nil
-}
-
-type gitlabReviewResponse struct {
-	IID          int    `json:"iid"`
-	WebURL       string `json:"web_url"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Draft        bool   `json:"draft"`
-	SourceBranch string `json:"source_branch"`
-	TargetBranch string `json:"target_branch"`
-}
-
-func (g *GitLab) FindOpenReviews(ctx context.Context, spec ReviewSpec) ([]ReviewInfo, error) {
-	if _, err := splitProject("gitlab", spec.Project, 0); err != nil {
-		return nil, err
-	}
-	endpoint := "projects/" + url.PathEscape(spec.Project) + "/merge_requests?state=opened&source_branch=" + url.QueryEscape(spec.SourceBranch) + "&target_branch=" + url.QueryEscape(spec.TargetBranch)
-	response, err := g.request(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	var values []gitlabReviewResponse
-	if err := decodeProviderResponse("gitlab", response, &values); err != nil {
-		return nil, err
-	}
-	result := make([]ReviewInfo, 0, len(values))
-	for _, value := range values {
-		if value.SourceBranch == spec.SourceBranch && value.TargetBranch == spec.TargetBranch {
-			result = append(result, gitlabReview(value, spec.Project))
-		}
-	}
-	return result, nil
-}
-
-func (g *GitLab) CreateReview(ctx context.Context, spec ReviewSpec) (ReviewInfo, error) {
-	if _, err := splitProject("gitlab", spec.Project, 0); err != nil {
-		return ReviewInfo{}, err
-	}
-	response, err := g.request(ctx, http.MethodPost, "projects/"+url.PathEscape(spec.Project)+"/merge_requests", map[string]any{
-		"source_branch": spec.SourceBranch, "target_branch": spec.TargetBranch, "title": spec.Title,
-		"description": spec.Description, "draft": spec.Draft,
-	})
-	if err != nil {
-		return ReviewInfo{}, err
-	}
-	var value gitlabReviewResponse
-	if err := decodeProviderResponse("gitlab", response, &value); err != nil {
-		return ReviewInfo{}, err
-	}
-	return gitlabReview(value, spec.Project), nil
-}
-
-func (g *GitLab) SetReady(ctx context.Context, review ReviewInfo) (ReviewInfo, error) {
-	if _, err := splitProject("gitlab", review.Project, 0); err != nil {
-		return ReviewInfo{}, err
-	}
-	response, err := g.request(ctx, http.MethodPut, "projects/"+url.PathEscape(review.Project)+"/merge_requests/"+url.PathEscape(review.ID), map[string]any{"draft": false})
-	if err != nil {
-		return ReviewInfo{}, err
-	}
-	var value gitlabReviewResponse
-	if err := decodeProviderResponse("gitlab", response, &value); err != nil {
-		return ReviewInfo{}, err
-	}
-	return gitlabReview(value, review.Project), nil
-}
-
-func gitlabReview(value gitlabReviewResponse, project string) ReviewInfo {
-	return ReviewInfo{Project: project, ID: strconv.Itoa(value.IID), URL: value.WebURL, Title: value.Title, Description: value.Description, SourceBranch: value.SourceBranch, TargetBranch: value.TargetBranch, Draft: value.Draft}
+	return ProjectInfo{Exists: true, Project: value.PathWithNamespace, SSHURL: value.SSHURLToRepo, WebURL: value.WebURL, DefaultBranch: value.DefaultBranch}, nil
 }

@@ -26,8 +26,8 @@ The shared, Obsidian-compatible knowledge base for Sanovy Mono Tool.
 The first CLI implementation is present. `task build` produces `bin/smt`,
 `task verify` runs the Go suite, and `smt doctor` reports a deterministic,
 repository-first readiness tree with local remediation. Provider project
-provisioning and prepared-workspace submission are available through explicit
-child-first commands with token-safe human handoff. GitHub Actions
+provisioning remains an explicit local command; workspace prepare/submit and
+provider review automation are not active. GitHub Actions
 tag-driven release publication is configured; local tagging remains an
 explicit, mutating operation. See the recipes note for prerequisites and safe
 examples.

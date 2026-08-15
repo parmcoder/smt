@@ -1,5 +1,5 @@
 // Package provider contains small provider-neutral HTTP boundaries for
-// GitHub and GitLab project/review automation.
+// GitHub and GitLab project provisioning.
 package provider
 
 import (
@@ -22,47 +22,19 @@ type ProjectSpec struct {
 	Visibility string
 }
 
-// ProjectInfo contains only safe identity and clone/review URLs.
+// ProjectInfo contains only safe project identity and URLs.
 type ProjectInfo struct {
-	Exists  bool
-	Project string
-	SSHURL  string
-	WebURL  string
-}
-
-// ReviewSpec identifies one source/target review and its safe content.
-type ReviewSpec struct {
-	Project      string
-	SourceBranch string
-	TargetBranch string
-	Title        string
-	Description  string
-	Draft        bool
-}
-
-// ReviewInfo is the provider-neutral review result.
-type ReviewInfo struct {
-	Project      string
-	ID           string
-	URL          string
-	Title        string
-	Description  string
-	SourceBranch string
-	TargetBranch string
-	Draft        bool
+	Exists        bool
+	Project       string
+	SSHURL        string
+	WebURL        string
+	DefaultBranch string
 }
 
 // ProjectProvider discovers and creates provider projects.
 type ProjectProvider interface {
 	InspectProject(context.Context, string) (ProjectInfo, error)
 	CreateProject(context.Context, ProjectSpec) (ProjectInfo, error)
-}
-
-// ReviewProvider discovers, creates, and promotes open reviews.
-type ReviewProvider interface {
-	FindOpenReviews(context.Context, ReviewSpec) ([]ReviewInfo, error)
-	CreateReview(context.Context, ReviewSpec) (ReviewInfo, error)
-	SetReady(context.Context, ReviewInfo) (ReviewInfo, error)
 }
 
 type client struct {

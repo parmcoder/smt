@@ -21,7 +21,7 @@ func TestNewConfiguredUsesCustomAndDefaultEndpoints(t *testing.T) {
 		{name: "gitlab default", provider: "gitlab", want: "https://gitlab.com/api/v4/"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			projects, _, err := NewConfigured(test.provider, test.settings, "token", &http.Client{})
+			projects, err := NewConfigured(test.provider, test.settings, "token", &http.Client{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -35,7 +35,7 @@ func TestNewConfiguredUsesCustomAndDefaultEndpoints(t *testing.T) {
 
 func TestNewConfiguredRejectsCredentialBearingEndpoint(t *testing.T) {
 	for _, endpoint := range []string{"https://user:pass@example.test/api", "https://example.test/api?token=secret", "https://example.test/api#secret"} {
-		if _, _, err := NewConfigured("github", config.ProviderConfig{APIBaseURL: endpoint}, "token", &http.Client{}); err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "pass") {
+		if _, err := NewConfigured("github", config.ProviderConfig{APIBaseURL: endpoint}, "token", &http.Client{}); err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "pass") {
 			t.Fatalf("endpoint=%q err=%v", endpoint, err)
 		}
 	}

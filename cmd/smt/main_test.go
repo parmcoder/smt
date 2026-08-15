@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,9 +19,14 @@ import (
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/operations"
-	workspacepkg "github.com/parmcoder/smt/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
+
+type processRunnerFunc func(context.Context, string, string, ...string) (beads.ProcessResult, error)
+
+func (f processRunnerFunc) Run(ctx context.Context, dir, name string, args ...string) (beads.ProcessResult, error) {
+	return f(ctx, dir, name, args...)
+}
 
 func TestRunApplyParsesConfigWithoutPrompting(t *testing.T) {
 	original := newApplyService
@@ -87,10 +93,60 @@ func TestDoctorHelpExplainsTermsWithoutLoadingConfiguration(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"worktree", "hook", "remote", "provider", "credential", "READY", "WARN", "ERROR"} {
+	for _, want := range []string{"worktree", "hook", "remote", "provider", "credential", "READY", "WARN", "ERROR", "--tree"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("doctor help missing %q:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestVerboseSwitchEmitsOnlySafeBeadsTelemetry(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.WriteFile("smt.yaml", []byte(testConfigYAML("gitlab", "repo", "repo")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secret := "secret-stderr-payload"
+	var calls []string
+	runner := processRunnerFunc(func(_ context.Context, _ string, name string, args ...string) (beads.ProcessResult, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return beads.ProcessResult{ExitCode: 1, Stderr: secret}, errors.New("process failed")
+	})
+	original, originalVerbose := newLifecycleBeadsService, newVerboseLifecycleBeadsService
+	t.Cleanup(func() {
+		newLifecycleBeadsService = original
+		newVerboseLifecycleBeadsService = originalVerbose
+	})
+	newLifecycleBeadsService = func(string) lifecycleBeadsService { return beads.New(root, runner) }
+	newVerboseLifecycleBeadsService = func(_ string, verbose io.Writer) lifecycleBeadsService {
+		return beads.NewWithVerbose(root, runner, verbose)
+	}
+
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"--verbose", "switch", "missing-id"}, strings.NewReader(""), out, errOut); code != exitValidation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(calls) != 1 || calls[0] != "bd show missing-id --json" {
+		t.Fatalf("calls=%q", calls)
+	}
+	for _, forbidden := range []string{secret, "--json", "stderr=", "description"} {
+		if strings.Contains(out.String()+errOut.String(), forbidden) {
+			t.Fatalf("output contains forbidden %q: stdout=%q stderr=%q", forbidden, out.String(), errOut.String())
+		}
+	}
+	for _, want := range []string{"operation=show", "classification=not_found", "exit_code=1", "duration_ms=", "stdout_bytes=0", "stderr_bytes="} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("verbose output=%q missing %q", errOut.String(), want)
+		}
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := runWithInput([]string{"switch", "missing-id"}, strings.NewReader(""), out, errOut); code != exitValidation {
+		t.Fatalf("normal code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if strings.Contains(errOut.String(), "operation=") || strings.Contains(errOut.String(), "classification=") {
+		t.Fatalf("normal output leaked telemetry: %q", errOut.String())
 	}
 }
 
@@ -256,64 +312,6 @@ func TestRunValidateMessageUsesConfigFlag(t *testing.T) {
 	errOut.Reset()
 	if code := runWithInput([]string{"validate-message", "--help"}, strings.NewReader(""), out, errOut); code != exitOK || !strings.Contains(out.String(), "--config string") || !strings.Contains(out.String(), "(default \"./smt.yaml\")") || errOut.Len() != 0 {
 		t.Fatalf("help code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
-	}
-}
-
-func TestRunValidateMessageEnforcesPreparedRepositoryAssignment(t *testing.T) {
-	root := t.TempDir()
-	child := filepath.Join(root, "api")
-	if err := os.MkdirAll(child, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	initTestGit(t, root)
-	initTestGit(t, child)
-	if err := os.WriteFile(filepath.Join(root, "smt.yaml"), []byte("version: 1\ncommit: {types: [feat], scopes: [repo, api]}\nrepositories:\n  - {id: repo, path: ., scope: repo}\n  - {id: api, path: api, scope: api}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("api/\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	commitTestFiles(t, root, "initial")
-	if err := os.WriteFile(filepath.Join(child, "README.md"), []byte("api\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	commitTestFiles(t, child, "initial")
-	state, err := git.Inspect(context.Background(), git.ExecRunner{}, git.Repository{ID: "api", Dir: child})
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest := workspacepkg.RunManifest{
-		SchemaVersion: 1,
-		Feature:       workspacepkg.FeatureContext{ID: "feature", Title: "Feature"},
-		WorkspacePath: root,
-		Branch:        state.Branch,
-		Repositories: []workspacepkg.ManifestRepository{
-			{ID: "repo", Path: ".", BaseBranch: "main", BaseCommit: "root-base", Ownership: "integration-worker", IntegrationGate: "root"},
-			{ID: "api", Path: "api", BaseBranch: "main", BaseCommit: "api-base", Ownership: "repository-worker", IntegrationGate: "root-gitlink", Tasks: []workspacepkg.TaskAssignment{{ID: "task", AllowedReferences: []string{"task", "API-7"}}}},
-		},
-	}
-	if _, err := workspacepkg.WriteRunManifest(root, manifest); err != nil {
-		t.Fatal(err)
-	}
-	message := filepath.Join(child, "message")
-	if err := os.WriteFile(message, []byte("feat(api): [task] add endpoint\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(child)
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runValidateMessage(filepath.Join(root, "smt.yaml"), message, out, errOut); code != exitOK || out.String() != "valid commit message\n" {
-		t.Fatalf("valid prepared code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
-	}
-	if err := os.WriteFile(message, []byte("feat(api): [WEB-1] add endpoint\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out.Reset()
-	errOut.Reset()
-	if code := runValidateMessage(filepath.Join(root, "smt.yaml"), message, out, errOut); code != exitValidation || !strings.Contains(errOut.String(), "not assigned to this repository") {
-		t.Fatalf("wrong prepared code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
 
@@ -530,16 +528,20 @@ Usage:
 
 Getting Started
   apply            Apply a workspace blueprint
-  new              Create a workspace blueprint
-
-Workspace
   doctor           Check local readiness
-  hooks            Manage workspace Git hooks
-  push             Push configured repositories
+  new              Create a workspace blueprint
   remote           Manage provider-backed remotes
   status           Show workspace status
-  workspace        Prepare and submit feature workspaces
+
+General
+  prepare          Prepare a Beads-ID branch across repositories
+  pull             Fast-forward configured repositories
+  push             Push configured repositories
+  switch           Switch every repository to an existing Beads-ID branch
   worktree         Manage linked worktrees
+
+Local CI
+  hooks            Manage workspace Git hooks
 
 Review Workflow
   release          Check release readiness
@@ -569,6 +571,22 @@ func TestCobraRootHelpMatchesGoldenWithoutConfig(t *testing.T) {
 	}
 	if out.String() != cobraRootHelpGolden || errOut.Len() != 0 {
 		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestTopLevelPrepareAndSwitchArgumentContracts(t *testing.T) {
+	for _, args := range [][]string{{"prepare", "extra"}, {"prepare", "--dry-run"}, {"switch"}, {"switch", "one", "two"}} {
+		out, errOut := new(bytes.Buffer), new(bytes.Buffer)
+		if code := runWithInput(args, strings.NewReader(""), out, errOut); code == exitOK {
+			t.Fatalf("args=%v unexpectedly accepted", args)
+		}
+	}
+}
+
+func TestWorkspaceCommandIsUnknown(t *testing.T) {
+	out, errOut := new(bytes.Buffer), new(bytes.Buffer)
+	if code := runWithInput([]string{"workspace"}, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "unknown command") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
 
@@ -743,16 +761,11 @@ func TestCobraWorktreeGroupHelpDoesNotLoadConfig(t *testing.T) {
 	}
 }
 
-func TestCobraWorkspacePrepareHelpDoesNotLoadConfig(t *testing.T) {
+func TestCobraWorkspaceCommandIsUnknown(t *testing.T) {
 	t.Chdir(t.TempDir())
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"workspace", "prepare", "--help"}, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 {
+	if code := runWithInput([]string{"workspace", "prepare", "--help"}, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "unknown command") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
-	}
-	for _, want := range []string{"Usage:\n  smt workspace prepare FEATURE PATH", "--branch string", "--dry-run", "--json"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("help=%q want=%q", out.String(), want)
-		}
 	}
 }
 
@@ -983,70 +996,6 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "worktree plan") || !strings.Contains(out.String(), destination) {
 		t.Fatalf("stdout = %q, want root worktree plan", out.String())
-	}
-}
-
-type prepareBeadsFixture struct {
-	feature  beads.Issue
-	children []beads.Issue
-}
-
-func (f prepareBeadsFixture) ShowIssue(context.Context, string) (beads.Issue, error) {
-	return f.feature, nil
-}
-
-func (f prepareBeadsFixture) ListOpenChildren(context.Context, string) ([]beads.Issue, error) {
-	return f.children, nil
-}
-
-func TestRunPrepareDryRunDoesNotCreateWorktreeOrManifest(t *testing.T) {
-	root := t.TempDir()
-	initTestGit(t, root)
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	commitTestFiles(t, root, "initial")
-	cfg := config.Config{Repositories: []config.Repository{{ID: "repo", Path: ".", Scope: "repo"}}}
-	feature := beads.Issue{ID: "feature", Title: "Feature", Status: "open", Type: "feature"}
-	children := []beads.Issue{{ID: "task", Parent: "feature", Status: "open", Type: "task", Labels: []string{"repo:repo"}}}
-	destination := filepath.Join(t.TempDir(), "prepared")
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runPrepare(context.Background(), cfg, root, prepareBeadsFixture{feature: feature, children: children}, git.ExecRunner{}, "feature", destination, "feature/demo", true, false, out, errOut); code != exitOK {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
-	}
-	if !strings.Contains(out.String(), "workspace prepare plan") || !strings.Contains(out.String(), destination) {
-		t.Fatalf("stdout=%q", out.String())
-	}
-	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
-		t.Fatalf("destination stat=%v, want no worktree", err)
-	}
-}
-
-func TestRunPrepareWritesManifestOnlyAfterWorktreeCreation(t *testing.T) {
-	root := t.TempDir()
-	initTestGit(t, root)
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	commitTestFiles(t, root, "initial")
-	cfg := config.Config{Repositories: []config.Repository{{ID: "repo", Path: ".", Scope: "repo"}}}
-	feature := beads.Issue{ID: "feature", Title: "Feature", Status: "open", Type: "feature"}
-	children := []beads.Issue{{ID: "task", Parent: "feature", Status: "open", Type: "task", Labels: []string{"repo:repo"}}}
-	destination := filepath.Join(t.TempDir(), "prepared")
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runPrepare(context.Background(), cfg, root, prepareBeadsFixture{feature: feature, children: children}, git.ExecRunner{}, "feature", destination, "feature/demo", false, false, out, errOut); code != exitOK {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
-	}
-	manifestPath := filepath.Join(destination, ".smt", "runs", "feature.json")
-	if _, err := os.Stat(manifestPath); err != nil {
-		t.Fatalf("manifest=%s err=%v stdout=%q stderr=%q", manifestPath, err, out.String(), errOut.String())
-	}
-	manifest, err := workspacepkg.FindRunManifest(destination, "feature", "feature/demo")
-	if err != nil || manifest.Repositories[0].Tasks[0].ID != "task" {
-		t.Fatalf("manifest=%+v err=%v", manifest, err)
-	}
-	if !strings.Contains(out.String(), "workspace prepared:") || strings.Contains(out.String(), `"manifest"`) {
-		t.Fatalf("human prepare output=%q", out.String())
 	}
 }
 

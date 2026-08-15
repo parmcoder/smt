@@ -21,8 +21,9 @@ type installCall struct {
 	args []string
 }
 type installRunner struct {
-	calls []installCall
-	fail  string
+	calls     []installCall
+	fail      string
+	failBeads bool
 }
 
 type hooksPathCall struct {
@@ -70,6 +71,12 @@ func lefthook210FixtureFile(t *testing.T, name string) string {
 }
 
 func (r *installRunner) Run(_ context.Context, dir string, args ...string) error {
+	if len(args) == 2 && args[0] == "bd" && args[1] == "where" {
+		if r.failBeads {
+			return os.ErrPermission
+		}
+		return nil
+	}
 	r.calls = append(r.calls, installCall{dir: dir, args: append([]string(nil), args...)})
 	if dir == r.fail {
 		return os.ErrPermission
@@ -89,6 +96,14 @@ func TestInspectCommitMsgRecognizesLefthookDispatcher(t *testing.T) {
 	}
 	if got, err := InspectCommitMsg(repository); err != nil || got != HookCurrent {
 		t.Fatalf("InspectCommitMsg()=%q err=%v, want current", got, err)
+	}
+}
+
+func TestPlanInstallRejectsUnavailableBeadsWorkspaceBeforeHookMutation(t *testing.T) {
+	runner := &installRunner{failBeads: true}
+	_, err := PlanInstall(context.Background(), t.TempDir(), []config.Repository{{ID: "repo", Path: "."}}, func(string) (string, error) { return "/bin/tool", nil }, installInspector{}, &hooksPathRunner{}, runner)
+	if err == nil || !strings.Contains(err.Error(), "Beads workspace") || len(runner.calls) != 0 {
+		t.Fatalf("err=%v calls=%v", err, runner.calls)
 	}
 }
 

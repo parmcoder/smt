@@ -81,6 +81,47 @@ repositories:
 	}
 }
 
+func TestRepositoryEffectiveDefaultBranchUsesMainWhenMissingOrBlank(t *testing.T) {
+	for _, branch := range []string{"", "   ", "main", "trunk"} {
+		repository := Repository{Remote: Remote{DefaultBranch: branch}}
+		want := branch
+		if strings.TrimSpace(want) == "" {
+			want = "main"
+		}
+		if got := repository.EffectiveDefaultBranch(); got != want {
+			t.Fatalf("branch=%q effective=%q want %q", branch, got, want)
+		}
+	}
+}
+
+func TestRepositoryRemoteDefaultBranchRoundTrips(t *testing.T) {
+	raw := `version: 1
+commit:
+  types: [feat]
+  scopes: [repo]
+repositories:
+  - id: repo
+    path: .
+    scope: repo
+    remote:
+      default_branch: trunk
+`
+	cfg, err := LoadBytes([]byte(raw), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Repositories[0].Remote.DefaultBranch; got != "trunk" {
+		t.Fatalf("default branch=%q", got)
+	}
+	encoded, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), "default_branch: trunk") {
+		t.Fatalf("encoded=%s", encoded)
+	}
+}
+
 func TestLoadAllowsRepeatedProvider(t *testing.T) {
 	yaml := `version: 1
 commit:

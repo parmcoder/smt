@@ -100,8 +100,21 @@ type Repository struct {
 
 // Remote holds a credential-free Git destination configured after init.
 type Remote struct {
-	URL string `yaml:"url"`
+	URL           string `yaml:"url"`
+	DefaultBranch string `yaml:"default_branch,omitempty"`
 }
+
+// EffectiveDefaultBranch returns the configured base branch, using the stable
+// version-1 default when it is absent or blank.
+func (r Remote) EffectiveDefaultBranch() string {
+	if branch := strings.TrimSpace(r.DefaultBranch); branch != "" {
+		return branch
+	}
+	return "main"
+}
+
+// EffectiveDefaultBranch returns the repository's configured base branch.
+func (r Repository) EffectiveDefaultBranch() string { return r.Remote.EffectiveDefaultBranch() }
 
 // Check is a configured preflight check.
 type Check struct {
