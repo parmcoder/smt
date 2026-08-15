@@ -6,6 +6,17 @@ The implementation spec is the behavioral source of truth.
 
 ## Current accepted scope
 
+The active lifecycle is `prepare`, `switch`, and `pull`: `prepare` takes no
+positional arguments, preflights all repositories, creates the active Beads-ID
+branch, stashes tracked and untracked changes, and leaves ignored files. `switch
+BEAD_ID` selects only an existing local branch with no auto-pop or rollback.
+`pull` fast-forwards children before root using repository
+`remote.default_branch`, then `main`.
+Hooks require Beads readiness. Active-branch commits use
+`type(scope): [BEAD-ID] summary`; ordinary branches use normal conventional
+syntax. Workspace prepare/submit manifests, Jira aliases, assignment waves,
+and provider review automation are out of scope and removed.
+
 Implement and verify the local workspace diagnostics and hook slice:
 
 - `status [--json]` and `doctor`;
@@ -64,7 +75,20 @@ changes. Add focused tests for every new behavior, run the narrowest useful
 checks, then run the repository verification command. Report changed paths,
 commands and results, assumptions, unresolved risks, and unverified behavior.
 
-## Prepared workspace commit contract
+## Active branch commit contract
+
+Default branches use ordinary conventional-commit syntax. On a non-default
+active Beads branch, require the exact branch ID immediately after the prefix:
+
+```text
+type(scope): [BEAD-ID] summary
+```
+
+There is no manifest exception for root integration commits. Workspace
+prepare/submit manifests, Jira aliases, assignment waves, and provider review
+automation are removed from the active release and must not be implemented.
+
+<!-- Historical prepared-workspace contract retained below for provenance only.
 
 When a workspace was prepared for a feature, every commit subject must use:
 
@@ -77,4 +101,4 @@ assigned to the current repository in the prepared run manifest. A child may
 use its assigned Beads ID or Jira-shaped alias; the root may additionally use
 the feature ID and assigned root-task IDs for integration/gitlink commits.
 Outside a prepared workspace, retain the normal configured conventional-commit
-validation.
+validation. -->

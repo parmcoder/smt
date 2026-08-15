@@ -30,6 +30,70 @@ func TestDoctorReportsMissingGitTool(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsBeadsDefaultAndAlignmentReadiness(t *testing.T) {
+	cfg := config.Config{Repositories: []config.Repository{
+		{ID: "root", Path: "."},
+		{ID: "api", Path: "api", Remote: config.Remote{DefaultBranch: "develop"}},
+	}}
+	doctor := NewDoctorWithBeads(cfg,
+		func(string) (string, error) { return "/usr/bin/tool", nil },
+		func(string) bool { return true },
+		func(_ context.Context, path string) (git.State, error) {
+			if path == "api" {
+				return git.State{Initialized: true, Branch: "develop"}, nil
+			}
+			return git.State{Initialized: true, Branch: "task-7", Dirty: true}, nil
+		},
+		func(context.Context) error { return nil },
+	)
+	result, err := doctor.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := make(map[string]Check, len(result.Checks))
+	for _, check := range result.Checks {
+		checks[check.ID] = check
+	}
+	if got := checks["beads:workspace"]; got.Status != DoctorStatusOK {
+		t.Fatalf("beads check = %#v", got)
+	}
+	if got := checks["repo:api:default"]; got.Status != DoctorStatusOK || !strings.Contains(got.Message, "develop") {
+		t.Fatalf("default check = %#v", got)
+	}
+	if got := checks["repo:root:state"]; got.Status != DoctorStatusWarning || !strings.Contains(got.Message, "clean") {
+		t.Fatalf("state check = %#v", got)
+	}
+	if got := checks["workspace:branches"]; got.Status != DoctorStatusError || !strings.Contains(got.Message, "active Beads") {
+		t.Fatalf("alignment check = %#v", got)
+	}
+}
+
+func TestDoctorRejectsUnverifiedSharedNonDefaultBranch(t *testing.T) {
+	cfg := config.Config{Repositories: []config.Repository{{ID: "root", Path: "."}, {ID: "api", Path: "api"}}}
+	doctor := NewDoctorWithBeads(cfg,
+		func(string) (string, error) { return "/usr/bin/tool", nil },
+		func(string) bool { return true },
+		func(context.Context, string) (git.State, error) {
+			return git.State{Initialized: true, Branch: "task-7"}, nil
+		},
+		func(context.Context) error { return nil },
+	)
+	doctor.SetActiveBranchLookup(func(context.Context, string) (bool, error) { return false, nil })
+	result, err := doctor.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range result.Checks {
+		if check.ID == "workspace:branches" {
+			if check.Status != DoctorStatusError || !strings.Contains(check.Message, "not an active Beads-ID") {
+				t.Fatalf("alignment check = %#v", check)
+			}
+			return
+		}
+	}
+	t.Fatal("alignment check missing")
+}
+
 func TestDoctorAlwaysChecksCoreToolsWithoutProfiles(t *testing.T) {
 	var lookedUp []string
 	doctor := NewDoctor(config.Config{}, func(name string) (string, error) { lookedUp = append(lookedUp, name); return "/tools/" + name, nil }, func(string) bool { return true }, func(context.Context, string) (git.State, error) { return git.State{}, nil })

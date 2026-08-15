@@ -26,8 +26,8 @@ func TestPlanWorktreePreflightsGitlinksAndCreatesNestedSteps(t *testing.T) {
 		t.Fatalf("PlanWorktree() error = %v", err)
 	}
 	want := []WorktreeStep{
-		{Repository: root.Repository, Destination: destination, Branch: "feature/demo", StartPoint: "HEAD"},
-		{Repository: web.Repository, Destination: filepath.Join(destination, "web-app"), Branch: "feature/demo", StartPoint: "HEAD"},
+		{Repository: root.Repository, Destination: destination, Branch: "feature/demo", StartPoint: "main"},
+		{Repository: web.Repository, Destination: filepath.Join(destination, "web-app"), Branch: "feature/demo", StartPoint: "main"},
 	}
 	if !reflect.DeepEqual(plan.Steps, want) {
 		t.Fatalf("steps = %#v, want %#v", plan.Steps, want)
@@ -35,6 +35,32 @@ func TestPlanWorktreePreflightsGitlinksAndCreatesNestedSteps(t *testing.T) {
 	for _, call := range runner.calls {
 		if len(call.args) > 0 && call.args[0] == "worktree" {
 			t.Fatalf("PlanWorktree() created worktree: %#v", call)
+		}
+	}
+}
+
+func TestPlanWorktreeUsesPerRepositoryDefaultBranch(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "feature-workspace")
+	root := WorktreeTarget{Repository: Repository{ID: "repo", Dir: "/workspace/root", IsRoot: true}, Path: ".", DefaultBranch: "main"}
+	child := WorktreeTarget{Repository: Repository{ID: "api", Dir: "/workspace/root/api"}, Path: "api", DefaultBranch: "trunk"}
+	runner := &recordingRunner{results: []Result{{}, {Stdout: "true\n"}, {}, {Stdout: "main\n"}, {Stdout: "true\n"}, {}, {Stdout: "trunk\n"}, {ExitCode: 1}, {ExitCode: 1}, {Stdout: "root-main\n"}, {Stdout: "child-trunk\n"}, {Stdout: "160000 commit child-trunk\tapi\n"}}}
+	plan, err := PlanWorktree(context.Background(), runner, []WorktreeTarget{root, child}, destination, "feature/demo")
+	if err != nil || plan.Steps[0].StartPoint != "main" || plan.Steps[1].StartPoint != "trunk" {
+		t.Fatalf("plan=%+v err=%v", plan, err)
+	}
+}
+
+func TestPlanWorktreeGitlinkValidationUsesRootDefaultRef(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "feature-workspace")
+	root := WorktreeTarget{Repository: Repository{ID: "repo", Dir: "/workspace/root", IsRoot: true}, Path: ".", DefaultBranch: "main"}
+	child := WorktreeTarget{Repository: Repository{ID: "api", Dir: "/workspace/root/api"}, Path: "api", DefaultBranch: "trunk"}
+	runner := &recordingRunner{results: []Result{{}, {Stdout: "true\n"}, {}, {Stdout: "main\n"}, {Stdout: "true\n"}, {}, {Stdout: "trunk\n"}, {ExitCode: 1}, {ExitCode: 1}, {Stdout: "root-main\n"}, {Stdout: "child-trunk\n"}, {Stdout: "160000 commit child-trunk\tapi\n"}}}
+	if _, err := PlanWorktree(context.Background(), runner, []WorktreeTarget{root, child}, destination, "feature/demo"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range runner.calls {
+		if len(call.args) > 1 && call.args[0] == "ls-tree" && call.args[1] == "HEAD" {
+			t.Fatalf("gitlink used HEAD: %v", runner.calls)
 		}
 	}
 }

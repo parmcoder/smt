@@ -16,8 +16,7 @@ import (
 
 func runRemoteProvision(ctx context.Context, cfg config.Config, root string, runner git.Runner, dryRun, jsonOutput bool, out, errOut io.Writer) int {
 	report, err := remotepkg.Provision(ctx, cfg, root, runner, func(name string, settings config.ProviderConfig, token string) (providerpkg.ProjectProvider, error) {
-		projects, _, factoryErr := providerpkg.NewConfigured(name, settings, token, nil)
-		return projects, factoryErr
+		return providerpkg.NewConfigured(name, settings, token, nil)
 	}, func(name string) string {
 		return os.Getenv("SMT_" + strings.ToUpper(name) + "_TOKEN")
 	}, dryRun)

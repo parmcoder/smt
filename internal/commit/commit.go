@@ -52,28 +52,34 @@ func ValidateMessage(message string, policy Policy) error {
 	return nil
 }
 
-// ValidatePreparedMessage applies normal commit policy plus one assigned
-// reference immediately after the conventional prefix.
-func ValidatePreparedMessage(message string, policy Policy, allowed []string) error {
-	if err := ValidateMessage(message, policy); err != nil {
-		return err
+// ValidateBranchMessage applies ordinary conventional syntax on the effective
+// default branch and requires an exact Beads ID reference on other branches.
+func ValidateBranchMessage(message string, policy Policy, branch, defaultBranch string) error {
+	if strings.TrimSpace(branch) == "" {
+		return fmt.Errorf("branch is required")
+	}
+	if strings.TrimSpace(defaultBranch) == "" {
+		defaultBranch = "main"
+	}
+	if branch == defaultBranch {
+		return ValidateMessage(message, policy)
 	}
 	reference, err := WorkItemReference(message)
 	if err != nil {
-		return err
+		return fmt.Errorf("branch %q requires exact Beads ID reference", branch)
 	}
-	if !contains(allowed, reference) {
-		return fmt.Errorf("work-item reference %q is not assigned to this repository", reference)
+	if reference != branch {
+		return fmt.Errorf("commit reference must match branch")
 	}
-	return nil
+	return ValidateMessage(message, policy)
 }
 
-// WorkItemReference extracts and validates the bracketed prepared-workspace ID.
+// WorkItemReference extracts and validates the bracketed Beads ID.
 func WorkItemReference(message string) (string, error) {
 	firstLine := strings.SplitN(strings.TrimSuffix(strings.TrimSuffix(message, "\n"), "\r"), "\n", 2)[0]
 	match := preparedHeaderPattern.FindStringSubmatch(firstLine)
 	if len(match) != 2 {
-		return "", fmt.Errorf("prepared workspace commit requires an assigned work-item reference immediately after the conventional prefix")
+		return "", fmt.Errorf("Beads branch commit requires its task ID immediately after the conventional prefix")
 	}
 	if !preparedReferencePattern.MatchString(match[1]) {
 		return "", fmt.Errorf("invalid work-item reference")

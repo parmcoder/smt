@@ -2,28 +2,47 @@
 package beads
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type ProcessRunner interface {
-	Run(context.Context, string, string, ...string) (string, error)
+	Run(context.Context, string, string, ...string) (ProcessResult, error)
+}
+
+// ProcessResult contains non-sensitive process telemetry and separated output.
+type ProcessResult struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+	Duration time.Duration
 }
 type CommandRunner struct{}
 
-func (CommandRunner) Run(ctx context.Context, dir, name string, args ...string) (string, error) {
+func (CommandRunner) Run(ctx context.Context, dir, name string, args ...string) (ProcessResult, error) {
+	started := time.Now()
 	c := exec.CommandContext(ctx, name, args...)
 	c.Dir = dir
-	out, err := c.Output()
-	if ctx.Err() != nil {
-		return "", ctx.Err()
+	var stdout, stderr bytes.Buffer
+	c.Stdout, c.Stderr = &stdout, &stderr
+	err := c.Run()
+	result := ProcessResult{Stdout: stdout.String(), Stderr: stderr.String(), Duration: time.Since(started)}
+	if c.ProcessState != nil {
+		result.ExitCode = c.ProcessState.ExitCode()
 	}
-	return string(out), err
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	return result, err
 }
 
 type Issue struct {
@@ -33,6 +52,7 @@ type Issue struct {
 	Design             string   `json:"design"`
 	AcceptanceCriteria string   `json:"acceptance_criteria"`
 	ExternalRef        string   `json:"external_ref"`
+	Priority           int      `json:"priority"`
 	Status             string   `json:"status"`
 	Type               string   `json:"issue_type"`
 	Labels             []string `json:"labels"`
@@ -48,28 +68,58 @@ type ReleaseReadiness struct {
 	Blocking []Issue
 }
 type Client struct {
-	Dir    string
-	Runner ProcessRunner
+	Dir     string
+	Runner  ProcessRunner
+	Verbose io.Writer
 }
 type Service struct{ client Client }
 
-func New(dir string, runner ProcessRunner) *Service { return &Service{Client{dir, runner}} }
+func New(dir string, runner ProcessRunner) *Service {
+	return &Service{client: Client{Dir: dir, Runner: runner}}
+}
+
+// NewWithVerbose constructs a service with safe operation telemetry output.
+func NewWithVerbose(dir string, runner ProcessRunner, verbose io.Writer) *Service {
+	service := New(dir, runner)
+	service.client.Verbose = verbose
+	return service
+}
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func validID(s string) bool { return idPattern.MatchString(s) }
 func (c Client) run(ctx context.Context, args ...string) (string, error) {
 	if c.Runner == nil {
-		return "", errors.New("Beads runner is required")
+		return "", errors.New("beads operation unavailable: unavailable")
 	}
-	out, err := c.Runner.Run(ctx, c.Dir, "bd", append(args, "--json")...)
-	if err != nil {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
+	operation := args[0]
+	result, err := c.Runner.Run(ctx, c.Dir, "bd", append(args, "--json")...)
+	classification := ""
+	if err != nil || result.ExitCode != 0 {
+		classification = "command_failed"
+		if operation == "show" && result.ExitCode == 1 {
+			classification = "not_found"
 		}
-		return "", errors.New("Beads command failed")
+		if result.ExitCode == 0 && err != nil {
+			classification = "unavailable"
+		}
+		if ctx.Err() != nil {
+			classification = "unavailable"
+		}
+		c.log(operation, classification, result)
+		return "", fmt.Errorf("beads %s: %s", operation, classification)
 	}
-	return out, nil
+	c.log(operation, classification, result)
+	return result.Stdout, nil
+}
+func (c Client) log(operation, classification string, result ProcessResult) {
+	if c.Verbose == nil {
+		return
+	}
+	if classification == "" {
+		classification = "ok"
+	}
+	fmt.Fprintf(c.Verbose, "operation=%s classification=%s exit_code=%d duration_ms=%d stdout_bytes=%d stderr_bytes=%d\n", operation, classification, result.ExitCode, result.Duration.Milliseconds(), len(result.Stdout), len(result.Stderr))
 }
 func decode(raw string) ([]Issue, error) {
 	var xs []Issue
@@ -78,14 +128,14 @@ func decode(raw string) ([]Issue, error) {
 	}
 	var x Issue
 	if err := json.Unmarshal([]byte(raw), &x); err != nil || x.ID == "" {
-		return nil, errors.New("malformed Beads JSON")
+		return nil, errors.New("invalid_json")
 	}
 	return checked([]Issue{x})
 }
 func checked(xs []Issue) ([]Issue, error) {
 	for _, x := range xs {
 		if !validID(x.ID) {
-			return nil, errors.New("invalid Beads issue response")
+			return nil, errors.New("invalid_json")
 		}
 	}
 	return xs, nil
@@ -98,9 +148,10 @@ func has(x Issue, label string) bool {
 	}
 	return false
 }
-func review(x Issue) bool { return has(x, "human-review") && has(x, "e2e") }
-func closed(x Issue) bool { return x.Status == "closed" }
-func active(x Issue) bool { return !closed(x) }
+func review(x Issue) bool       { return has(x, "human-review") && has(x, "e2e") }
+func closed(x Issue) bool       { return x.Status == "closed" }
+func active(x Issue) bool       { return !closed(x) }
+func activeLookup(x Issue) bool { return x.Status == "open" || x.Status == "in_progress" }
 func state(x Issue) string {
 	for _, v := range []string{"queued", "failed", "retest-queued"} {
 		if has(x, v) {
@@ -153,7 +204,10 @@ func (s *Service) show(ctx context.Context, id string) (Issue, error) {
 	}
 	xs, err := decode(raw)
 	if err != nil || len(xs) != 1 {
-		return Issue{}, errors.New("invalid Beads issue response")
+		return Issue{}, errors.New("beads show: invalid_json")
+	}
+	if !activeLookup(xs[0]) {
+		return Issue{}, fmt.Errorf("beads show %s: not_found", id)
 	}
 	return xs[0], nil
 }
@@ -168,11 +222,69 @@ func (s *Service) ListOpenChildren(ctx context.Context, parent string) ([]Issue,
 	if !validID(parent) {
 		return nil, errors.New("invalid feature ID")
 	}
-	raw, err := s.client.run(ctx, "list", "--parent", parent, "--status", "open")
+	raw, err := s.client.run(ctx, "list", "--parent", parent, "--status", "open,in_progress")
 	if err != nil {
 		return nil, err
 	}
-	return decode(raw)
+	xs, err := decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	activeChildren := xs[:0]
+	for _, x := range xs {
+		if x.Parent == parent && activeLookup(x) {
+			activeChildren = append(activeChildren, x)
+		}
+	}
+	return activeChildren, nil
+}
+
+// EnsurePreparedWorkspaceTask returns the sole active P2 task named
+// Prepared workspace, creating it when absent.
+func (s *Service) EnsurePreparedWorkspaceTask(ctx context.Context) (string, error) {
+	raw, err := s.client.run(ctx, "list", "--status", "open,in_progress")
+	if err != nil {
+		return "", err
+	}
+	issues, err := decode(raw)
+	if err != nil {
+		return "", errors.New("beads list: invalid_json")
+	}
+	var matches []Issue
+	for _, issue := range issues {
+		if activeLookup(issue) && issue.Title == "Prepared workspace" && issue.Priority == 2 {
+			matches = append(matches, issue)
+		}
+	}
+	if len(matches) > 1 {
+		return "", errors.New("beads prepared workspace: command_failed")
+	}
+	if len(matches) == 1 {
+		return matches[0].ID, nil
+	}
+	raw, err = s.client.run(ctx, "create", "Prepared workspace", "--type", "task", "--priority", "2", "--status", "open")
+	if err != nil {
+		return "", err
+	}
+	created, err := decode(raw)
+	if err != nil || len(created) != 1 || !validID(created[0].ID) {
+		return "", errors.New("beads create: invalid_json")
+	}
+	return created[0].ID, nil
+}
+
+// CreatePreparedWorkspaceTask is the explicit lifecycle name for callers that
+// need the singleton prepared-workspace task ID.
+func (s *Service) CreatePreparedWorkspaceTask(ctx context.Context) (string, error) {
+	raw, err := s.client.run(ctx, "create", "Prepared workspace", "--type", "task", "--priority", "2", "--status", "open")
+	if err != nil {
+		return "", err
+	}
+	created, err := decode(raw)
+	if err != nil || len(created) != 1 || !validID(created[0].ID) {
+		return "", errors.New("beads create: invalid_json")
+	}
+	return created[0].ID, nil
 }
 func (s *Service) ReadyWork(ctx context.Context) ([]Issue, error) {
 	raw, err := s.client.run(ctx, "list", "--ready")
@@ -210,7 +322,7 @@ func (s *Service) QueueReview(ctx context.Context, feature, handoff, evidence st
 	if closed(f) || (f.Type != "feature" && f.Type != "task") {
 		return QueueResult{}, errors.New("feature must be an open feature or task")
 	}
-	raw, err := s.client.run(ctx, "list", "--parent", feature, "--status", "open")
+	raw, err := s.client.run(ctx, "list", "--parent", feature, "--status", "open,in_progress")
 	if err != nil {
 		return QueueResult{}, err
 	}
@@ -247,7 +359,7 @@ func (s *Service) QueueReview(ctx context.Context, feature, handoff, evidence st
 	return QueueResult{FeatureID: feature, ReviewID: xs[0].ID}, nil
 }
 func (s *Service) ListReviews(ctx context.Context) ([]Issue, error) {
-	raw, err := s.client.run(ctx, "list", "--label", "human-review", "--label", "e2e", "--status", "open")
+	raw, err := s.client.run(ctx, "list", "--label", "human-review", "--label", "e2e", "--status", "open,in_progress")
 	if err != nil {
 		return nil, err
 	}

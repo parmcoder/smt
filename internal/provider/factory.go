@@ -10,7 +10,7 @@ import (
 
 // NewConfigured constructs the provider boundary selected by configuration.
 // Tokens are supplied by the caller so they can remain environment-only.
-func NewConfigured(name string, settings config.ProviderConfig, token string, httpClient *http.Client) (ProjectProvider, ReviewProvider, error) {
+func NewConfigured(name string, settings config.ProviderConfig, token string, httpClient *http.Client) (ProjectProvider, error) {
 	baseURL := strings.TrimSpace(settings.APIBaseURL)
 	if baseURL == "" {
 		baseURL = strings.TrimSpace(settings.EnterpriseBaseURL)
@@ -22,23 +22,23 @@ func NewConfigured(name string, settings config.ProviderConfig, token string, ht
 		case "gitlab":
 			baseURL = "https://gitlab.com/api/v4/"
 		default:
-			return nil, nil, fmt.Errorf("unsupported provider %q", name)
+			return nil, fmt.Errorf("unsupported provider %q", name)
 		}
 	}
 	switch name {
 	case "github":
 		client, err := NewGitHub(baseURL, token, httpClient)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return client, client, nil
+		return client, nil
 	case "gitlab":
 		client, err := NewGitLab(baseURL, token, httpClient)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return client, client, nil
+		return client, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported provider %q", name)
+		return nil, fmt.Errorf("unsupported provider %q", name)
 	}
 }

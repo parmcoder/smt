@@ -11,8 +11,9 @@ import (
 // WorktreeTarget identifies one configured root or submodule and its path
 // relative to the root worktree destination.
 type WorktreeTarget struct {
-	Repository Repository
-	Path       string
+	Repository    Repository
+	Path          string
+	DefaultBranch string
 }
 
 // WorktreeStep is one linked-worktree creation after all preflight succeeds.
@@ -82,15 +83,24 @@ func PlanWorktree(ctx context.Context, runner Runner, targets []WorktreeTarget, 
 	if err != nil {
 		return WorktreePlan{}, err
 	}
-	if err := verifyGitlinks(ctx, runner, root, children, heads); err != nil {
+	if err := verifyGitlinks(ctx, runner, root, children, heads, root.DefaultBranch); err != nil {
 		return WorktreePlan{}, err
 	}
 
 	steps := make([]WorktreeStep, 0, len(targets))
-	steps = append(steps, WorktreeStep{Repository: root.Repository, Destination: destination, Branch: branch, StartPoint: "HEAD"})
+	start := root.DefaultBranch
+	if start == "" {
+		start = "main"
+	}
+	steps = append(steps, WorktreeStep{Repository: root.Repository, Destination: destination, Branch: branch, StartPoint: start})
 	for _, child := range children {
 		steps = append(steps, WorktreeStep{
-			Repository: child.Repository, Destination: filepath.Join(destination, child.Path), Branch: branch, StartPoint: "HEAD",
+			Repository: child.Repository, Destination: filepath.Join(destination, child.Path), Branch: branch, StartPoint: func() string {
+				if child.DefaultBranch != "" {
+					return child.DefaultBranch
+				}
+				return "main"
+			}(),
 		})
 	}
 	return WorktreePlan{Steps: steps}, nil
@@ -188,7 +198,11 @@ func ensureNewBranch(ctx context.Context, runner Runner, targets []WorktreeTarge
 func repositoryHeads(ctx context.Context, runner Runner, targets []WorktreeTarget) (map[string]string, error) {
 	heads := make(map[string]string, len(targets))
 	for _, target := range targets {
-		result, err := runner.Run(ctx, target.Repository.Dir, "rev-parse", "HEAD")
+		branch := target.DefaultBranch
+		if branch == "" {
+			branch = "main"
+		}
+		result, err := runner.Run(ctx, target.Repository.Dir, "rev-parse", branch)
 		if err != nil || hasNonZeroExit(result) {
 			return nil, fmt.Errorf("preflight repository %s: read HEAD", target.Repository.ID)
 		}
@@ -201,9 +215,12 @@ func repositoryHeads(ctx context.Context, runner Runner, targets []WorktreeTarge
 	return heads, nil
 }
 
-func verifyGitlinks(ctx context.Context, runner Runner, root WorktreeTarget, children []WorktreeTarget, heads map[string]string) error {
+func verifyGitlinks(ctx context.Context, runner Runner, root WorktreeTarget, children []WorktreeTarget, heads map[string]string, rootBranch string) error {
+	if rootBranch == "" {
+		rootBranch = "main"
+	}
 	for _, child := range children {
-		result, err := runner.Run(ctx, root.Repository.Dir, "ls-tree", "HEAD", "--", child.Path)
+		result, err := runner.Run(ctx, root.Repository.Dir, "ls-tree", rootBranch, "--", child.Path)
 		if err != nil || hasNonZeroExit(result) {
 			return fmt.Errorf("preflight repository %s: read root gitlink", child.Repository.ID)
 		}

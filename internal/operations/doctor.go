@@ -67,6 +67,8 @@ func BuildDoctorReport(cfg config.Config, result Result) DoctorReport {
 	for _, repository := range cfg.Repositories {
 		knownRepositoryChecks["repo:"+repository.ID+":worktree"] = struct{}{}
 		knownRepositoryChecks["hook:"+repository.ID+":commit-msg"] = struct{}{}
+		knownRepositoryChecks["repo:"+repository.ID+":default"] = struct{}{}
+		knownRepositoryChecks["repo:"+repository.ID+":state"] = struct{}{}
 	}
 	for _, check := range result.Checks {
 		checksByID[check.ID] = append(checksByID[check.ID], check)
@@ -90,6 +92,8 @@ func BuildDoctorReport(cfg config.Config, result Result) DoctorReport {
 		}
 		for _, checkID := range []string{
 			"repo:" + repository.ID + ":worktree",
+			"repo:" + repository.ID + ":default",
+			"repo:" + repository.ID + ":state",
 			"hook:" + repository.ID + ":commit-msg",
 		} {
 			for _, check := range checksByID[checkID] {
@@ -139,7 +143,7 @@ func hasKnownCheck(checks map[string]struct{}, id string) bool {
 }
 
 func isToolCheck(id string) bool {
-	return id == "git" || strings.HasPrefix(id, "tool:")
+	return id == "git" || id == "beads:workspace" || strings.HasPrefix(id, "tool:")
 }
 
 func isCredentialCheck(id string) bool {
@@ -177,6 +181,16 @@ func safeDoctorMessage(check Check) string {
 			return "repository " + repositoryID + " is an initialized Git worktree"
 		}
 		return "repository " + repositoryID + " is not an initialized Git worktree"
+	case strings.HasPrefix(check.ID, "repo:") && strings.HasSuffix(check.ID, ":default"):
+		return "repository " + strings.TrimSuffix(strings.TrimPrefix(check.ID, "repo:"), ":default") + " default branch is configured"
+	case strings.HasPrefix(check.ID, "repo:") && strings.HasSuffix(check.ID, ":state"):
+		if check.Status == DoctorStatusError {
+			return "repository " + strings.TrimSuffix(strings.TrimPrefix(check.ID, "repo:"), ":state") + " is detached"
+		}
+		if check.Status == DoctorStatusWarning {
+			return "repository " + strings.TrimSuffix(strings.TrimPrefix(check.ID, "repo:"), ":state") + " is not clean"
+		}
+		return "repository " + strings.TrimSuffix(strings.TrimPrefix(check.ID, "repo:"), ":state") + " is clean and attached"
 	case strings.HasPrefix(check.ID, "hook:") && strings.HasSuffix(check.ID, ":commit-msg"):
 		repositoryID := strings.TrimSuffix(strings.TrimPrefix(check.ID, "hook:"), ":commit-msg")
 		if check.Status == DoctorStatusError {
@@ -197,6 +211,11 @@ func safeDoctorMessage(check Check) string {
 			return variable + " is set"
 		}
 		return variable + " is not set"
+	case check.ID == "beads:workspace":
+		if check.Status == DoctorStatusOK {
+			return "Beads workspace is ready"
+		}
+		return "Beads workspace is unavailable"
 	default:
 		return ""
 	}
@@ -238,6 +257,12 @@ type EnvironmentPresent func(string) bool
 // RepositoryState inspects one configured repository without changing it.
 type RepositoryState func(context.Context, string) (git.State, error)
 
+// BeadsAvailability checks the configured workspace without exposing command output.
+type BeadsAvailability func(context.Context) error
+
+// ActiveBranchLookup verifies that a shared non-default branch is an active Beads ID.
+type ActiveBranchLookup func(context.Context, string) (bool, error)
+
 // Doctor checks local prerequisites and configured repository state.
 type Doctor struct {
 	config      config.Config
@@ -245,7 +270,19 @@ type Doctor struct {
 	environment EnvironmentPresent
 	repository  RepositoryState
 	hook        HookInspector
+	beads       BeadsAvailability
+	active      ActiveBranchLookup
 }
+
+// NewDoctorWithBeads adds read-only Beads workspace readiness to Doctor.
+func NewDoctorWithBeads(cfg config.Config, lookup ExecutableLookup, environment EnvironmentPresent, repository RepositoryState, beads BeadsAvailability) *Doctor {
+	doctor := NewDoctorWithHookInspector(cfg, lookup, environment, repository, hooks.InspectCommitMsg)
+	doctor.beads = beads
+	return doctor
+}
+
+// SetActiveBranchLookup supplies active Beads-ID validation for branch alignment.
+func (d *Doctor) SetActiveBranchLookup(lookup ActiveBranchLookup) { d.active = lookup }
 
 // NewDoctor constructs a read-only Doctor service with injected observations.
 func NewDoctor(cfg config.Config, lookup ExecutableLookup, environment EnvironmentPresent, repository RepositoryState) *Doctor {
@@ -267,8 +304,13 @@ func (d *Doctor) Run(ctx context.Context) (Result, error) {
 		result.Checks = append(result.Checks, d.executableCheck(executable))
 	}
 
+	states := make(map[string]git.State, len(d.config.Repositories))
 	for _, repository := range d.config.Repositories {
-		result.Checks = append(result.Checks, d.repositoryCheck(ctx, repository))
+		check, state := d.repositoryCheck(ctx, repository)
+		result.Checks = append(result.Checks, check)
+		if state.Initialized {
+			states[repository.ID] = state
+		}
 	}
 	for _, repository := range d.config.Repositories {
 		result.Checks = append(result.Checks, d.hookCheck(repository))
@@ -292,6 +334,25 @@ func (d *Doctor) Run(ctx context.Context) (Result, error) {
 			result.Checks = append(result.Checks, d.tokenCheck(provider, variable))
 		}
 	}
+	for _, repository := range d.config.Repositories {
+		state, ok := states[repository.ID]
+		if !ok {
+			continue
+		}
+		result.Checks = append(result.Checks,
+			Check{ID: "repo:" + repository.ID + ":default", Status: DoctorStatusOK, Message: "repository " + repository.ID + " default branch is " + repository.EffectiveDefaultBranch()},
+			repositoryStateCheck(repository, state),
+		)
+	}
+	result.Checks = append(result.Checks, d.branchAlignmentCheck(ctx, states))
+	beadsCheck := Check{ID: "beads:workspace", Status: DoctorStatusOK, Message: "Beads workspace is ready"}
+	if d.beads != nil {
+		if err := d.beads(ctx); err != nil {
+			beadsCheck.Status = DoctorStatusWarning
+			beadsCheck.Message = "Beads workspace is unavailable"
+		}
+	}
+	result.Checks = append(result.Checks, beadsCheck)
 
 	return result, nil
 }
@@ -334,21 +395,71 @@ func executableID(name string) string {
 	return "tool:" + name
 }
 
-func (d *Doctor) repositoryCheck(ctx context.Context, repository config.Repository) Check {
+func (d *Doctor) repositoryCheck(ctx context.Context, repository config.Repository) (Check, git.State) {
 	check := Check{ID: "repo:" + repository.ID + ":worktree"}
 	if d.repository == nil {
 		check.Status = "error"
 		check.Message = "repository " + repository.ID + " is not an initialized Git worktree"
-		return check
+		return check, git.State{}
 	}
 	state, err := d.repository(ctx, repository.Path)
 	if err != nil || !state.Initialized {
 		check.Status = "error"
 		check.Message = "repository " + repository.ID + " is not an initialized Git worktree"
-		return check
+		return check, state
 	}
 	check.Status = "ok"
 	check.Message = "repository " + repository.ID + " is an initialized Git worktree"
+	return check, state
+}
+
+func repositoryStateCheck(repository config.Repository, state git.State) Check {
+	check := Check{ID: "repo:" + repository.ID + ":state", Status: DoctorStatusOK, Message: "repository " + repository.ID + " is clean and attached"}
+	if state.Detached {
+		check.Status = DoctorStatusError
+		check.Message = "repository " + repository.ID + " is detached; switch it to a branch"
+	} else if state.Dirty {
+		check.Status = DoctorStatusWarning
+		check.Message = "repository " + repository.ID + " is not clean; commit or stash local changes"
+	}
+	return check
+}
+
+func (d *Doctor) branchAlignmentCheck(ctx context.Context, states map[string]git.State) Check {
+	check := Check{ID: "workspace:branches", Status: DoctorStatusOK, Message: "repositories are aligned on their effective default branches"}
+	if len(states) != len(d.config.Repositories) || len(states) == 0 {
+		check.Status = DoctorStatusError
+		check.Message = "repositories must be initialized and attached before branch alignment can be checked"
+		return check
+	}
+	allDefault := true
+	shared := ""
+	for _, repository := range d.config.Repositories {
+		state := states[repository.ID]
+		if state.Branch != repository.EffectiveDefaultBranch() {
+			allDefault = false
+		}
+		if shared == "" {
+			shared = state.Branch
+		} else if shared != state.Branch {
+			check.Status = DoctorStatusError
+			check.Message = "repositories must share one effective default branch or one active Beads-ID branch"
+			return check
+		}
+	}
+	if allDefault {
+		return check
+	}
+	if d.active != nil {
+		active, err := d.active(ctx, shared)
+		if err != nil || !active {
+			check.Status = DoctorStatusError
+			check.Message = "repositories use a non-default branch that is not an active Beads-ID branch"
+		}
+		return check
+	}
+	check.Status = DoctorStatusError
+	check.Message = "repositories use a shared non-default branch but active Beads-ID status could not be verified"
 	return check
 }
 

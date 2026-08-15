@@ -174,10 +174,13 @@ func PlanInstall(ctx context.Context, workspace string, repositories []config.Re
 	if lookup == nil || inspector == nil || gitRunner == nil || runner == nil {
 		return InstallPlan{}, fmt.Errorf("plan hook install: dependencies are required")
 	}
-	for _, name := range []string{"smt", "lefthook"} {
+	for _, name := range []string{"smt", "lefthook", "bd"} {
 		if _, err := lookup(name); err != nil {
 			return InstallPlan{}, fmt.Errorf("plan hook install: required executable %q is unavailable", name)
 		}
+	}
+	if err := runner.Run(ctx, workspace, "bd", "where"); err != nil {
+		return InstallPlan{}, fmt.Errorf("plan hook install: Beads workspace is unavailable")
 	}
 	plan := InstallPlan{Repositories: make([]InstallTarget, 0, len(repositories))}
 	var firstErr error

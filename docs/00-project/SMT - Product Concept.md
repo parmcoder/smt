@@ -29,6 +29,9 @@ flowchart LR
     F --> G[Run named check profile]
     G --> H[Push children then root]
     G --> I[Create synchronized worktree]
+    G --> M[prepare active Beads branch]
+    M --> N[switch existing branch]
+    N --> O[pull child-first]
     G --> J[Validate CI contracts]
     J --> K[Plan guarded literal bump]
     K --> L[Apply only with explicit approval]
@@ -45,7 +48,8 @@ the discoverable command tree into Getting Started, Workspace, Review
 Workflow, and Developer Tools; help and generated shell completion work
 without workspace configuration. The current CLI covers blueprint creation and
 application, inspection, safe hook installation, checks, contracts, CI audits,
-guarded contract bumps, configured pushes, linked worktrees, local work/review workflow, and release
+guarded contract bumps, configured pushes, linked worktrees, Beads-branch
+preparation/switching, child-first pulls, and release
 readiness. The release path is deliberately split: `release:build` makes four
 local archives and checksums, while a clean `release:tag` creates and pushes an
 annotated version tag. GitHub Actions now publishes a GitHub Release from that
@@ -53,11 +57,14 @@ tag with the four archives and checksum file.
 
 Direct provider-native release CLI orchestration does not exist, and GitLab
 release automation does not exist. Remote repository creation, external-clone
-submodule URL synchronization, submit orchestration, cloud or database actions,
+submodule URL synchronization, workspace submit orchestration, Jira aliases,
+assignment waves, provider review automation, cloud or database actions,
 deployment, rollback, and credential storage remain outside the current product
 boundary.
 
-Human `status` and `doctor` reports emphasize the next safe action. `status
+Human `status` and `doctor` reports emphasize the next safe action. `doctor`
+defaults to action-first output and offers `--tree` plus safe `--verbose` detail.
+`status
 --json` is intentionally separate for automation. Both may say that a
 `commit-msg` hook is absent, current, or unmanaged; an unmanaged hook is a
 human decision, never something SMT replaces. Generated `lefthook.yml` is a

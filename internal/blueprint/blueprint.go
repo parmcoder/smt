@@ -186,31 +186,31 @@ func (s Selection) labels() []string {
 
 func marshal(selection Selection) ([]byte, error) {
 	stack := config.WorkspaceStack{}
-	repos := []config.Repository{{ID: "repo", Path: ".", Scope: "repo", Remote: config.Remote{}}}
+	repos := []config.Repository{{ID: "repo", Path: ".", Scope: "repo", Remote: config.Remote{DefaultBranch: "main"}}}
 	scopes := []string{"repo"}
 	if selection.Web {
 		stack.Web = "nextjs"
-		repos = append(repos, config.Repository{ID: "web", Path: "web-app", Component: "web", Technology: "nextjs", Scope: "web", Remote: config.Remote{}})
+		repos = append(repos, config.Repository{ID: "web", Path: "web-app", Component: "web", Technology: "nextjs", Scope: "web", Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "web")
 	}
 	if selection.Mobile {
 		stack.Mobile = "flutter"
-		repos = append(repos, config.Repository{ID: "mobile", Path: "mobile-app", Component: "mobile", Technology: "flutter", Scope: "mobile", Remote: config.Remote{}})
+		repos = append(repos, config.Repository{ID: "mobile", Path: "mobile-app", Component: "mobile", Technology: "flutter", Scope: "mobile", Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "mobile")
 	}
 	if selection.API {
 		stack.API = "go"
-		repos = append(repos, config.Repository{ID: "api", Path: "apis", Component: "api", Technology: "go", Scope: "api", Remote: config.Remote{}})
+		repos = append(repos, config.Repository{ID: "api", Path: "apis", Component: "api", Technology: "go", Scope: "api", Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "api")
 	}
 	if selection.Database {
 		stack.Database = "postgresql"
-		repos = append(repos, config.Repository{ID: "database", Path: "database", Component: "database", Technology: "postgresql", Scope: "database", Remote: config.Remote{}})
+		repos = append(repos, config.Repository{ID: "database", Path: "database", Component: "database", Technology: "postgresql", Scope: "database", Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "database")
 	}
 	if selection.DevOps {
 		stack.DevOps = []string{"docker", "opentofu"}
-		repos = append(repos, config.Repository{ID: "infra", Path: "devops", Component: "devops", Technology: "docker-opentofu", Scope: "infra", Remote: config.Remote{}})
+		repos = append(repos, config.Repository{ID: "infra", Path: "devops", Component: "devops", Technology: "docker-opentofu", Scope: "infra", Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "infra")
 	}
 	cfg := config.Config{Version: 1, Workspace: config.Workspace{AIAssist: "codex", Stack: stack}, Commit: config.CommitConfig{Types: []string{"feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"}, Scopes: scopes}, Repositories: repos, Workflow: fixedWorkflow()}

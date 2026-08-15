@@ -16,8 +16,8 @@ is the source of truth for behavior and acceptance criteria.
   or sensitive payloads.
 - Preserve existing user changes and inspect root/submodule status before Git
   operations.
-- Make checkout all-or-nothing after preflight; never rewrite history or run
-  destructive remote rollback after a partial submit failure.
+- Make prepare/switch/pull safe after preflight; never rewrite history, auto-pop
+  stashes, or run destructive rollback after a partial lifecycle failure.
 - Add focused tests for each new behavior and report exact verification
   commands, assumptions, risks, and unverified behavior.
 - Keep documentation Obsidian-friendly: frontmatter, stable titles, wikilinks,

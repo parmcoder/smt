@@ -54,12 +54,13 @@ type provisionProvider struct {
 	inspect    []string
 	failCreate string
 	existing   map[string]bool
+	branches   map[string]string
 }
 
 func (p *provisionProvider) InspectProject(_ context.Context, project string) (provider.ProjectInfo, error) {
 	p.inspect = append(p.inspect, project)
 	if p.existing[project] {
-		return provider.ProjectInfo{Exists: true, Project: project, SSHURL: "git@example:" + project + ".git", WebURL: "https://example/" + project}, nil
+		return provider.ProjectInfo{Exists: true, Project: project, SSHURL: "git@example:" + project + ".git", WebURL: "https://example/" + project, DefaultBranch: p.branches[project]}, nil
 	}
 	return provider.ProjectInfo{Project: project}, nil
 }
@@ -70,7 +71,33 @@ func (p *provisionProvider) CreateProject(_ context.Context, spec provider.Proje
 	if spec.Project == p.failCreate {
 		return provider.ProjectInfo{}, errors.New("provider create failed")
 	}
-	return provider.ProjectInfo{Exists: true, Project: spec.Project, SSHURL: "git@example:" + spec.Project + ".git", WebURL: "https://example/" + spec.Project}, nil
+	return provider.ProjectInfo{Exists: true, Project: spec.Project, SSHURL: "git@example:" + spec.Project + ".git", WebURL: "https://example/" + spec.Project, DefaultBranch: p.branches[spec.Project]}, nil
+}
+
+func TestProvisionPersistsProviderDefaultOrMainWithoutOverwritingOverride(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := provisionConfig()
+	cfg.Repositories[0].Remote.DefaultBranch = "release"
+	runner := &provisionRunner{origins: map[string]string{}}
+	projectProvider := &provisionProvider{existing: map[string]bool{"acme/root": true, "acme/api": true}, branches: map[string]string{"acme/root": "trunk", "acme/api": ""}}
+	if _, err := Provision(context.Background(), cfg, root, runner, func(string, config.ProviderConfig, string) (provider.ProjectProvider, error) {
+		return projectProvider, nil
+	}, func(string) string { return "token" }, false); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := config.Load(filepath.Join(root, "smt.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Repositories[0].Remote.DefaultBranch; got != "release" {
+		t.Fatalf("explicit branch=%q want release", got)
+	}
+	if got := loaded.Repositories[1].Remote.DefaultBranch; got != "main" {
+		t.Fatalf("empty provider branch=%q want main", got)
+	}
 }
 
 func TestProvisionCreatesChildFirstAndWiresOnlyAfterAllProjectsExist(t *testing.T) {

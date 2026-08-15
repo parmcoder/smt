@@ -48,27 +48,29 @@ Workflow, and Developer Tools. Implemented commands are:
   repository at the same destination layout. It rejects dirty, detached,
   uninitialized, branch-colliding, gitlink-mismatched, or existing-destination
   state.
-- `smt workspace prepare FEATURE PATH --branch NAME [--dry-run] [--json]` —
-  resolve direct dependency-ready feature children into repository assignments,
-  create the synchronized linked worktree, and write a secret-free ignored run
-  manifest only after successful creation.
-- `smt workspace submit FEATURE [--ready] [--dry-run] [--json]` — select only
-  assigned commits ahead of each manifest base, push children before the root,
-  and create or reuse provider reviews when environment tokens are available.
+- `smt prepare` — after complete preflight, create the active Beads-ID branch
+  in every configured repository. Tracked and untracked changes are stashed;
+  ignored files are left in place. The operation has no positional arguments.
+- `smt switch BEAD_ID` — switch every repository to an existing local branch
+  named by the active Beads ID. It never creates branches, auto-pops stashes,
+  or rolls back a partial switch.
+- `smt pull` — fast-forward configured repositories child-first, then root,
+  using each repository's effective default branch.
 - `smt hooks install [--dry-run]` — require bare `smt` and `lefthook` on
   `PATH`, then preflight every configured initialized worktree, valid
   `lefthook.yml` `commit-msg` mapping, `lefthook validate` result, and eligible
   `commit-msg` hook before installing Lefthook dispatchers root-first. Dry-run
   prints the complete plan without mutation.
 - `smt validate-message [--config FILE] FILE` — validate one complete
-  conventional commit message against the selected configuration's types and
-  scopes. Inside a prepared workspace it additionally requires
-  `type(scope): [WORK-ID] summary`, where the ID is assigned to the current
-  repository by the matching run manifest.
+  conventional commit message. On a non-default active Beads branch it also
+  requires the exact branch ID in `type(scope): [BEAD-ID] summary`; default
+  branches use ordinary configured conventional-commit syntax.
 - `smt status [--json]` — inspect configured repositories and summarize
   available profiles and contract findings.
-- `smt doctor` — report repository, commit-msg hook, executable,
-  provider-token, and profile readiness without printing secret values.
+- `smt doctor [--tree]` — report repository, Beads, hook, executable, remote,
+  and profile readiness without printing secret values. The default is an
+  action-first summary; `--tree` renders the detailed tree. `--verbose` adds
+  safe diagnostic detail only.
 - `smt check --profile hook|submit|ci-parity [--repo ID]
   [--allow-worktree-mutation] [--dry-run]` — run one named profile. A check
   with `mutates_worktree: true` is refused unless the explicit
@@ -188,8 +190,8 @@ The fixed workspace stack values are `nextjs`, `go`, `postgresql`, and the
 DevOps tools `docker` plus `opentofu`; the implemented Mobile extension adds
 only `mobile: flutter` as described above. `ai_assist` is either absent or
 `codex`.
-`remote.url` is optional at initialization but required by `smt push` and
-`smt workspace submit`; it may not contain embedded credentials. A repository
+`remote.url` is optional at initialization but required by `smt push`; it may
+not contain embedded credentials. A repository
 used by `smt remote provision` must declare `provider` and a fully qualified
 `project` (`owner/repository` for GitHub, or `namespace/repository` for
 GitLab). `visibility` accepts `private` or `public` and defaults to `private`.
@@ -234,7 +236,16 @@ reported if a later child fails. Fixed untracked OS metadata (`.DS_Store`,
 blocking. Provider projects and runtime tokens remain explicit
 configuration/environment inputs.
 
-## Workspace diagnostics and hooks
+## Workspace lifecycle, diagnostics, and hooks
+
+The effective default branch is `repositories[].remote.default_branch` when
+set, otherwise `main`. `prepare` and `switch` use Beads readiness from the root
+workspace: the active Beads ID is the branch name, and hooks require the
+workspace to be ready before accepting a commit. Commit subjects on an active
+Beads branch use `type(scope): [BEAD-ID] summary`; outside one, use the normal
+configured conventional-commit syntax. The root may use the active Beads ID;
+there are no Jira aliases, assignment waves, manifests, or provider review
+automation in this release.
 
 `status` is a human report: it starts with `STATUS: OK`, `WARN`, or `ERROR`,
 then shows each configured repository's path, Git state, branch, and
@@ -319,7 +330,7 @@ leaving `smt` on PATH, Git rejected an otherwise valid commit with Lefthook's
 assertion error. This demonstrates the no-silent-skip boundary, not a completed
 human end-to-end review across every launch environment.
 
-Prepared feature workspaces use `.smt/runs/<feature-id>.json` as an ignored,
+<!-- INACTIVE: Prepared feature workspaces use `.smt/runs/<feature-id>.json` as an ignored,
 secret-free snapshot of the feature, base branches/commits, repository paths,
 ownership boundaries, check-profile names, integration gates, and assigned
 work-item context. The file is written only after the root and child linked
@@ -328,8 +339,9 @@ Beads IDs or Jira-shaped aliases. The root accepts the feature ID and its
 assigned root-task references for integration/gitlink commits. Missing,
 malformed, cross-repository, ambiguous, corrupt, or out-of-date manifests fail
 closed; outside a prepared workspace the existing conventional-commit behavior
-is unchanged. Dry-run preparation performs no Git, Beads, or manifest write.
+is unchanged. Dry-run preparation performs no Git, Beads, or manifest write. -->
 
+<!-- INACTIVE historical provider submission design.
 ## Provider remotes and workspace submission
 
 Provider tokens are environment-only: `SMT_GITHUB_TOKEN` and
@@ -377,6 +389,8 @@ The exact commands and evidence expectations are in the
 [[../10-development/SMT - Command Recipes#Traceable workspace release-gate handoff]]
 section. Record failures as linked Beads bugs and leave the corresponding
 review and parent feature open.
+
+## Local requirements and verification -->
 
 ## Local requirements and verification
 
