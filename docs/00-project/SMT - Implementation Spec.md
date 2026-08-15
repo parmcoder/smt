@@ -48,8 +48,10 @@ Workflow, and Developer Tools. Implemented commands are:
   repository at the same destination layout. It rejects dirty, detached,
   uninitialized, branch-colliding, gitlink-mismatched, or existing-destination
   state.
-- `smt prepare` — after complete preflight, create the active Beads-ID branch
-  in every configured repository. Tracked and untracked changes are stashed;
+- `smt prepare` — create and report one open `Prepared workspace` Beads task,
+  then run complete preflight before creating the active Beads-ID branch in
+  every configured repository. If preflight fails, the task remains open and
+  Git remains mutation-free. Tracked and untracked changes are stashed;
   ignored files are left in place. The operation has no positional arguments.
 - `smt switch BEAD_ID` — switch every repository to an existing local branch
   named by the active Beads ID. It never creates branches, auto-pops stashes,

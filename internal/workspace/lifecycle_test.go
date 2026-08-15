@@ -49,9 +49,10 @@ func (r *lifecycleRunner) Run(_ context.Context, dir string, args ...string) (gi
 }
 
 type lifecycleBeads struct {
-	created int
-	issue   beads.Issue
-	events  *[]string
+	created   int
+	issue     beads.Issue
+	createErr error
+	events    *[]string
 }
 
 func (b *lifecycleBeads) CreatePreparedWorkspaceTask(context.Context) (string, error) {
@@ -62,6 +63,9 @@ func (b *lifecycleBeads) CreatePreparedWorkspaceTask(context.Context) (string, e
 	if b.events != nil {
 		*b.events = append(*b.events, "beads:create")
 	}
+	if b.createErr != nil {
+		return "", b.createErr
+	}
 	return "task-7", nil
 }
 func (b *lifecycleBeads) ShowIssue(context.Context, string) (beads.Issue, error) { return b.issue, nil }
@@ -70,7 +74,7 @@ func lifecycleConfig() config.Config {
 	return config.Config{Repositories: []config.Repository{{ID: "repo", Path: ".", Scope: "repo"}, {ID: "api", Path: "api", Scope: "api"}}, Commit: config.CommitConfig{Types: []string{"feat"}, Scopes: []string{"repo", "api"}}}
 }
 
-func TestPreparePreflightsEveryRepositoryBeforeCreateAndUsesGeneratedID(t *testing.T) {
+func TestPrepareCreatesTaskBeforePreflightAndUsesGeneratedID(t *testing.T) {
 	events := []string{}
 	r := &lifecycleRunner{branches: map[string]bool{"/root=refs/heads/main": true, "/root/api=refs/heads/main": true}, events: &events}
 	b := &lifecycleBeads{events: &events}
@@ -79,8 +83,8 @@ func TestPreparePreflightsEveryRepositoryBeforeCreateAndUsesGeneratedID(t *testi
 		t.Fatalf("report=%+v created=%d err=%v calls=%v", report, b.created, err, r.calls)
 	}
 	create := eventIndex(events, "beads:create")
-	apiDefault := eventContainsIndex(events, "/root/api symbolic-ref")
-	if create < 0 || apiDefault < 0 || create < apiDefault {
+	firstGit := eventContainsIndex(events, "git:")
+	if create < 0 || firstGit < 0 || create > firstGit {
 		t.Fatalf("events=%v", events)
 	}
 	for _, call := range r.calls {
@@ -95,9 +99,12 @@ func TestPrepareBranchPreflightFailureDoesNotStash(t *testing.T) {
 	b := &lifecycleBeads{}
 	// The generated target exists in one repository; the implementation must stop before stash.
 	r.branches["/root/api=refs/heads/task-7"] = true
-	_, err := Prepare(context.Background(), lifecycleConfig(), "/root", r, b)
+	report, err := Prepare(context.Background(), lifecycleConfig(), "/root", r, b)
 	if err == nil {
 		t.Fatal("expected branch preflight failure")
+	}
+	if report.TaskID != "task-7" || b.created != 1 {
+		t.Fatalf("report=%+v created=%d", report, b.created)
 	}
 	for _, call := range r.calls {
 		if strings.Contains(call, "stash") {
@@ -106,15 +113,29 @@ func TestPrepareBranchPreflightFailureDoesNotStash(t *testing.T) {
 	}
 }
 
-func TestPrepareMissingDefaultBranchDoesNotCreateTaskOrStash(t *testing.T) {
+func TestPrepareMissingDefaultBranchPreservesCreatedTaskAndDoesNotStash(t *testing.T) {
 	events := []string{}
 	r := &lifecycleRunner{branches: map[string]bool{"/root=refs/heads/main": true}, events: &events}
 	b := &lifecycleBeads{events: &events}
-	if _, err := Prepare(context.Background(), lifecycleConfig(), "/root", r, b); err == nil {
+	report, err := Prepare(context.Background(), lifecycleConfig(), "/root", r, b)
+	if err == nil {
 		t.Fatal("expected missing default branch")
 	}
-	if b.created != 0 || eventIndex(events, "beads:create") >= 0 || eventContainsIndex(events, "stash") >= 0 {
-		t.Fatalf("events=%v created=%d", events, b.created)
+	if b.created != 1 || report.TaskID != "task-7" || eventIndex(events, "beads:create") < 0 || eventContainsIndex(events, "stash") >= 0 {
+		t.Fatalf("report=%+v events=%v created=%d", report, events, b.created)
+	}
+}
+
+func TestPrepareCreateFailureDoesNotInspectGit(t *testing.T) {
+	events := []string{}
+	r := &lifecycleRunner{events: &events}
+	b := &lifecycleBeads{createErr: errors.New("secret beads failure"), events: &events}
+	report, err := Prepare(context.Background(), lifecycleConfig(), "/root", r, b)
+	if err == nil {
+		t.Fatal("expected Beads creation failure")
+	}
+	if report.TaskID != "" || b.created != 1 || len(r.calls) != 0 {
+		t.Fatalf("report=%+v created=%d calls=%v", report, b.created, r.calls)
 	}
 }
 
@@ -150,10 +171,39 @@ func TestPrepareStashesTrackedAndUntrackedButLeavesIgnoredFilesAlone(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantStashes := map[string]bool{
+		"/root stash push --include-untracked --message smt prepared workspace task-7 -- . :(exclude).beads/**":     true,
+		"/root/api stash push --include-untracked --message smt prepared workspace task-7 -- . :(exclude).beads/**": true,
+	}
 	for _, call := range r.calls {
 		if strings.Contains(call, "stash") {
+			if !wantStashes[call] {
+				t.Fatalf("unexpected stash=%q", call)
+			}
 			if !strings.Contains(call, "--include-untracked") || strings.Contains(call, "--all") {
 				t.Fatalf("stash must include tracked/untracked but exclude ignored files: %s", call)
+			}
+		}
+	}
+}
+
+func TestSwitchStashesTrackedAndUntrackedButLeavesBeadsStateAlone(t *testing.T) {
+	r := &lifecycleRunner{branches: map[string]bool{
+		"/root=refs/heads/task-7":     true,
+		"/root/api=refs/heads/task-7": true,
+	}}
+	b := &lifecycleBeads{issue: beads.Issue{ID: "task-7", Status: "open"}}
+	if _, err := Switch(context.Background(), lifecycleConfig(), "/root", "task-7", r, b); err != nil {
+		t.Fatal(err)
+	}
+	wantStashes := map[string]bool{
+		"/root stash push --include-untracked --message smt prepared workspace task-7 -- . :(exclude).beads/**":     true,
+		"/root/api stash push --include-untracked --message smt prepared workspace task-7 -- . :(exclude).beads/**": true,
+	}
+	for _, call := range r.calls {
+		if strings.Contains(call, "stash") {
+			if !wantStashes[call] {
+				t.Fatalf("unexpected stash=%q", call)
 			}
 		}
 	}

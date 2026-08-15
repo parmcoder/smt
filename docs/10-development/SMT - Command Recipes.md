@@ -144,12 +144,13 @@ bin/smt switch smt-123
 bin/smt pull
 ```
 
-`prepare` has no positional arguments and runs complete preflight before
-creating the active Beads-ID branch. It stashes tracked and untracked changes
-but leaves ignored files in place. `switch BEAD_ID` uses only an existing local
-branch and never creates, auto-pops, or rolls back. `pull` fast-forwards child
-repositories before the root. The effective default branch is per-repository
-`remote.default_branch`, then `main`.
+`prepare` has no positional arguments, creates and reports the open `Prepared
+workspace` task before running complete preflight, and leaves that task open
+when preflight fails without mutating Git. It stashes tracked and untracked
+changes but leaves ignored files in place. `switch BEAD_ID` uses only an
+existing local branch and never creates, auto-pops, or rolls back. `pull`
+fast-forwards child repositories before the root. The effective default branch
+is per-repository `remote.default_branch`, then `main`.
 Default branches use ordinary conventional-commit syntax; non-default active
 Beads branches require the exact branch ID as `type(scope): [BEAD-ID] summary`.
 The root has no special manifest exception. Hooks require Beads readiness.

@@ -19,6 +19,7 @@ import (
 	"github.com/parmcoder/smt/internal/config"
 	"github.com/parmcoder/smt/internal/git"
 	"github.com/parmcoder/smt/internal/operations"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,6 +27,162 @@ type processRunnerFunc func(context.Context, string, string, ...string) (beads.P
 
 func (f processRunnerFunc) Run(ctx context.Context, dir, name string, args ...string) (beads.ProcessResult, error) {
 	return f(ctx, dir, name, args...)
+}
+
+type lifecycleCommandRunner struct {
+	branch bool
+	calls  []string
+}
+
+func (r *lifecycleCommandRunner) Run(_ context.Context, dir string, args ...string) (git.Result, error) {
+	r.calls = append(r.calls, dir+" "+strings.Join(args, " "))
+	switch args[0] {
+	case "rev-parse":
+		return git.Result{Stdout: "true\n"}, nil
+	case "status":
+		return git.Result{}, nil
+	case "symbolic-ref":
+		return git.Result{Stdout: "main\n"}, nil
+	case "show-ref":
+		if r.branch && args[len(args)-1] == "refs/heads/task-7" {
+			return git.Result{}, nil
+		}
+		return git.Result{ExitCode: 1}, errors.New("missing")
+	default:
+		return git.Result{}, nil
+	}
+}
+
+type lifecycleCommandService struct {
+	issue     beads.Issue
+	createErr error
+	showErr   error
+}
+
+func (s *lifecycleCommandService) CreatePreparedWorkspaceTask(context.Context) (string, error) {
+	if s.createErr != nil {
+		return "", s.createErr
+	}
+	return "task-7", nil
+}
+
+func (s *lifecycleCommandService) ShowIssue(context.Context, string) (beads.Issue, error) {
+	return s.issue, s.showErr
+}
+
+func lifecycleCommandConfig() config.Config {
+	return config.Config{Repositories: []config.Repository{{ID: "repo", Path: "."}}}
+}
+
+func TestRunRepositoryPrepareReportsOneNormalFailure(t *testing.T) {
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	runner := &lifecycleCommandRunner{}
+	code := runRepositoryPrepare(context.Background(), lifecycleCommandConfig(), "/root", &lifecycleCommandService{}, runner, out, errOut, newRunLogger(false, errOut), false)
+	if code != exitValidation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.String() != "prepare task: task-7\n" {
+		t.Fatalf("stdout=%q", out.String())
+	}
+	if got := errOut.String(); got != "prepare: repository repo default branch is unavailable\n" {
+		t.Fatalf("stderr=%q", got)
+	}
+}
+
+func TestRunRepositorySwitchReportsOneNormalFailure(t *testing.T) {
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	runner := &lifecycleCommandRunner{}
+	service := &lifecycleCommandService{issue: beads.Issue{ID: "task-7", Status: "open"}}
+	code := runRepositorySwitch(context.Background(), lifecycleCommandConfig(), "/root", "task-7", service, runner, out, errOut, newRunLogger(false, errOut), false)
+	if code != exitValidation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.String() != "switch task: task-7\n" {
+		t.Fatalf("stdout=%q", out.String())
+	}
+	if got := errOut.String(); got != "switch: branch preflight failed for repository repo\n" {
+		t.Fatalf("stderr=%q", got)
+	}
+}
+
+func TestRunRepositorySwitchVerboseFailureLogsSafeFieldsAndFinalSummary(t *testing.T) {
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	runner := &lifecycleCommandRunner{}
+	service := &lifecycleCommandService{issue: beads.Issue{ID: "task-7", Status: "open"}}
+	err := runNativeCommandWithVerbose("switch", errOut, true, func(logger *logrus.Logger) int {
+		return runRepositorySwitch(context.Background(), lifecycleCommandConfig(), "/root", "task-7", service, runner, out, errOut, logger, true)
+	})
+	if err == nil {
+		t.Fatal("expected switch failure")
+	}
+	got := errOut.String()
+	for _, want := range []string{"level=error", "command=switch", "status=failed", "exit_code=2", "task_id=task-7", "command finished"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("verbose stderr=%q missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "error: switch: branch preflight failed") || strings.Count(got, "level=error") != 1 {
+		t.Fatalf("verbose stderr duplicated plain error: %q", got)
+	}
+}
+
+func TestRunRepositorySwitchSuccessDoesNotLogError(t *testing.T) {
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	runner := &lifecycleCommandRunner{branch: true}
+	service := &lifecycleCommandService{issue: beads.Issue{ID: "task-7", Status: "open"}}
+	if err := runNativeCommandWithVerbose("switch", errOut, true, func(logger *logrus.Logger) int {
+		return runRepositorySwitch(context.Background(), lifecycleCommandConfig(), "/root", "task-7", service, runner, out, errOut, logger, true)
+	}); err != nil {
+		t.Fatalf("unexpected error: %v stdout=%q stderr=%q", err, out.String(), errOut.String())
+	}
+	if strings.Contains(errOut.String(), "level=error") {
+		t.Fatalf("success logged an error: %q", errOut.String())
+	}
+}
+
+func TestVerbosePrepareCreationFailureReportsSafeLifecycleError(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	if err := os.WriteFile("smt.yaml", []byte(testConfigYAML("gitlab", "repo", "repo")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secret := "secret-stderr-payload"
+	var calls []string
+	runner := processRunnerFunc(func(_ context.Context, _ string, name string, args ...string) (beads.ProcessResult, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return beads.ProcessResult{ExitCode: 1, Stderr: secret}, errors.New("process failed")
+	})
+	original, originalVerbose := newLifecycleBeadsService, newVerboseLifecycleBeadsService
+	t.Cleanup(func() {
+		newLifecycleBeadsService = original
+		newVerboseLifecycleBeadsService = originalVerbose
+	})
+	newLifecycleBeadsService = func(string) lifecycleBeadsService { return beads.New(root, runner) }
+	newVerboseLifecycleBeadsService = func(_ string, verbose io.Writer) lifecycleBeadsService {
+		return beads.NewWithVerbose(root, runner, verbose)
+	}
+
+	out, errOut := new(strings.Builder), new(strings.Builder)
+	if code := runWithInput([]string{"--verbose", "prepare"}, strings.NewReader(""), out, errOut); code != exitValidation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(calls) != 1 || calls[0] != "bd create Prepared workspace --type task --priority 2 --json" {
+		t.Fatalf("calls=%q", calls)
+	}
+	got := out.String() + errOut.String()
+	for _, forbidden := range []string{secret, "stderr=", "description", "--json"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("output contains forbidden %q: stdout=%q stderr=%q", forbidden, out.String(), errOut.String())
+		}
+	}
+	for _, want := range []string{"operation=create", "classification=command_failed", "level=error", "command=prepare", "status=failed", "exit_code=2", "command finished"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("verbose stderr=%q missing %q", errOut.String(), want)
+		}
+	}
+	if strings.Contains(errOut.String(), "error: prepare") || strings.Count(errOut.String(), "level=error") != 1 {
+		t.Fatalf("verbose stderr duplicated plain error: %q", errOut.String())
+	}
 }
 
 func TestRunApplyParsesConfigWithoutPrompting(t *testing.T) {
