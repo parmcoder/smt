@@ -262,7 +262,7 @@ func (s *Service) EnsurePreparedWorkspaceTask(ctx context.Context) (string, erro
 	if len(matches) == 1 {
 		return matches[0].ID, nil
 	}
-	raw, err = s.client.run(ctx, "create", "Prepared workspace", "--type", "task", "--priority", "2", "--status", "open")
+	raw, err = s.client.run(ctx, "create", "Prepared workspace", "--type", "task", "--priority", "2")
 	if err != nil {
 		return "", err
 	}
@@ -276,7 +276,7 @@ func (s *Service) EnsurePreparedWorkspaceTask(ctx context.Context) (string, erro
 // CreatePreparedWorkspaceTask is the explicit lifecycle name for callers that
 // need the singleton prepared-workspace task ID.
 func (s *Service) CreatePreparedWorkspaceTask(ctx context.Context) (string, error) {
-	raw, err := s.client.run(ctx, "create", "Prepared workspace", "--type", "task", "--priority", "2", "--status", "open")
+	raw, err := s.client.run(ctx, "create", "Prepared workspace", "--type", "task", "--priority", "2")
 	if err != nil {
 		return "", err
 	}

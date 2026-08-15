@@ -188,6 +188,13 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rootHead, err := repo.Head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rootHead.Name().Short(); got != "main" {
+		t.Fatalf("root branch=%q, want main", got)
+	}
 	commit, err := repo.CommitObject(mustHead(t, repo))
 	if err != nil {
 		t.Fatal(err)
@@ -210,6 +217,9 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 	head, err := child.Head()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got := head.Name().Short(); got != "main" {
+		t.Fatalf("child branch=%q, want main", got)
 	}
 	if entry.Hash != head.Hash() {
 		t.Fatalf("gitlink=%s child=%s", entry.Hash, head.Hash())

@@ -36,6 +36,11 @@ func Prepare(ctx context.Context, cfg config.Config, root string, runner git.Run
 	if runner == nil || service == nil {
 		return report, errorsLifecycle("prepare: required services are unavailable")
 	}
+	id, err := service.CreatePreparedWorkspaceTask(ctx)
+	if err != nil {
+		return report, fmt.Errorf("prepare: create Beads task: %w", err)
+	}
+	report.TaskID = id
 	r := repos(root, cfg)
 	for i, repo := range r {
 		if err := preflightRepo(ctx, runner, repo); err != nil {
@@ -45,11 +50,6 @@ func Prepare(ctx context.Context, cfg config.Config, root string, runner git.Run
 			return report, fmt.Errorf("prepare: repository %s default branch is unavailable", repo.ID)
 		}
 	}
-	id, err := service.CreatePreparedWorkspaceTask(ctx)
-	if err != nil {
-		return report, fmt.Errorf("prepare: create Beads task: %w", err)
-	}
-	report.TaskID = id
 	for _, repo := range r {
 		if branchExists(ctx, runner, repo, id) {
 			return report, fmt.Errorf("prepare: target branch preflight failed for repository %s", repo.ID)
@@ -57,7 +57,7 @@ func Prepare(ctx context.Context, cfg config.Config, root string, runner git.Run
 	}
 	for i, repo := range r {
 		report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "clean"})
-		if err := runGit(ctx, runner, repo, "stash", "push", "--include-untracked", "--message", "smt prepared workspace "+id); err != nil {
+		if err := stashWorkspace(ctx, runner, repo, id); err != nil {
 			return failLifecycle(report, r[i:], repo, err)
 		}
 		report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "stashed"})
@@ -89,7 +89,7 @@ func Switch(ctx context.Context, cfg config.Config, root, id string, runner git.
 	}
 	for i, repo := range r {
 		report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "clean"})
-		if err := runGit(ctx, runner, repo, "stash", "push", "--include-untracked", "--message", "smt prepared workspace "+id); err != nil {
+		if err := stashWorkspace(ctx, runner, repo, id); err != nil {
 			return failLifecycle(report, r[i:], repo, err)
 		}
 		report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "stashed"})
@@ -122,6 +122,11 @@ func runGit(ctx context.Context, r git.Runner, repo git.Repository, args ...stri
 	}
 	return nil
 }
+
+func stashWorkspace(ctx context.Context, runner git.Runner, repo git.Repository, id string) error {
+	return runGit(ctx, runner, repo, "stash", "push", "--include-untracked", "--message", "smt prepared workspace "+id, "--", ".", ":(exclude).beads/**")
+}
+
 func failLifecycle(report LifecycleReport, pending []git.Repository, repo git.Repository, err error) (LifecycleReport, error) {
 	report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "pending", Error: err.Error()})
 	for _, p := range pending {

@@ -159,7 +159,9 @@ func buildWorkspace(ctx context.Context, root, publishedRoot string, cfg config.
 	if len(cfg.Repositories) == 0 {
 		return fmt.Errorf("blueprint is required")
 	}
-	rootRepo, err := ggit.PlainInit(root, false)
+	rootRepo, err := ggit.PlainInitWithOptions(root, &ggit.PlainInitOptions{
+		InitOptions: ggit.InitOptions{DefaultBranch: plumbing.Main},
+	})
 	if err != nil {
 		return err
 	}
@@ -184,7 +186,9 @@ func addChild(ctx context.Context, root, publishedRoot string, c component) (plu
 	if err := os.MkdirAll(bootstrap, 0o755); err != nil {
 		return plumbing.ZeroHash, err
 	}
-	repo, err := ggit.PlainInit(bootstrap, false)
+	repo, err := ggit.PlainInitWithOptions(bootstrap, &ggit.PlainInitOptions{
+		InitOptions: ggit.InitOptions{DefaultBranch: plumbing.Main},
+	})
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}

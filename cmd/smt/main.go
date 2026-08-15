@@ -196,7 +196,7 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		return runApply(applyConfig, args[0], out, errOut)
 	})
 	applyCommand.Flags().StringVar(&applyConfig, "config", "./smt.yaml", "configuration file")
-	topPrepareCommand := nativeLeaf("prepare", "Prepare a Beads-ID branch across repositories", "general", "prepare", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+	topPrepareCommand := nativeLeaf("prepare", "Prepare a Beads-ID branch across repositories", "general", "prepare", cobra.NoArgs, func(_ []string, logger *logrus.Logger) int {
 		cfg, root, code := loadConfig(errOut)
 		if code != exitOK {
 			return code
@@ -205,9 +205,9 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		if verbose {
 			service = newVerboseLifecycleBeadsService(root, errOut)
 		}
-		return runRepositoryPrepare(context.Background(), *cfg, root, service, git.ExecRunner{}, out, errOut)
+		return runRepositoryPrepare(context.Background(), *cfg, root, service, git.ExecRunner{}, out, errOut, logger, verbose)
 	})
-	topSwitchCommand := nativeLeaf("switch BEAD_ID", "Switch every repository to an existing Beads-ID branch", "general", "switch", cobra.ExactArgs(1), func(args []string, _ *logrus.Logger) int {
+	topSwitchCommand := nativeLeaf("switch BEAD_ID", "Switch every repository to an existing Beads-ID branch", "general", "switch", cobra.ExactArgs(1), func(args []string, logger *logrus.Logger) int {
 		cfg, root, code := loadConfig(errOut)
 		if code != exitOK {
 			return code
@@ -216,7 +216,7 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		if verbose {
 			service = newVerboseLifecycleBeadsService(root, errOut)
 		}
-		return runRepositorySwitch(context.Background(), *cfg, root, args[0], service, git.ExecRunner{}, out, errOut)
+		return runRepositorySwitch(context.Background(), *cfg, root, args[0], service, git.ExecRunner{}, out, errOut, logger, verbose)
 	})
 
 	var pushDryRun bool

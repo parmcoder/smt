@@ -105,7 +105,7 @@ func TestEnsurePreparedWorkspaceTaskUsesOnlyActiveP2Records(t *testing.T) {
 
 	f = newFake()
 	reply(f, `[]`, "list", "--status", "open,in_progress")
-	reply(f, `{"id":"created","title":"Prepared workspace","status":"open","priority":2}`, "create", "Prepared workspace", "--type", "task", "--priority", "2", "--status", "open")
+	reply(f, `{"id":"created","title":"Prepared workspace","status":"open","priority":2}`, "create", "Prepared workspace", "--type", "task", "--priority", "2")
 	got, err = New("/workspace", f).EnsurePreparedWorkspaceTask(context.Background())
 	if err != nil || got != "created" {
 		t.Fatalf("created id=%q err=%v calls=%v replies=%v", got, err, f.calls, f.replies)
@@ -115,12 +115,12 @@ func TestEnsurePreparedWorkspaceTaskUsesOnlyActiveP2Records(t *testing.T) {
 func TestCreatePreparedWorkspaceTaskAlwaysCreatesNewTask(t *testing.T) {
 	f := newFake()
 	reply(f, `[{"id":"existing","title":"Prepared workspace","status":"open","priority":2}]`, "list", "--status", "open,in_progress")
-	reply(f, `{"id":"created","title":"Prepared workspace","status":"open","priority":2}`, "create", "Prepared workspace", "--type", "task", "--priority", "2", "--status", "open")
+	reply(f, `{"id":"created","title":"Prepared workspace","status":"open","priority":2}`, "create", "Prepared workspace", "--type", "task", "--priority", "2")
 	got, err := New("/workspace", f).CreatePreparedWorkspaceTask(context.Background())
 	if err != nil || got != "created" {
 		t.Fatalf("id=%q err=%v calls=%v", got, err, f.calls)
 	}
-	if len(f.calls) != 1 || strings.Join(f.calls[0].args, " ") != "create Prepared workspace --type task --priority 2 --status open --json" {
+	if len(f.calls) != 1 || strings.Join(f.calls[0].args, " ") != "create Prepared workspace --type task --priority 2 --json" {
 		t.Fatalf("calls=%v", f.calls)
 	}
 }

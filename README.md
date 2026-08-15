@@ -110,11 +110,13 @@ error. This is evidence for the assertion boundary, not a substitute for human
 end-to-end review in every launch environment.
 
 For the active Beads lifecycle, run `smt prepare` (no arguments), then
-`smt switch BEAD_ID` and `smt pull` as needed. Preparation happens only after
-complete preflight, stashes tracked and untracked changes, and leaves ignored
-files untouched. Switching uses only an existing local Beads-ID branch and
-never auto-pops or rolls back. Pull is child-first and fast-forward-only. The
-effective default branch is repository `remote.default_branch`, then `main`.
+`smt switch BEAD_ID` and `smt pull` as needed. Preparation creates and reports
+the open `Prepared workspace` task before complete preflight; a failed
+preflight leaves that task open and makes no Git mutation. It stashes tracked
+and untracked changes and leaves ignored files untouched. Switching uses only
+an existing local Beads-ID branch and never auto-pops or rolls back. Pull is
+child-first and fast-forward-only. The effective default branch is repository
+`remote.default_branch`, then `main`.
 Default branches use ordinary conventional commits; non-default active Beads
 branches require the exact branch ID as `type(scope): [BEAD-ID] summary`.
 Hooks require Beads readiness.
