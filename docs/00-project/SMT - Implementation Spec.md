@@ -19,11 +19,13 @@ updated: 2026-08-11
 `smt` is a small Go CLI for a Git root plus independent submodules.
 Configuration is committed in `smt.yaml`, remains at `version: 1`, and contains
 no credentials. The accepted implementation includes local workspace
-scaffolding, guarded Git lifecycle operations, diagnostics, checks, and
-contract inspection.
+scaffolding, guarded Git lifecycle operations, diagnostics, safe hooks, and
+Beads-backed lifecycle support. Profiles and reusable contracts remain valid
+configuration and are summarized by diagnostics; their former standalone
+execution commands are not part of the public CLI.
 
-The Cobra root help groups commands as Getting Started, Workspace, Review
-Workflow, and Developer Tools. Implemented commands are:
+The Cobra root help lists the retained workspace, Git, diagnostics, hooks, and
+Beads lifecycle commands. Implemented commands are:
 
 - `smt new [FILE]` — interactively select fixed Next.js, Go, PostgreSQL, and
   Docker/OpenTofu components; immediately after the Web selection it asks
@@ -74,27 +76,25 @@ Workflow, and Developer Tools. Implemented commands are:
   and profile readiness without printing secret values. The default is an
   action-first summary; `--tree` renders the detailed tree. `--verbose` adds
   safe diagnostic detail only.
-- `smt check --profile hook|submit|ci-parity [--repo ID]
-  [--allow-worktree-mutation] [--dry-run]` — run one named profile. A check
-  with `mutates_worktree: true` is refused unless the explicit
-  `--allow-worktree-mutation` flag is supplied.
-- `smt contracts validate` — evaluate reusable configured contracts and report
-  all findings. Severity defaults to `error`; `severity: warn` is explicit.
-- `smt ci audit` — run the CI-parity contract/profile audit and return a
-  validation failure when error-severity findings exist.
-- `smt ci contracts bump --id ID [--apply]` — plan a reference-literal bump by
-  default; write only with explicit `--apply`. Stale, absent, or ambiguous
-  literals are guarded failures.
-- `smt work ready [--json]`, `smt review`, `smt review list [--json]`,
-  `smt review queue FEATURE --handoff PATH --evidence PATH [--json]`, and
-  `smt review requeue REVIEW [--json]` — expose the retained local
-  work/review workflow.
-- `smt release check [--json]` — report release readiness.
-- `smt completion bash|fish|powershell|zsh` — generate static shell
-  completion; this command and `smt --help` do not require `smt.yaml`.
-
 These commands use argument arrays, never force-push or rewrite history, and
 never log or persist tokens, authorization headers, or sensitive payloads.
+
+Agents create and manage feature or task tickets directly with Beads. The
+supported ticket workflow is:
+
+```sh
+bd prime
+bd create --title="Short task title" --description="Why this exists and what needs to be done" --type=task --priority=2
+bd show <id>
+bd update <id> --claim
+bd ready
+bd blocked
+bd close <id> --reason="Completed"
+```
+
+Create the implementation ticket before editing code. `smt prepare` may still
+create its special internal `Prepared workspace` task for repository lifecycle
+coordination.
 
 ## Flutter Mobile component
 
@@ -215,9 +215,9 @@ those child entries with returned SSH clone URLs and updates each repository's
 `origin` plus `remote.url` in one post-discovery wiring phase. It refuses
 occupied or incompatible local remotes and never deletes provider projects.
 
-Reference bumps replace exactly one current literal. The default is a plan;
-`--apply` is required to write, and the command refuses stale, missing, or
-ambiguous matches.
+Reference and contract schemas remain declarative configuration. Diagnostics
+summarize configured profiles and contract counts, but SMT does not expose the
+former standalone check, audit, or guarded-bump commands.
 
 ## Explicitly planned, not implemented
 
@@ -404,9 +404,9 @@ Go 1.26.4 or newer and `git` are required. The SMT source checkout's
 `task verify` runs the Go tests. The implementation must keep focused tests for
 configuration, scaffolded Git submodules, push/worktree preflight and recovery
 reporting, hook preflight/installation, custom hook-path, nonregular-hook, and
-migration/collision behavior, harmless metadata, profiles and mutation guards,
-status/doctor output, contract severity and path validation, CI audit, and
-guarded bump planning/apply behavior.
+migration/collision behavior, harmless metadata, status/doctor output,
+profile/contract summaries, and secret redaction. Standalone check, CI-audit,
+and guarded-bump command tests are not part of the public CLI.
 
 The Mobile focused-test contract covers default inclusion, explicit
 opt-out, invalid-answer retry, EOF/decline no-write, exact YAML/repository

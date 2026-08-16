@@ -237,6 +237,9 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 			t.Fatalf("published %s: %v", path, err)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(destination, "docs", "Review Queue.base")); !os.IsNotExist(err) {
+		t.Fatalf("retired review queue artifact exists: %v", err)
+	}
 	readme, err := os.ReadFile(filepath.Join(destination, "README.md"))
 	if err != nil || !strings.Contains(string(readme), "embedded Dolt database") || !strings.Contains(string(readme), "ignored by Git") {
 		t.Fatalf("workspace README=%q err=%v", readme, err)
@@ -249,6 +252,14 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 		if !strings.Contains(string(contents), "type(scope): [BEAD-ID] summary") || !strings.Contains(string(contents), "Beads-ID") {
 			t.Fatalf("generated contract %s=%q", path, contents)
 		}
+	}
+	agents, err := os.ReadFile(filepath.Join(destination, "AGENTS.md"))
+	if err != nil || !strings.Contains(string(agents), "bd create") || strings.Contains(string(agents), "smt review") {
+		t.Fatalf("generated agent workflow=%q err=%v", agents, err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(destination, "prompts", "build.md"))
+	if err != nil || !strings.Contains(string(prompt), "bd create") || !strings.Contains(string(prompt), "bd blocked") {
+		t.Fatalf("generated Beads prompt=%q err=%v", prompt, err)
 	}
 	integration, err := os.ReadFile(filepath.Join(destination, "agents", "integration_worker.toml"))
 	if err != nil || !strings.Contains(string(integration), "root integration and gitlink updates only") || !strings.Contains(string(integration), "not a third delivery delegate") {

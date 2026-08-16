@@ -3,10 +3,8 @@
 Sanovy Mono Tool is a small Go CLI for inspectable, repeatable work across a
 Git root repository and independent submodules. The v0.1 implementation is
 available locally, including an interactive blueprint-and-apply workspace flow,
-configured
-repository pushes, synchronized linked worktrees, status/diagnostics, check
-profiles, contract validation, CI contract auditing, guarded bumps, and release
-packaging.
+configured repository pushes, synchronized linked worktrees, status/diagnostics,
+safe hooks, and Beads-backed workspace lifecycle operations.
 
 ## Minimal onboarding
 
@@ -124,12 +122,11 @@ Default branches use ordinary conventional commits; non-default active Beads
 branches require the exact branch ID as `type(scope): [BEAD-ID] summary`.
 Hooks require Beads readiness.
 
-`bin/smt --help` groups commands into Getting Started, Workspace, Review
-Workflow, and Developer Tools. The retained surface includes workspace
-inspection and Git operations, check/contract/CI tools, work and review
-workflow commands, and release readiness. Generate shell completion with, for
-example, `bin/smt completion zsh`; completion and help work without an
-`smt.yaml` file.
+`bin/smt --help` lists the retained workspace, Git, status/doctor, hook, and
+Beads lifecycle commands. Agents create and manage feature or task tickets
+directly with Beads; use `bd prime`, `bd create`, `bd show`, `bd update --claim`,
+`bd ready`, `bd blocked`, and `bd close`. `smt prepare` may still create its
+special internal `Prepared workspace` task.
 
 For copyable command examples, configuration assumptions, and the safe release
 flow, see [SMT Command Recipes](docs/10-development/SMT%20-%20Command%20Recipes.md).

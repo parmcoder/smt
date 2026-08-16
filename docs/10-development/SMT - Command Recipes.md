@@ -136,19 +136,24 @@ local origins, never deletes remote projects, and only updates `smt.yaml`,
 `.gitmodules`, and Git origins after every target is available. Tokens are read
 from `SMT_GITHUB_TOKEN` or `SMT_GITLAB_TOKEN` and are never written to disk.
 
-## Discover commands and enable completion
+## Discover commands and create Beads tickets
 
 ```sh
 bin/smt --help
-bin/smt completion zsh > ~/.zfunc/_smt
+bd prime
+bd create --title="Short task title" --description="Why this exists and what needs to be done" --type=task --priority=2
+bd show <id>
+bd update <id> --claim
+bd ready
+bd blocked
+bd close <id> --reason="Completed"
 ```
 
-Root help groups commands into Getting Started (`new`, `apply`), Workspace,
-Review Workflow, and Developer Tools. The retained review workflow commands
-are `work ready`, `review`, `review list`, `review queue`, `review requeue`,
-and `release check`; use each command's `--help` for its required flags.
-Completion generation and help do not load `smt.yaml`. Ensure `~/.zfunc` is in
-your Zsh completion path before starting a new shell.
+Agents create and manage feature or task tickets directly with Beads; SMT does
+not wrap ticket creation, review queues, release readiness, or ready-work
+listing. Create the implementation ticket before editing code. Use `smt
+prepare` only for repository lifecycle coordination; it may create its special
+internal `Prepared workspace` task.
 
 ## Push configured repositories
 
@@ -432,23 +437,13 @@ smt validate-message --config ../platform/smt.yaml .git/COMMIT_EDITMSG
 `validate-message FILE` expects a complete commit-message file. `--config`
 selects its configuration file and is useful from a child repository hook.
 
-## Checks and contracts
+## Profiles and contracts
 
-```sh
-bin/smt check --profile hook
-bin/smt check --profile submit --repo apis --dry-run
-bin/smt check --profile ci-parity --repo apis
-bin/smt check --profile submit --repo apis --allow-worktree-mutation
-bin/smt contracts validate
-bin/smt ci audit
-bin/smt ci contracts bump --id example-contract
-bin/smt ci contracts bump --id example-contract --apply
-```
-
-Use `--dry-run` to inspect a check without executing it. A check that can
-mutate a worktree requires the explicit `--allow-worktree-mutation` guard. A
-contract bump is plan-only unless `--apply` is supplied; use an ID from the
-configured CI contract report, not a placeholder.
+Profiles and reusable contracts remain valid in `smt.yaml` for configuration
+and diagnostics. `smt status` and `smt doctor` summarize profile names and
+contract counts. The former standalone check, contract-validation, CI-audit,
+and guarded-bump command surfaces have been retired; use direct Beads tickets
+for work that needs follow-up.
 
 The global flag must lead the command. It preserves machine-readable output:
 
@@ -457,11 +452,6 @@ bin/smt --verbose status --json > status.json
 ```
 
 JSON remains on stdout in `status.json`; Logrus diagnostics go only to stderr.
-
-Verbose check commands include timestamped, structured results for each
-configured command, including the repository, profile, program, status, exit
-code, duration, and captured stderr byte count. Arguments and command output
-are not copied into Logrus fields.
 
 Colors are enabled automatically for interactive terminals. Use `NO_COLOR` to
 disable ANSI colors, or `CLICOLOR_FORCE=1` to force them when output is being
