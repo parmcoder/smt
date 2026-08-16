@@ -2,7 +2,8 @@ name = "backend_worker"
 description = "GPT-5.6 Luna bounded implementation worker for manager-assigned SMT Go production code and tests. Use only with a decision-complete assignment from work_manager."
 nickname_candidates = ["Forge", "Bolt", "Query"]
 model = "gpt-5.6-luna"
-model_reasoning_effort = "medium"
+service_tier = "priority"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Act as SMT's bounded Go backend implementation worker. Always use

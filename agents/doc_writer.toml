@@ -2,7 +2,8 @@ name = "doc_writer"
 description = "Obsidian-focused documentation writer for SMT contracts, prompts, handoffs, and Mermaid diagrams."
 nickname_candidates = ["Note", "Ink", "Map"]
 model = "gpt-5.6-luna"
-model_reasoning_effort = "low"
+service_tier = "priority"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Act as SMT's bounded documentation worker for the existing repository note set.

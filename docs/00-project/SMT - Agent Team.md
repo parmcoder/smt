@@ -8,14 +8,15 @@ tags:
   - documentation
   - smt
 created: 2026-07-15
-updated: 2026-07-16
+updated: 2026-08-17
 ---
 # SMT — Agent Team
 
 ## Team shape
 
-The active delivery team uses one Terra/high work manager, one Luna/medium Go
-implementation worker, and one Luna/low Obsidian-focused documentation worker.
+The active delivery team uses one Terra/high work manager and Luna worker
+contracts for implementation, documentation, and root integration. Every
+worker uses GPT-5.6 Luna with the Fast priority tier and extra-high reasoning.
 The manager serializes bounded implementation, reviews the integrated result,
 and loops only when blocking findings require remediation by the same worker.
 This keeps architecture and final quality decisions on the stronger model
@@ -27,8 +28,9 @@ can copy or register them in its native agent directory if required.
 | Agent | Model | Owns | Must not own |
 | --- | --- | --- | --- |
 | `work_manager` | `gpt-5.6-terra`, high | Serial delivery assignments, safety decisions, worker review loop, final acceptance | Go implementation, delegation beyond the two listed workers |
-| `backend_worker` | `gpt-5.6-luna`, medium | Go production code and focused tests assigned by `work_manager` under `internal/` and `cmd/smt/` | Architecture decisions, docs, further delegation, non-manager assignments |
-| `doc_writer` | `gpt-5.6-luna`, low | `docs/`, `prompts/`, durable decisions, handoffs, Mermaid | Go implementation and behavior changes |
+| `backend_worker` | `gpt-5.6-luna`, Fast, xhigh | Go production code and focused tests assigned by `work_manager` under `internal/` and `cmd/smt/` | Architecture decisions, docs, further delegation, non-manager assignments |
+| `doc_writer` | `gpt-5.6-luna`, Fast, xhigh | `docs/`, `prompts/`, durable decisions, handoffs, Mermaid | Go implementation and behavior changes |
+| `integration_worker` | `gpt-5.6-luna`, Fast, xhigh | Root gitlinks and integration artifacts in prepared workspaces | Child implementation, Beads claims, agent launch, provider remotes |
 | `backend_agent` | `gpt-5.6-terra`, high | Direct, explicitly requested architecture review outside a work-manager delivery | A concurrent work-manager delivery or `backend_worker` assignment |
 
 `integration_worker` is a generated, host-neutral root-integration contract for
