@@ -73,27 +73,41 @@ func Prepare(ctx context.Context, cfg config.Config, root string, runner git.Run
 }
 
 func Switch(ctx context.Context, cfg config.Config, root, id string, runner git.Runner, service BeadsLifecycle) (LifecycleReport, error) {
-	report := LifecycleReport{TaskID: id}
-	if runner == nil || service == nil || strings.TrimSpace(id) == "" {
-		return report, errorsLifecycle("switch: required services and Beads ID are required")
+	target := strings.TrimSpace(id)
+	defaultTarget := target == ""
+	report := LifecycleReport{TaskID: target}
+	if runner == nil || (!defaultTarget && service == nil) {
+		return report, errorsLifecycle("switch: required services are unavailable")
 	}
-	issue, err := service.ShowIssue(ctx, id)
-	if err != nil || (issue.Status != "open" && issue.Status != "in_progress") {
-		return report, errorsLifecycle("switch: Beads task is not active")
+	if !defaultTarget {
+		issue, err := service.ShowIssue(ctx, target)
+		if err != nil || (issue.Status != "open" && issue.Status != "in_progress") {
+			return report, errorsLifecycle("switch: Beads task is not active")
+		}
 	}
 	r := repos(root, cfg)
-	for _, repo := range r {
-		if err := preflightRepo(ctx, runner, repo); err != nil || !branchExists(ctx, runner, repo, id) {
+	branches := make([]string, len(r))
+	for i, repo := range r {
+		branch := target
+		if defaultTarget {
+			branch = cfg.Repositories[i].EffectiveDefaultBranch()
+		}
+		branches[i] = branch
+		if err := preflightRepo(ctx, runner, repo); err != nil || !branchExists(ctx, runner, repo, branch) {
 			return report, fmt.Errorf("switch: branch preflight failed for repository %s", repo.ID)
 		}
 	}
+	stashID := target
+	if defaultTarget {
+		stashID = "default"
+	}
 	for i, repo := range r {
 		report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "clean"})
-		if err := stashWorkspace(ctx, runner, repo, id); err != nil {
+		if err := stashWorkspace(ctx, runner, repo, stashID); err != nil {
 			return failLifecycle(report, r[i:], repo, err)
 		}
 		report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "stashed"})
-		if err := runGit(ctx, runner, repo, "switch", id); err != nil {
+		if err := runGit(ctx, runner, repo, "switch", branches[i]); err != nil {
 			return failLifecycle(report, r[i:], repo, err)
 		}
 		report.Results = append(report.Results, RepositoryProgress{ID: repo.ID, Status: "switched"})

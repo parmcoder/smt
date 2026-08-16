@@ -53,9 +53,10 @@ Workflow, and Developer Tools. Implemented commands are:
   every configured repository. If preflight fails, the task remains open and
   Git remains mutation-free. Tracked and untracked changes are stashed;
   ignored files are left in place. The operation has no positional arguments.
-- `smt switch BEAD_ID` — switch every repository to an existing local branch
-  named by the active Beads ID. It never creates branches, auto-pops stashes,
-  or rolls back a partial switch.
+- `smt switch [BEAD_ID]` — with no argument, switch every repository to its
+  effective default branch; with a Beads ID, switch every repository to its
+  existing local active-task branch. It never creates branches, auto-pops
+  stashes, or rolls back a partial switch.
 - `smt pull` — fast-forward configured repositories child-first, then root,
   using each repository's effective default branch.
 - `smt hooks install [--dry-run]` — require bare `smt` and `lefthook` on
@@ -241,11 +242,13 @@ configuration/environment inputs.
 ## Workspace lifecycle, diagnostics, and hooks
 
 The effective default branch is `repositories[].remote.default_branch` when
-set, otherwise `main`. `prepare` and `switch` use Beads readiness from the root
-workspace: the active Beads ID is the branch name, and hooks require the
-workspace to be ready before accepting a commit. Commit subjects on an active
-Beads branch use `type(scope): [BEAD-ID] summary`; outside one, use the normal
-configured conventional-commit syntax. The root may use the active Beads ID;
+set, otherwise `main`. `prepare` and explicit-ID `switch` use Beads readiness
+from the root workspace; no-argument `switch` returns to each repository's
+effective default without a Beads task lookup. The active Beads ID is the
+branch name, and hooks require the workspace to be ready before accepting a
+commit. Commit subjects on an active Beads branch use
+`type(scope): [BEAD-ID] summary`; outside one, use the normal configured
+conventional-commit syntax. The root may use the active Beads ID;
 there are no Jira aliases, assignment waves, manifests, or provider review
 automation in this release.
 

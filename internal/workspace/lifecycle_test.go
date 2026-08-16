@@ -53,6 +53,7 @@ type lifecycleBeads struct {
 	issue     beads.Issue
 	createErr error
 	events    *[]string
+	shown     []string
 }
 
 func (b *lifecycleBeads) CreatePreparedWorkspaceTask(context.Context) (string, error) {
@@ -68,7 +69,10 @@ func (b *lifecycleBeads) CreatePreparedWorkspaceTask(context.Context) (string, e
 	}
 	return "task-7", nil
 }
-func (b *lifecycleBeads) ShowIssue(context.Context, string) (beads.Issue, error) { return b.issue, nil }
+func (b *lifecycleBeads) ShowIssue(_ context.Context, id string) (beads.Issue, error) {
+	b.shown = append(b.shown, id)
+	return b.issue, nil
+}
 
 func lifecycleConfig() config.Config {
 	return config.Config{Repositories: []config.Repository{{ID: "repo", Path: ".", Scope: "repo"}, {ID: "api", Path: "api", Scope: "api"}}, Commit: config.CommitConfig{Types: []string{"feat"}, Scopes: []string{"repo", "api"}}}
@@ -205,6 +209,43 @@ func TestSwitchStashesTrackedAndUntrackedButLeavesBeadsStateAlone(t *testing.T) 
 			if !wantStashes[call] {
 				t.Fatalf("unexpected stash=%q", call)
 			}
+		}
+	}
+}
+
+func TestSwitchWithoutIDTargetsEachEffectiveDefaultBranch(t *testing.T) {
+	cfg := lifecycleConfig()
+	cfg.Repositories[1].Remote.DefaultBranch = "develop"
+	r := &lifecycleRunner{branches: map[string]bool{
+		"/root=refs/heads/main":        true,
+		"/root/api=refs/heads/develop": true,
+	}}
+	b := &lifecycleBeads{issue: beads.Issue{Status: "closed"}}
+	report, err := Switch(context.Background(), cfg, "/root", "", r, b)
+	if err != nil {
+		t.Fatalf("Switch() error = %v", err)
+	}
+	if report.TaskID != "" || len(b.shown) != 0 {
+		t.Fatalf("report=%+v beads lookups=%v", report, b.shown)
+	}
+	if !hasCall(r.calls, "/root switch main") || !hasCall(r.calls, "/root/api switch develop") {
+		t.Fatalf("default branch calls=%v", r.calls)
+	}
+	if !hasCall(r.calls, "smt prepared workspace default") {
+		t.Fatalf("default stash message missing: %v", r.calls)
+	}
+}
+
+func TestSwitchWithoutIDMissingDefaultBranchHasNoGitMutation(t *testing.T) {
+	cfg := lifecycleConfig()
+	cfg.Repositories[1].Remote.DefaultBranch = "develop"
+	r := &lifecycleRunner{branches: map[string]bool{"/root=refs/heads/main": true}}
+	if _, err := Switch(context.Background(), cfg, "/root", "", r, nil); err == nil {
+		t.Fatal("missing default branch accepted")
+	}
+	for _, call := range r.calls {
+		if strings.Contains(call, "stash") || strings.Contains(call, "switch") || strings.Contains(call, "fetch") {
+			t.Fatalf("default branch mutation before preflight: %v", r.calls)
 		}
 	}
 }

@@ -237,6 +237,10 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 			t.Fatalf("published %s: %v", path, err)
 		}
 	}
+	readme, err := os.ReadFile(filepath.Join(destination, "README.md"))
+	if err != nil || !strings.Contains(string(readme), "embedded Dolt database") || !strings.Contains(string(readme), "ignored by Git") {
+		t.Fatalf("workspace README=%q err=%v", readme, err)
+	}
 	for _, path := range []string{"AGENTS.md", "agents/work_manager.toml", "agents/web_worker.toml", "agents/integration_worker.toml", "prompts/build.md"} {
 		contents, err := os.ReadFile(filepath.Join(destination, path))
 		if err != nil {
@@ -249,6 +253,64 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 	integration, err := os.ReadFile(filepath.Join(destination, "agents", "integration_worker.toml"))
 	if err != nil || !strings.Contains(string(integration), "root integration and gitlink updates only") || !strings.Contains(string(integration), "not a third delivery delegate") {
 		t.Fatalf("integration contract=%q err=%v", integration, err)
+	}
+}
+
+func TestServiceDoesNotCommitIgnoredBeadsRuntimeFiles(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	cfg, err := config.LoadBytes(blueprintBytes(), filepath.Join(parent, "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := Service{Config: *cfg, Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Beads: initializerFunc(func(_ context.Context, stage string) error {
+		beads := filepath.Join(stage, ".beads")
+		if err := os.MkdirAll(filepath.Join(beads, "embeddeddolt", "workspace", ".dolt"), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(beads, ".gitignore"), []byte("embeddeddolt/\n.local_version\n"), 0o644); err != nil {
+			return err
+		}
+		for path, contents := range map[string]string{
+			"config.yaml":        "database: embedded\n",
+			".local_version":     "9.9.9\n",
+			"embeddeddolt/.lock": "lock\n",
+			"embeddeddolt/workspace/.dolt/config.json": "{\"format\": \"dolt\"}\n",
+		} {
+			if err := os.WriteFile(filepath.Join(beads, path), []byte(contents), 0o600); err != nil {
+				return err
+			}
+		}
+		return nil
+	})}
+	if err := s.Apply(context.Background(), destination, blueprintBytes()); err != nil {
+		t.Fatal(err)
+	}
+
+	repo, err := ggit.PlainOpen(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := repo.Storer.Index()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked := make(map[string]bool, len(index.Entries))
+	for _, entry := range index.Entries {
+		tracked[entry.Name] = true
+	}
+	for _, path := range []string{".beads/.gitignore", ".beads/config.yaml"} {
+		if !tracked[path] {
+			t.Fatalf("tracked files missing %s: %v", path, tracked)
+		}
+	}
+	for _, path := range []string{".beads/.local_version", ".beads/embeddeddolt/.lock", ".beads/embeddeddolt/workspace/.dolt/config.json"} {
+		if tracked[path] {
+			t.Fatalf("ignored runtime file tracked: %s", path)
+		}
+		if _, err := os.Stat(filepath.Join(destination, path)); err != nil {
+			t.Fatalf("ignored runtime file was not preserved: %s: %v", path, err)
+		}
 	}
 }
 

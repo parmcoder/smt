@@ -8,7 +8,7 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-08-11
+updated: 2026-08-16
 ---
 # SMT — Command Recipes
 
@@ -58,6 +58,33 @@ Lefthook from automatically installing or updating hooks when configuration
 changes; the assertion makes Git fail if Lefthook cannot be found, rather than
 silently skipping validation. Applying a blueprint does not execute Lefthook or
 install a Git hook.
+
+### Beads bootstrap files
+
+The initial workspace commit includes Beads configuration and metadata while
+honoring the `.beads/.gitignore` created by `bd init`. The embedded Dolt
+database, locks, backups, and other local runtime files remain on disk but are
+not tracked by Git. Verify a generated workspace with:
+
+```sh
+git ls-files -ci --exclude-standard
+git check-ignore -v .beads/embeddeddolt/
+```
+
+For a workspace created by an older SMT version, preserve the local Beads
+database and remove only indexed ignored paths from Git:
+
+```sh
+bd doctor --fix
+git ls-files -ci --exclude-standard
+git rm --cached -r .beads/embeddeddolt/
+git rm --cached .beads/.local_version
+git commit -m "fix(repo): stop tracking Beads runtime data"
+```
+
+Use the output of `git ls-files -ci --exclude-standard` to include any other
+indexed ignored runtime paths; do not delete the local files or rewrite Git
+history.
 
 ## Human E2E Mobile review handoff
 
@@ -140,6 +167,7 @@ commits, force-pushes, or rolls back a successful child push.
 
 ```sh
 bin/smt prepare
+bin/smt switch
 bin/smt switch smt-123
 bin/smt pull
 ```
@@ -147,8 +175,9 @@ bin/smt pull
 `prepare` has no positional arguments, creates and reports the open `Prepared
 workspace` task before running complete preflight, and leaves that task open
 when preflight fails without mutating Git. It stashes tracked and untracked
-changes but leaves ignored files in place. `switch BEAD_ID` uses only an
-existing local branch and never creates, auto-pops, or rolls back. `pull`
+changes but leaves ignored files in place. `switch` with no argument returns
+every repository to its effective default branch; `switch BEAD_ID` uses only an
+existing local branch. Neither form creates, auto-pops, or rolls back. `pull`
 fast-forwards child repositories before the root. The effective default branch
 is per-repository `remote.default_branch`, then `main`.
 Default branches use ordinary conventional-commit syntax; non-default active
