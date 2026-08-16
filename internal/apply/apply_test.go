@@ -265,6 +265,17 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 	if err != nil || !strings.Contains(string(integration), "root integration and gitlink updates only") || !strings.Contains(string(integration), "not a third delivery delegate") {
 		t.Fatalf("integration contract=%q err=%v", integration, err)
 	}
+	for _, path := range []string{"agents/web_worker.toml", "agents/integration_worker.toml", "agents/doc_writer.toml"} {
+		contents, err := os.ReadFile(filepath.Join(destination, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, setting := range []string{`model = "gpt-5.6-luna"`, `service_tier = "priority"`, `model_reasoning_effort = "xhigh"`} {
+			if !strings.Contains(string(contents), setting) {
+				t.Fatalf("generated worker %s missing %s: %q", path, setting, contents)
+			}
+		}
+	}
 }
 
 func TestServiceDoesNotCommitIgnoredBeadsRuntimeFiles(t *testing.T) {

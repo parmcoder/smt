@@ -25,10 +25,11 @@ is the source of truth for behavior and acceptance criteria.
 
 ## Agent routing
 
-The active delivery path uses a Terra work manager, a Luna implementation
-worker, and a Luna documentation worker. `backend_agent` remains available for
-an explicitly requested standalone architecture review, but it is not a child
-of `work_manager` and must not share an active implementation scope with it:
+The active delivery path uses a Terra work manager and Luna workers. Every
+worker uses GPT-5.6 Luna with the Fast priority tier and extra-high reasoning.
+`backend_agent` remains available for an explicitly requested standalone
+architecture review, but it is not a child of `work_manager` and must not share
+an active implementation scope with it:
 
 Their manifests live under `agents/` because the host-managed `.codex/` and
 `.agents/` directories are not writable in this checkout.
@@ -37,14 +38,19 @@ Their manifests live under `agents/` because the host-managed `.codex/` and
   `backend_worker` and `doc_writer`, serializes backend assignments, performs
   the final review loop, and never implements Go code. Use
   `$godex:godex-go-backend` for Go architecture and review only.
-- `backend_worker`: Luna/medium worker for assigned Go implementation and
+- `backend_worker`: GPT-5.6 Luna worker with Fast priority and extra-high
+  reasoning for assigned Go implementation and
   tests. It accepts assignments only from `work_manager` and is the sole owner
   of manager-assigned Go production code and focused Go tests under `internal/`
   and `cmd/smt/`; it never delegates further. Use `$godex:godex-go-backend`.
 - `doc_writer`: docs, prompts, handoffs, and diagrams under `docs/` and
-  `prompts/`, using Luna/low. Use `$codex-obsidian-writer` and
+  `prompts/`, using GPT-5.6 Luna with Fast priority and extra-high reasoning.
+  Use `$codex-obsidian-writer` and
   `$codex-obsidian-markdown`. It remains a high-level documentation worker and
   does not implement Go behavior.
+- `integration_worker`: generated root-integration worker using GPT-5.6 Luna
+  with Fast priority and extra-high reasoning. It owns only root gitlinks and
+  integration artifacts and is not a third downstream delegate.
 - `backend_agent`: Terra/high Go architecture and review controller for direct,
   non-work-manager requests. It does not issue `backend_worker` implementation
   assignments. Use `$godex:godex-go-backend`.
