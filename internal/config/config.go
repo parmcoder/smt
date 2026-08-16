@@ -113,6 +113,7 @@ type Repository struct {
 	Path          string        `yaml:"path"`
 	Component     string        `yaml:"component,omitempty"`
 	Technology    string        `yaml:"technology,omitempty"`
+	Modules       []string      `yaml:"modules,omitempty"`
 	Remote        Remote        `yaml:"remote"`
 	Provider      string        `yaml:"provider,omitempty"`
 	Project       string        `yaml:"project,omitempty"`
@@ -178,6 +179,7 @@ func (r *Repository) UnmarshalYAML(value *yaml.Node) error {
 		Path       string    `yaml:"path"`
 		Component  string    `yaml:"component"`
 		Technology string    `yaml:"technology"`
+		Modules    []string  `yaml:"modules"`
 		Remote     Remote    `yaml:"remote"`
 		Provider   string    `yaml:"provider"`
 		Project    string    `yaml:"project"`
@@ -190,9 +192,9 @@ func (r *Repository) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	r.ID, r.Path = raw.ID, raw.Path
-	r.Component, r.Technology, r.Remote = raw.Component, raw.Technology, raw.Remote
+	r.Component, r.Technology, r.Modules, r.Remote = raw.Component, raw.Technology, raw.Modules, raw.Remote
 	r.Provider, r.Project, r.Visibility, r.Scope = raw.Provider, raw.Project, raw.Visibility, raw.Scope
-	allowed := map[string]bool{"id": true, "path": true, "component": true, "technology": true, "remote": true, "provider": true, "project": true, "visibility": true, "scope": true, "checks": true}
+	allowed := map[string]bool{"id": true, "path": true, "component": true, "technology": true, "modules": true, "remote": true, "provider": true, "project": true, "visibility": true, "scope": true, "checks": true}
 	for i := 0; i+1 < len(value.Content); i += 2 {
 		if !allowed[value.Content[i].Value] {
 			r.UnknownFields = append(r.UnknownFields, value.Content[i].Value)
@@ -284,6 +286,9 @@ func (c *Config) Validate(workspaceRoot string) error {
 		return err
 	}
 	if err := c.validateWorkflow(); err != nil {
+		return err
+	}
+	if err := c.validateRepositoryModules(); err != nil {
 		return err
 	}
 
@@ -402,16 +407,17 @@ func validateProjectIdentity(provider, project string) error {
 // that update remote URLs must not silently erase local readiness checks.
 func (r Repository) MarshalYAML() (interface{}, error) {
 	type repositoryFields struct {
-		ID         string `yaml:"id"`
-		Path       string `yaml:"path"`
-		Component  string `yaml:"component,omitempty"`
-		Technology string `yaml:"technology,omitempty"`
-		Remote     Remote `yaml:"remote"`
-		Provider   string `yaml:"provider,omitempty"`
-		Project    string `yaml:"project,omitempty"`
-		Visibility string `yaml:"visibility,omitempty"`
-		Scope      string `yaml:"scope"`
-		Checks     any    `yaml:"checks,omitempty"`
+		ID         string   `yaml:"id"`
+		Path       string   `yaml:"path"`
+		Component  string   `yaml:"component,omitempty"`
+		Technology string   `yaml:"technology,omitempty"`
+		Modules    []string `yaml:"modules,omitempty"`
+		Remote     Remote   `yaml:"remote"`
+		Provider   string   `yaml:"provider,omitempty"`
+		Project    string   `yaml:"project,omitempty"`
+		Visibility string   `yaml:"visibility,omitempty"`
+		Scope      string   `yaml:"scope"`
+		Checks     any      `yaml:"checks,omitempty"`
 	}
 	var checks any
 	if r.Profiles != nil {
@@ -420,7 +426,7 @@ func (r Repository) MarshalYAML() (interface{}, error) {
 		checks = r.Checks
 	}
 	return repositoryFields{
-		ID: r.ID, Path: r.Path, Component: r.Component, Technology: r.Technology,
+		ID: r.ID, Path: r.Path, Component: r.Component, Technology: r.Technology, Modules: r.Modules,
 		Remote: r.Remote, Provider: r.Provider, Project: r.Project,
 		Visibility: r.Visibility, Scope: r.Scope, Checks: checks,
 	}, nil

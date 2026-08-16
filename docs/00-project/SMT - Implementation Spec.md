@@ -31,9 +31,14 @@ Beads lifecycle commands. Implemented commands are:
   (`flutter`), API (`go`), and Database (`postgresql`) components. Immediately
   after the Web selection it asks `Include Flutter mobile application? [Y/n]`.
   Enter includes the Android/iOS Flutter Mobile component and an explicit no
-  excludes it. It writes a validated `smt.yaml` blueprint only after
-  confirmation and does not create a repository or workspace. Generation is
-  offline and byte-stable for identical selections in fresh destinations.
+  excludes it. After the Database selection it asks the optional,
+  default-no quality-root question `Include E2E quality declaration? [y/N]`.
+  An affirmative answer records `modules: [e2e]` on the root repository only;
+  it does not create an E2E repository or scaffold. Component repositories
+  receive their exact catalog module IDs. It writes a validated `smt.yaml`
+  blueprint only after confirmation and does not create a repository or
+  workspace. Generation is offline and byte-stable for identical selections in
+  fresh destinations.
   Existing destination files are refused; `smt new` never overwrites, merges,
   regenerates, or upgrades a blueprint.
 - `smt apply [--config FILE] PATH` — validate the supplied workspace
@@ -42,7 +47,11 @@ Beads lifecycle commands. Implemented commands are:
   agent workflow files at a new destination. It does not install dependencies,
   create remote repositories, or call provider APIs. It refuses an existing
   destination file or directory; apply has no overwrite, merge, regenerate,
-  upgrade, or `smt extend` path.
+  upgrade, or `smt extend` path. Generated blueprints must contain the exact
+  repository module annotations from the static catalog; apply persists those
+  annotations but does not execute their verification recipes, install their
+  tools, skills, or MCP integrations, mutate host configuration, or create
+  module repositories.
 - `smt push [--dry-run]` — preflight every configured repository, then push
   each child repository's current branch before the root. Remote URLs come from
   `repositories[].remote.url`; dry-run validates and prints the order without
@@ -170,6 +179,7 @@ repositories:
   - id: repo
     path: .
     scope: repo
+    modules: [e2e]
     remote:
       url: ""
   - id: web
@@ -177,6 +187,7 @@ repositories:
     component: web
     technology: nextjs
     scope: web
+    modules: [web]
     remote:
       url: git@github.com:example/web-app.git
   - id: mobile
@@ -184,16 +195,19 @@ repositories:
     component: mobile
     technology: flutter
     scope: mobile
+    modules: [mobile]
   - id: api
     path: apis
     component: api
     technology: go
     scope: api
+    modules: [api]
   - id: database
     path: database
     component: database
     technology: postgresql
     scope: database
+    modules: [database]
 
 contracts:
   reference:
@@ -232,11 +246,39 @@ selected. They contain no DevOps prompt, `workspace.stack.devops`, combined
 `infra` or DevOps repository, Docker/OpenTofu component or tooling metadata,
 or generated DevOps artifacts.
 
+Repositories may also carry optional `modules: [id...]` metadata. Omitting the
+field remains valid for existing general version-1 configurations. Version 1
+uses a static, schema-v1 catalog owned by the SMT code; it is not user YAML.
+The built-in selectable entries are exactly `web`, `mobile`, `api`, `database`,
+and the quality declaration `e2e`. The catalog records each ID's category and
+layer, provided/required/optional capabilities, safe placement defaults,
+agent and skill references, argument-array verification requirements including
+`mutates_worktree`, and reviewed scaffold-asset identity. Its complete layer
+vocabulary is `control-plane`, `application-components`,
+`shared-infrastructure`, `quality-verification`, and `platform-delivery`; the
+built-in catalog has no selectable control-plane or platform entry.
+Web, Mobile, and API use the `application`/`application-components` pairing;
+Database uses `infrastructure`/`shared-infrastructure`; and E2E uses
+`quality`/`quality-verification`.
+
+`smt new` derives the quality prompt and emitted module ID from the catalog's
+role and placement. Component repositories receive exact IDs (`web`, `mobile`,
+`api`, and `database`). Opting into the quality declaration adds only
+`modules: [e2e]` to the root; it creates no E2E repository, scaffold, or other
+artifact. Catalog validation rejects invalid schema, duplicate IDs, invalid
+category/layer pairs, unknown capability references, unsafe paths, and
+dependency cycles. Configuration validation
+rejects unknown or duplicate repository module IDs and missing selected
+required capabilities. `smt apply` requires the exact generated root/component
+annotations and persists them, but it does not execute verification recipes,
+install referenced tools, skills, or MCP integrations, mutate host
+configuration, or provide `smt extend`.
+
 Legacy DevOps-shaped configurations are rejected by `smt apply` before any
 destination mutation. The migration-oriented error directs the operator to
 remove the legacy DevOps entries and regenerate a version-1 blueprint. The
 configuration and generation behavior above describes the current
-implementation; the planned runnable starter and platform/module work is
+implementation; the planned runnable starter and platform work is
 recorded in [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]].
 The planned component gates and optional tool integrations are summarized in
 [[../10-development/SMT - Component Developer Toolchains|Component Developer Toolchains]].
@@ -277,14 +319,15 @@ implemented by the CLI or this release:
 - YAML selector rewrites or automatic CI configuration edits;
 - `checkout` and `validate-range` workflows from the earlier design.
 
-The broader runnable-starter and module work is also planned, not implemented:
+The broader runnable-starter and platform work is planned, not implemented:
 the five layers remain in this repository initially; platform capabilities are
 named `container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd` (with
-`argocd` depending on `k8s`); and a thin module contract is being defined.
-This release provides no runnable templates, Podman/Compose artifacts, module
-catalog, or `smt extend` command. `smt extend` and its E2E scaffold are later
-work and must not be described as available CLI behavior. AWS + Apptainer +
-OpenTofu remains later discovery.
+`argocd` depending on `k8s`). This release provides no runnable templates,
+Podman/Compose artifacts, platform artifacts or capabilities, remote module
+registry, or `smt extend` command. The static module catalog and repository
+annotations above are implemented metadata only: verification recipes are not
+executed, and no E2E/module repository or scaffold is generated. AWS +
+Apptainer + OpenTofu remains later discovery.
 
 Git lifecycle operations preflight all configured repositories before a remote
 push or worktree creation. Pushes are child-first and stop after a failure with

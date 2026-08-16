@@ -14,12 +14,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var moduleCatalogSource = config.BuiltInModuleCatalog
+
 // Selection holds the fixed component choices for a new configuration.
 type Selection struct {
 	Web      bool
 	Mobile   bool
 	API      bool
 	Database bool
+	E2E      bool
 }
 
 // Result describes a generated blueprint or a deliberate cancellation.
@@ -104,7 +107,15 @@ func promptSelection(reader *bufio.Reader, out io.Writer) (Selection, error) {
 	if err != nil {
 		return Selection{}, err
 	}
-	return Selection{Web: web, Mobile: mobile, API: api, Database: database}, nil
+	e2eModule, err := e2eModuleDefinition()
+	if err != nil {
+		return Selection{}, err
+	}
+	e2e, err := askOptionalModule(reader, out, e2eModule)
+	if err != nil {
+		return Selection{}, err
+	}
+	return Selection{Web: web, Mobile: mobile, API: api, Database: database, E2E: e2e}, nil
 }
 
 func askComponent(reader *bufio.Reader, out io.Writer, label string) (bool, error) {
@@ -126,6 +137,32 @@ func askComponent(reader *bufio.Reader, out io.Writer, label string) (bool, erro
 			fmt.Fprintln(out, "please answer yes or no")
 		}
 	}
+}
+
+func askOptionalModule(reader *bufio.Reader, out io.Writer, module config.ModuleDefinition) (bool, error) {
+	label := fmt.Sprintf("%s %s declaration", strings.ToUpper(module.ID), module.Category)
+	for {
+		fmt.Fprintf(out, "Include %s? [y/N] ", label)
+		answer, ended, err := readAnswer(reader)
+		if err != nil {
+			return false, fmt.Errorf("read %s answer: %w", label, err)
+		}
+		if ended {
+			return false, fmt.Errorf("input ended before confirmation while answering %s", label)
+		}
+		switch answer {
+		case "", "n", "no":
+			return false, nil
+		case "y", "yes":
+			return true, nil
+		default:
+			fmt.Fprintln(out, "please answer yes or no")
+		}
+	}
+}
+
+func e2eModuleDefinition() (config.ModuleDefinition, error) {
+	return config.QualityRootModule(moduleCatalogSource())
 }
 
 func askConfirmation(reader *bufio.Reader, out io.Writer) (bool, error) {
@@ -177,27 +214,35 @@ func (s Selection) labels() []string {
 }
 
 func marshal(selection Selection) ([]byte, error) {
+	e2eModule, err := e2eModuleDefinition()
+	if err != nil {
+		return nil, err
+	}
 	stack := config.WorkspaceStack{}
-	repos := []config.Repository{{ID: "repo", Path: ".", Scope: "repo", Remote: config.Remote{DefaultBranch: "main"}}}
+	root := config.Repository{ID: "repo", Path: ".", Scope: "repo", Remote: config.Remote{DefaultBranch: "main"}}
+	if selection.E2E {
+		root.Modules = []string{e2eModule.ID}
+	}
+	repos := []config.Repository{root}
 	scopes := []string{"repo"}
 	if selection.Web {
 		stack.Web = "nextjs"
-		repos = append(repos, config.Repository{ID: "web", Path: "web-app", Component: "web", Technology: "nextjs", Scope: "web", Remote: config.Remote{DefaultBranch: "main"}})
+		repos = append(repos, config.Repository{ID: "web", Path: "web-app", Component: "web", Technology: "nextjs", Scope: "web", Modules: []string{"web"}, Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "web")
 	}
 	if selection.Mobile {
 		stack.Mobile = "flutter"
-		repos = append(repos, config.Repository{ID: "mobile", Path: "mobile-app", Component: "mobile", Technology: "flutter", Scope: "mobile", Remote: config.Remote{DefaultBranch: "main"}})
+		repos = append(repos, config.Repository{ID: "mobile", Path: "mobile-app", Component: "mobile", Technology: "flutter", Scope: "mobile", Modules: []string{"mobile"}, Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "mobile")
 	}
 	if selection.API {
 		stack.API = "go"
-		repos = append(repos, config.Repository{ID: "api", Path: "apis", Component: "api", Technology: "go", Scope: "api", Remote: config.Remote{DefaultBranch: "main"}})
+		repos = append(repos, config.Repository{ID: "api", Path: "apis", Component: "api", Technology: "go", Scope: "api", Modules: []string{"api"}, Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "api")
 	}
 	if selection.Database {
 		stack.Database = "postgresql"
-		repos = append(repos, config.Repository{ID: "database", Path: "database", Component: "database", Technology: "postgresql", Scope: "database", Remote: config.Remote{DefaultBranch: "main"}})
+		repos = append(repos, config.Repository{ID: "database", Path: "database", Component: "database", Technology: "postgresql", Scope: "database", Modules: []string{"database"}, Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "database")
 	}
 	cfg := config.Config{Version: 1, Provenance: &config.Provenance{Tool: config.ProvenanceTool, SMTVersion: config.ProvenanceSMTVersion, TemplateSetVersion: config.ProvenanceTemplateSetVersion}, Workspace: config.Workspace{AIAssist: "codex", Stack: stack}, Commit: config.CommitConfig{Types: []string{"feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"}, Scopes: scopes}, Repositories: repos, Workflow: fixedWorkflow()}

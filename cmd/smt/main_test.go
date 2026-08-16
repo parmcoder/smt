@@ -411,7 +411,7 @@ func applyBlueprint() []byte {
 provenance: {tool: smt, smt_version: v0.1.0, template_set_version: v1}
 workspace: {ai_assist: codex, stack: {web: nextjs}}
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
-repositories: [{id: repo, path: ., scope: repo, remote: {url: ""}}, {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}]
+repositories: [{id: repo, path: ., scope: repo, remote: {url: ""}}, {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}]
 workflow: {policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}, plugins: [{source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}, {source: parmcoder/godex, selectors: [godex-go-backend]}]}
 `)
 }
@@ -493,6 +493,42 @@ func TestRunApplyRejectsInvalidConfigurationBeforePublication(t *testing.T) {
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		t.Fatalf("destination stat=%v, want no publication", err)
+	}
+}
+
+func TestRunApplyRejectsTamperedModuleMappingsBeforeServiceMutation(t *testing.T) {
+	tests := map[string]struct {
+		old string
+		new string
+	}{
+		"missing component module": {old: "modules: [web], ", new: ""},
+		"wrong component module":   {old: "modules: [web]", new: "modules: [api]"},
+		"unknown module":           {old: "modules: [web]", new: "modules: [missing]"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			original := newApplyService
+			t.Cleanup(func() { newApplyService = original })
+			called := false
+			newApplyService = func() applypkg.Service {
+				called = true
+				return applypkg.Service{}
+			}
+			root := t.TempDir()
+			configPath := filepath.Join(root, "invalid-modules.yaml")
+			raw := strings.Replace(string(applyBlueprint()), tt.old, tt.new, 1)
+			if err := os.WriteFile(configPath, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, "workspace")
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := runWithInput([]string{"apply", "--config", configPath, destination}, strings.NewReader(""), out, errOut); code != exitValidation || called || !strings.Contains(strings.ToLower(errOut.String()), "module") {
+				t.Fatalf("code=%d service called=%t stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+			}
+			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+				t.Fatalf("destination stat=%v, want no mutation", err)
+			}
+		})
 	}
 }
 
@@ -985,7 +1021,7 @@ func TestRunNewCreatesConfigurationWithoutExistingConfiguration(t *testing.T) {
 	t.Chdir(t.TempDir())
 	allowNewInput(t)
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\ny\n"), out, errOut)
+	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\nn\ny\n"), out, errOut)
 	if code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
@@ -999,7 +1035,7 @@ func TestRunNewCreatesConfigurationAtCustomPath(t *testing.T) {
 	allowNewInput(t)
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\ny\nn\ny\n"), out, errOut); code != exitOK {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\ny\nn\nn\ny\n"), out, errOut); code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := config.Load(destination); err != nil {
@@ -1085,7 +1121,7 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "platform")
 	blueprintPath := filepath.Join(t.TempDir(), "smt.yaml")
-	if _, err := blueprint.Create(strings.NewReader("y\ny\ny\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
+	if _, err := blueprint.Create(strings.NewReader("y\ny\ny\nn\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	cfg, err := config.Load(blueprintPath)

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -471,6 +472,187 @@ repositories:
 `
 	if _, err := LoadBytes([]byte(raw), "/tmp/smt.yaml"); err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("LoadBytes() error = %v, want unknown provenance field rejection", err)
+	}
+}
+
+func TestRepositoryModulesRoundTripAndNoModulesRemainValid(t *testing.T) {
+	raw := `version: 1
+commit: {types: [feat], scopes: [repo, web]}
+repositories:
+  - {id: repo, path: ., scope: repo}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web]}
+`
+	cfg, err := LoadBytes([]byte(raw), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Repositories[1].Modules) != 1 || cfg.Repositories[1].Modules[0] != "web" {
+		t.Fatalf("modules = %#v, want [web]", cfg.Repositories[1].Modules)
+	}
+	encoded, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := LoadBytes(encoded, "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roundTrip.Repositories[1].Modules) != 1 || roundTrip.Repositories[1].Modules[0] != "web" {
+		t.Fatalf("round-trip modules = %#v, want [web]", roundTrip.Repositories[1].Modules)
+	}
+	noModules := `version: 1
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo}
+`
+	if _, err := LoadBytes([]byte(noModules), "/tmp/smt.yaml"); err != nil {
+		t.Fatalf("no-modules configuration error = %v", err)
+	}
+}
+
+func TestRepositoryModulesRejectUnknownAndDuplicateIDs(t *testing.T) {
+	base := `version: 1
+commit: {types: [feat], scopes: [repo, web]}
+repositories:
+  - {id: repo, path: ., scope: repo}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [%s]}
+`
+	for name, modules := range map[string]string{
+		"unknown":   "missing",
+		"duplicate": "web, web",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := LoadBytes([]byte(fmt.Sprintf(base, modules)), "/tmp/smt.yaml"); err == nil || !strings.Contains(err.Error(), "module") {
+				t.Fatalf("LoadBytes() error = %v, want module validation error", err)
+			}
+		})
+	}
+}
+
+func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
+	catalog := BuiltInModuleCatalog()
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("built-in catalog validation error = %v", err)
+	}
+	if catalog.SchemaVersion != 1 {
+		t.Fatalf("schema version = %d, want 1", catalog.SchemaVersion)
+	}
+	wantIDs := []string{"web", "mobile", "api", "database", "e2e"}
+	if len(catalog.Modules) != len(wantIDs) {
+		t.Fatalf("catalog IDs = %#v, want exactly %#v", catalog.Modules, wantIDs)
+	}
+	for i, want := range wantIDs {
+		if catalog.Modules[i].ID != want {
+			t.Fatalf("catalog module %d = %#v, want ID %q", i, catalog.Modules[i], want)
+		}
+		if len(catalog.Modules[i].Verification) == 0 || len(catalog.Modules[i].ScaffoldAssets) == 0 || len(catalog.Modules[i].Agents) == 0 || len(catalog.Modules[i].Skills) == 0 {
+			t.Fatalf("catalog module %q lacks declarative verification/assets/agent/skill fields: %#v", want, catalog.Modules[i])
+		}
+		for _, verification := range catalog.Modules[i].Verification {
+			if verification.ID == "" || len(verification.Argv) == 0 || verification.MutatesWorktree {
+				t.Fatalf("catalog module %q has unsafe verification declaration: %#v", want, verification)
+			}
+		}
+	}
+	if got := catalog.Modules[0].Repository; got.Path != "web-app" || got.Scope != "web" {
+		t.Fatalf("web placement = %#v", got)
+	}
+	if got := catalog.Modules[1].Repository; got.Path != "mobile-app" || got.Scope != "mobile" {
+		t.Fatalf("mobile placement = %#v", got)
+	}
+	if got := catalog.Modules[2].Repository; got.Path != "apis" || got.Scope != "api" {
+		t.Fatalf("api placement = %#v", got)
+	}
+	if got := catalog.Modules[3].Repository; got.Path != "database" || got.Scope != "database" {
+		t.Fatalf("database placement = %#v", got)
+	}
+	if got := catalog.Modules[4].Repository; got.Path != "." || got.Scope != "repo" {
+		t.Fatalf("e2e placement = %#v", got)
+	}
+}
+
+func TestModuleCatalogAcceptsAllFiveLayerVocabularyPairs(t *testing.T) {
+	catalog := BuiltInModuleCatalog()
+	catalog.Modules = append(catalog.Modules,
+		moduleDefinitionForTest("control", "control-plane", "control-plane", "control"),
+		moduleDefinitionForTest("platform", "platform", "platform-delivery", "platform"),
+	)
+	if err := catalog.Validate(); err != nil {
+		t.Fatalf("catalog.Validate() error = %v, want all five taxonomy pairs accepted", err)
+	}
+}
+
+func TestModuleCatalogRejectsMismatchedLayerPair(t *testing.T) {
+	catalog := BuiltInModuleCatalog()
+	catalog.Modules = append(catalog.Modules, moduleDefinitionForTest("platform", "platform", "control-plane", "platform"))
+	if err := catalog.Validate(); err == nil || !strings.Contains(err.Error(), "category/layer") {
+		t.Fatalf("catalog.Validate() error = %v, want category/layer mismatch", err)
+	}
+}
+
+func TestQualityRootModuleUsesCatalogRoleAndRejectsAmbiguity(t *testing.T) {
+	catalog := BuiltInModuleCatalog()
+	for i := range catalog.Modules {
+		if catalog.Modules[i].Category == "quality" && catalog.Modules[i].Repository.Path == "." && catalog.Modules[i].Repository.Scope == "repo" {
+			catalog.Modules[i].ID = "quality-check"
+		}
+	}
+	definition, err := QualityRootModule(catalog)
+	if err != nil || definition.ID != "quality-check" {
+		t.Fatalf("QualityRootModule() = %#v, error=%v, want mutated role definition", definition, err)
+	}
+	duplicate := definition
+	duplicate.ID = "quality-alt"
+	duplicate.Provides = []string{"quality-alt"}
+	catalog.Modules = append(catalog.Modules, duplicate)
+	if _, err := QualityRootModule(catalog); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("QualityRootModule() error = %v, want ambiguity error", err)
+	}
+}
+
+func TestModuleCatalogRejectsWindowsDrivePathOnUnix(t *testing.T) {
+	catalog := BuiltInModuleCatalog()
+	catalog.Modules[0].Repository.Path = `C:\unsafe`
+	if err := catalog.Validate(); err == nil || !strings.Contains(err.Error(), "must be relative") {
+		t.Fatalf("catalog.Validate() error = %v, want Windows drive path rejection", err)
+	}
+}
+
+func moduleDefinitionForTest(id, category, layer, capability string) ModuleDefinition {
+	return ModuleDefinition{
+		ID: id, Category: category, Layer: layer, Provides: []string{capability},
+		Repository: ModuleRepositoryPlacement{Path: id, Scope: id}, Agents: []string{id + "_worker"}, Skills: []string{id + "_skill"},
+		Verification:   []VerificationRequirement{{ID: id + "-verify", Argv: []string{"task", "verify"}}},
+		ScaffoldAssets: []ScaffoldAsset{{ID: id + "-asset", Path: id, Revision: "v1"}},
+	}
+}
+
+func TestModuleCatalogRejectsMalformedDefinitions(t *testing.T) {
+	tests := map[string]func(*ModuleCatalog){
+		"unsupported schema": func(c *ModuleCatalog) { c.SchemaVersion = 2 },
+		"duplicate IDs": func(c *ModuleCatalog) {
+			c.Modules = append(c.Modules, c.Modules[0])
+		},
+		"unknown capability reference": func(c *ModuleCatalog) {
+			c.Modules[4].Optional = append(c.Modules[4].Optional, "missing")
+		},
+		"unsafe placement path":       func(c *ModuleCatalog) { c.Modules[0].Repository.Path = "../outside" },
+		"missing required capability": func(c *ModuleCatalog) { c.Modules[0].Requires = []string{"missing"} },
+		"dependency cycle": func(c *ModuleCatalog) {
+			c.Modules[0].Provides = []string{"alpha"}
+			c.Modules[0].Requires = []string{"beta"}
+			c.Modules[1].Provides = []string{"beta"}
+			c.Modules[1].Requires = []string{"alpha"}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			catalog := BuiltInModuleCatalog()
+			mutate(&catalog)
+			if err := catalog.Validate(); err == nil || !strings.Contains(strings.ToLower(err.Error()), "module") && !strings.Contains(strings.ToLower(err.Error()), "catalog") {
+				t.Fatalf("catalog.Validate() error = %v, want safe catalog validation error", err)
+			}
+		})
 	}
 }
 

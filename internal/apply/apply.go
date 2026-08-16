@@ -495,6 +495,13 @@ func ValidateBlueprint(cfg config.Config) error {
 	if cfg.Repositories[0].HasChecks || len(cfg.Repositories[0].UnknownFields) != 0 {
 		return fmt.Errorf("apply requires only supported blueprint fields")
 	}
+	qualityRoot, err := config.QualityRootModule(config.BuiltInModuleCatalog())
+	if err != nil {
+		return fmt.Errorf("apply requires a valid quality root module: %w", err)
+	}
+	if len(cfg.Repositories[0].Modules) > 1 || (len(cfg.Repositories[0].Modules) == 1 && cfg.Repositories[0].Modules[0] != qualityRoot.ID) {
+		return fmt.Errorf("apply requires root modules to be omitted or exactly [%s]", qualityRoot.ID)
+	}
 	expected := []component{{"web", "web-app", "web", "web", "nextjs", ""}, {"mobile", "mobile-app", "mobile", "mobile", "flutter", ""}, {"api", "apis", "api", "api", "go", ""}, {"database", "database", "database", "database", "postgresql", ""}}
 	stacks := []string{cfg.Workspace.Stack.Web, cfg.Workspace.Stack.Mobile, cfg.Workspace.Stack.API, cfg.Workspace.Stack.Database}
 	scopes := []string{"repo"}
@@ -513,10 +520,16 @@ func ValidateBlueprint(cfg config.Config) error {
 		if r.ID != e.id || r.Path != e.path || r.Component != e.kind || r.Technology != e.tech || r.Scope != e.scope || r.Provider != "" || r.Project != "" || r.HasChecks || len(r.UnknownFields) != 0 {
 			return fmt.Errorf("apply repositories do not match selected stack")
 		}
+		if len(r.Modules) != 1 || r.Modules[0] != e.id {
+			return fmt.Errorf("apply repository modules do not match selected components")
+		}
 		scopes = append(scopes, e.scope)
 		n++
 	}
 	if n != len(cfg.Repositories) || strings.Join(scopes, ",") != strings.Join(cfg.Commit.Scopes, ",") {
+		if n != len(cfg.Repositories) {
+			return fmt.Errorf("apply repository modules do not match selected components")
+		}
 		return fmt.Errorf("apply repositories do not match selected stack")
 	}
 	return nil
