@@ -16,7 +16,11 @@ updated: 2026-08-17
 ## Summary
 
 This is the approved design direction for the next SMT production milestone.
-It is planned work; the current CLI still follows [[../../00-project/SMT - Implementation Spec|the implemented specification]]. The immediate priority is to restructure the version-1 starter and define a thin module contract. `smt extend` is explicitly deferred until the starter and contract are accepted.
+The taxonomy and configuration portion of the version-1 starter restructure is
+implemented: new blueprints select Web, optional Mobile, API, and Database,
+with DevOps-shaped configuration removed. The runnable starter, platform
+capabilities, and thin module contract remain planned work. `smt extend` is
+explicitly deferred until the starter and contract are accepted.
 
 The guiding rule is: modules represent capabilities, while repositories
 represent lifecycle and deployment boundaries. A module may remain in the
@@ -58,14 +62,17 @@ Podman 5.8.3 or newer with a Compose provider. These are reviewed target
 constraints for the milestone, not evidence that the current CLI generates or
 verifies them today.
 
-## Planned version-1 restructure
+## Implemented version-1 taxonomy change
 
 Because there are no version-1 users to migrate, rewrite the starter contract
-rather than preserve the current DevOps-shaped configuration. Retain Web,
-Mobile, API, and Database. Remove `workspace.stack.devops`, the DevOps prompt,
-and the combined `infra` repository from the planned starter. This is not yet
-implemented, so current generated output must continue to be documented as
-current behavior until the corresponding Beads work is accepted.
+rather than preserve the DevOps-shaped configuration. New blueprints retain
+Web, Mobile, API, and Database, with Mobile optional and ordered immediately
+after Web. They omit `workspace.stack.devops`, the DevOps prompt, the combined
+`infra` repository, and Docker/OpenTofu component or tooling metadata. Legacy
+DevOps-shaped configurations are rejected before apply mutation with a
+migration-oriented removal/regeneration error.
+
+## Deferred runnable starter and platform work
 
 The planned starter is operational rather than a fake product: Web and API
 are runnable, PostgreSQL is orchestrated locally with Podman Compose, and
@@ -73,7 +80,9 @@ Mobile is a runnable Android/iOS starter but not an OCI workload. It should
 include health/readiness, graceful shutdown, migrations owned by the API,
 non-root container images, lockfiles, and smoke commands without inventing
 CRUD or domain behavior. Workspace creation remains deterministic and offline;
-runtime tools are used only by later verification.
+runtime tools are used only by later verification. None of those runnable
+templates or Podman/Compose artifacts are provided by the accepted taxonomy
+change.
 
 Platform capabilities are decomposed into `container`, `cicd`,
 `observability`, `iac`, `k8s`, and `argocd`. `argocd` depends on `k8s`.
@@ -113,11 +122,13 @@ implementation is deferred until the version-1 restructure is complete.
 
 ## Boundaries and acceptance
 
-In scope for the restructure: the five-layer vocabulary, starter component
-selection, Podman-first local runtime skeleton, platform capability names,
-and the thin module contract. Out of scope: implementing `smt extend`, a
-remote module registry, provider/cloud creation, fake CRUD, Kubernetes or
-ArgoCD deployment, and AWS runtime selection.
+The accepted `.2` scope is the starter component taxonomy and configuration
+gate. Remaining design scope is the five-layer vocabulary, Podman-first local
+runtime skeleton, platform capability names, and thin module contract. Out of
+scope for the current CLI are runnable templates, Podman/Compose artifacts, a
+module catalog, implementing `smt extend`, a remote module registry,
+provider/cloud creation, fake CRUD, Kubernetes or ArgoCD deployment, and AWS
+runtime selection.
 
 Acceptance requires the canonical docs and generated guidance to distinguish
 implemented behavior from planned behavior. Beads is the source of truth for

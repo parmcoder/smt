@@ -231,7 +231,6 @@ workspace:
     web: nextjs
     api: go
     database: postgresql
-    devops: [docker, opentofu]
 commit:
   types: [chore]
   scopes: [repo, web]
@@ -371,6 +370,47 @@ func TestLoadBytesPreservesValidationContract(t *testing.T) {
 	raw := []byte("version: 1\ncommit: {types: [feat], scopes: [repo]}\nrepositories:\n  - {id: repo, path: ., scope: repo, remote: {url: \"\"}}\n")
 	if _, err := LoadBytes(raw, "/tmp/smt.yaml"); err != nil {
 		t.Fatalf("LoadBytes() error = %v", err)
+	}
+}
+
+func TestLoadRejectsLegacyDevOpsConfigurationWithMigrationError(t *testing.T) {
+	legacy := map[string]string{
+		"deprecated stack key": `version: 1
+workspace:
+  stack:
+    devops: [docker, opentofu]
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+`,
+		"legacy infra repository": `version: 1
+commit: {types: [feat], scopes: [repo, infra]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: infra, path: devops, component: devops, technology: docker-opentofu, scope: infra, remote: {url: ""}}
+`,
+	}
+	for name, suffix := range legacy {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadBytes([]byte(suffix), "/tmp/smt.yaml")
+			if err == nil || !strings.Contains(err.Error(), "DevOps") || !strings.Contains(err.Error(), "remove") || !strings.Contains(err.Error(), "regenerate") {
+				t.Fatalf("LoadBytes() error = %v, want migration-oriented DevOps removal/regeneration guidance", err)
+			}
+		})
+	}
+}
+
+func TestLoadStillRejectsUnrelatedUnknownWorkspaceStackFields(t *testing.T) {
+	raw := `version: 1
+workspace:
+  stack:
+    experimental: value
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+`
+	if _, err := LoadBytes([]byte(raw), "/tmp/smt.yaml"); err == nil || !strings.Contains(err.Error(), "experimental") {
+		t.Fatalf("LoadBytes() error = %v, want unrelated unknown field rejection", err)
 	}
 }
 

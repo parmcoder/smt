@@ -20,7 +20,6 @@ type Selection struct {
 	Mobile   bool
 	API      bool
 	Database bool
-	DevOps   bool
 }
 
 // Result describes a generated blueprint or a deliberate cancellation.
@@ -41,7 +40,7 @@ func Create(in io.Reader, out io.Writer, destination string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if !selection.Web && !selection.Mobile && !selection.API && !selection.Database && !selection.DevOps {
+	if !selection.Web && !selection.Mobile && !selection.API && !selection.Database {
 		return Result{}, errors.New("select at least one component")
 	}
 	data, err := marshal(selection)
@@ -105,11 +104,7 @@ func promptSelection(reader *bufio.Reader, out io.Writer) (Selection, error) {
 	if err != nil {
 		return Selection{}, err
 	}
-	devops, err := askComponent(reader, out, "DevOps")
-	if err != nil {
-		return Selection{}, err
-	}
-	return Selection{Web: web, Mobile: mobile, API: api, Database: database, DevOps: devops}, nil
+	return Selection{Web: web, Mobile: mobile, API: api, Database: database}, nil
 }
 
 func askComponent(reader *bufio.Reader, out io.Writer, label string) (bool, error) {
@@ -165,7 +160,7 @@ func readAnswer(reader *bufio.Reader) (answer string, ended bool, err error) {
 }
 
 func (s Selection) labels() []string {
-	labels := make([]string, 0, 5)
+	labels := make([]string, 0, 4)
 	if s.Web {
 		labels = append(labels, "Web")
 	}
@@ -177,9 +172,6 @@ func (s Selection) labels() []string {
 	}
 	if s.Database {
 		labels = append(labels, "Database")
-	}
-	if s.DevOps {
-		labels = append(labels, "DevOps")
 	}
 	return labels
 }
@@ -207,11 +199,6 @@ func marshal(selection Selection) ([]byte, error) {
 		stack.Database = "postgresql"
 		repos = append(repos, config.Repository{ID: "database", Path: "database", Component: "database", Technology: "postgresql", Scope: "database", Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "database")
-	}
-	if selection.DevOps {
-		stack.DevOps = []string{"docker", "opentofu"}
-		repos = append(repos, config.Repository{ID: "infra", Path: "devops", Component: "devops", Technology: "docker-opentofu", Scope: "infra", Remote: config.Remote{DefaultBranch: "main"}})
-		scopes = append(scopes, "infra")
 	}
 	cfg := config.Config{Version: 1, Workspace: config.Workspace{AIAssist: "codex", Stack: stack}, Commit: config.CommitConfig{Types: []string{"feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"}, Scopes: scopes}, Repositories: repos, Workflow: fixedWorkflow()}
 	data, err := yaml.Marshal(cfg)

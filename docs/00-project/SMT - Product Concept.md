@@ -67,18 +67,26 @@ scaffold, not proof that Lefthook has run or that a hook was installed.
 
 ## Planned module restructure
 
-The next production milestone prioritizes a five-layer module model while
+The next production milestone still prioritizes a five-layer module model while
 keeping the layers in this repository initially: control plane, application
-components, shared infrastructure, quality, and platform/delivery. The
-approved starter rewrite retains Web, Mobile, API, and Database, removes the
-DevOps prompt, `workspace.stack.devops`, and combined `infra` repository from
-new version-1 blueprints, and makes Podman/Compose the local runtime path.
-Web, API, and PostgreSQL are planned to be runnable operational skeletons;
-Mobile is planned as an Android/iOS starter rather than an OCI workload.
+components, shared infrastructure, quality, and platform/delivery.
 
-This is planned work, not current CLI behavior. The thin module contract is
-being documented now; `smt extend` is explicitly deferred until the starter
-restructure is implemented and accepted. See [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|SMT v0.1.0 Production Plan]]. Beads remains the delivery status source of truth.
+The accepted version-1 taxonomy/configuration change is implemented: new
+blueprints select independent Web, optional Mobile, API, and Database
+components in deterministic `repo`, `web`, `mobile`, `api`, `database` order,
+with omitted selections absent and the Mobile question immediately after Web;
+they have no DevOps prompt,
+`workspace.stack.devops`, combined `infra` repository, or Docker/OpenTofu
+component/tooling metadata or generated DevOps artifacts. Legacy
+DevOps-shaped configurations are rejected before `smt apply` mutates the
+destination, with a migration-oriented removal/regeneration error.
+
+The runnable starter remains planned: Web, API, and PostgreSQL are intended to
+be runnable operational skeletons using Podman/Compose, and Mobile is intended
+as an Android/iOS starter rather than an OCI workload. This release provides
+no runnable templates or Podman/Compose artifacts. The thin module contract and
+module catalog remain planned; `smt extend` is explicitly deferred until the
+starter and contract are accepted. See [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|SMT v0.1.0 Production Plan]]. Beads remains the delivery status source of truth.
 
 ## Related
 

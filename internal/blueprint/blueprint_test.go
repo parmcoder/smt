@@ -13,7 +13,7 @@ import (
 func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("\n\n\n\n\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("\n\n\n\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -36,10 +36,7 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	if cfg.Workspace.AIAssist != "codex" || cfg.Workspace.Stack.Web != "nextjs" || cfg.Workspace.Stack.Mobile != "flutter" || cfg.Workspace.Stack.API != "go" || cfg.Workspace.Stack.Database != "postgresql" {
 		t.Fatalf("workspace = %#v, want default selected fixed stack", cfg.Workspace)
 	}
-	if got, want := strings.Join(cfg.Workspace.Stack.DevOps, ","), "docker,opentofu"; got != want {
-		t.Fatalf("devops = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,web,mobile,api,database,infra"; got != want {
+	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,web,mobile,api,database"; got != want {
 		t.Fatalf("scopes = %q, want %q", got, want)
 	}
 	if got, want := strings.Join(cfg.Commit.Types, ","), "feat,fix,refactor,perf,test,docs,build,ci,chore,revert"; got != want {
@@ -53,7 +50,6 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 		{"mobile", "mobile-app", "mobile", "flutter", "mobile"},
 		{"api", "apis", "api", "go", "api"},
 		{"database", "database", "database", "postgresql", "database"},
-		{"infra", "devops", "devops", "docker-opentofu", "infra"},
 	}
 	if len(cfg.Repositories) != len(wantRepositories) {
 		t.Fatalf("repositories = %#v, want root and four selected components", cfg.Repositories)
@@ -79,10 +75,62 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	}
 }
 
+func TestCreateAllComponentsOmitsDevOpsPromptAndArtifacts(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	var out bytes.Buffer
+	result, err := Create(strings.NewReader("\n\n\n\ny\n"), &out, destination)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if result.Cancelled {
+		t.Fatal("Create() cancelled, want published blueprint")
+	}
+	if strings.Contains(out.String(), "Include DevOps") || strings.Contains(out.String(), "components: Web, Flutter mobile application, API, Database, DevOps") {
+		t.Fatalf("prompts = %q, want no DevOps prompt", out.String())
+	}
+	cfg, err := config.Load(destination)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,web,mobile,api,database"; got != want {
+		t.Fatalf("scopes = %q, want %q", got, want)
+	}
+	if len(cfg.Repositories) != 5 {
+		t.Fatalf("repositories = %#v, want root plus four components", cfg.Repositories)
+	}
+	for _, repository := range cfg.Repositories {
+		if repository.ID == "infra" || repository.Component == "devops" || repository.Technology == "docker-opentofu" {
+			t.Fatalf("unexpected DevOps repository = %#v", repository)
+		}
+	}
+}
+
+func TestCreateAllowsExplicitMobileOptOutWithDeterministicSelection(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	var out bytes.Buffer
+	result, err := Create(strings.NewReader("y\nn\ny\nn\ny\n"), &out, destination)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if result.Cancelled {
+		t.Fatal("Create() cancelled, want published blueprint")
+	}
+	cfg, err := config.Load(destination)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	if cfg.Workspace.Stack.Mobile != "" {
+		t.Fatalf("mobile stack = %q, want omitted", cfg.Workspace.Stack.Mobile)
+	}
+	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,web,api"; got != want {
+		t.Fatalf("scopes = %q, want %q", got, want)
+	}
+}
+
 func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	var out bytes.Buffer
-	_, err := Create(strings.NewReader("y\nperhaps\nn\nn\ny\nn\ny\n"), &out, destination)
+	_, err := Create(strings.NewReader("y\nperhaps\nn\nn\ny\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -100,7 +148,7 @@ func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 
 func TestCreateAllowsExplicitMobileOptOut(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
-	_, err := Create(strings.NewReader("y\nn\ny\nn\nn\ny\n"), &bytes.Buffer{}, destination)
+	_, err := Create(strings.NewReader("y\nn\ny\nn\ny\n"), &bytes.Buffer{}, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -161,7 +209,7 @@ func TestCreateRejectsMissingParentAndPreservesExistingSymlink(t *testing.T) {
 }
 
 func TestCreateDeclineAndConfirmationEOFAreNoWriteCancellations(t *testing.T) {
-	for name, input := range map[string]string{"decline": "y\ny\ny\ny\ny\nn\n", "confirmation eof": "y\ny\ny\ny\ny\n"} {
+	for name, input := range map[string]string{"decline": "y\ny\ny\ny\nn\n", "confirmation eof": "y\ny\ny\ny\n"} {
 		t.Run(name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "smt.yaml")
 			result, err := Create(strings.NewReader(input), &bytes.Buffer{}, destination)

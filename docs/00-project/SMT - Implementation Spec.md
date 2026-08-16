@@ -27,12 +27,12 @@ execution commands are not part of the public CLI.
 The Cobra root help lists the retained workspace, Git, diagnostics, hooks, and
 Beads lifecycle commands. Implemented commands are:
 
-- `smt new [FILE]` — interactively select fixed Next.js, Go, PostgreSQL, and
-  Docker/OpenTofu components; immediately after the Web selection it asks
-  `Include Flutter mobile application? [Y/n]`. Enter includes the Android/iOS
-  Flutter Mobile component and an explicit no excludes it. It writes a
-  validated `smt.yaml` blueprint only after confirmation and does not create a
-  repository or workspace.
+- `smt new [FILE]` — interactively select independent Web (`nextjs`), Mobile
+  (`flutter`), API (`go`), and Database (`postgresql`) components. Immediately
+  after the Web selection it asks `Include Flutter mobile application? [Y/n]`.
+  Enter includes the Android/iOS Flutter Mobile component and an explicit no
+  excludes it. It writes a validated `smt.yaml` blueprint only after
+  confirmation and does not create a repository or workspace.
 - `smt apply [--config FILE] PATH` — validate the supplied workspace
   blueprint/configuration, then create the root Git repository, selected local
   bootstrap submodules, ignore files, Beads metadata, and repository-local
@@ -100,8 +100,8 @@ coordination.
 
 `smt new` asks the literal prompt `Include Flutter mobile application? [Y/n]`
 immediately after the Web selection. Enter means Yes and an explicit no
-excludes Mobile. When Mobile is selected, the component and repository order
-is repo, web, mobile, api, database, infra; an opt-out omits Mobile.
+excludes Mobile. When Mobile is selected, the component and repository order is
+repo, web, mobile, api, database; an opt-out omits Mobile.
 
 Mobile extends, rather than changes, `version: 1`. Existing version-1
 blueprints/configurations that lack Mobile remain valid; applying one produces
@@ -150,9 +150,9 @@ workspace:
   ai_assist: codex
   stack:
     web: nextjs
+    mobile: flutter
     api: go
     database: postgresql
-    devops: [docker, opentofu]
 
 repositories:
   - id: repo
@@ -167,6 +167,21 @@ repositories:
     scope: web
     remote:
       url: git@github.com:example/web-app.git
+  - id: mobile
+    path: mobile-app
+    component: mobile
+    technology: flutter
+    scope: mobile
+  - id: api
+    path: apis
+    component: api
+    technology: go
+    scope: api
+  - id: database
+    path: database
+    component: database
+    technology: postgresql
+    scope: database
 
 contracts:
   reference:
@@ -189,17 +204,20 @@ contracts:
       expected: present
 ```
 
-The fixed workspace stack values are `nextjs`, `go`, `postgresql`, and the
-DevOps tools `docker` plus `opentofu`; the implemented Mobile extension adds
-only `mobile: flutter` as described above. `ai_assist` is either absent or
-`codex`.
+The supported version-1 stack values are `web: nextjs`, optional
+`mobile: flutter`, `api: go`, and `database: postgresql`; `ai_assist` is either
+absent or `codex`. New blueprints use the deterministic repository order
+`repo`, `web`, `mobile`, `api`, `database`, omitting `mobile` when it is not
+selected. They contain no DevOps prompt, `workspace.stack.devops`, combined
+`infra` or DevOps repository, Docker/OpenTofu component or tooling metadata,
+or generated DevOps artifacts.
 
-The configuration and generation behavior above describes the current
-implementation. A planned version-1 restructure will rewrite new blueprints
-around Web, Mobile, API, and Database, remove the DevOps prompt,
-`workspace.stack.devops`, and combined `infra` repository, and use Podman with
-Compose for the local runtime skeleton. It is recorded in
-[[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and is not implemented by this specification yet.
+Legacy DevOps-shaped configurations are rejected by `smt apply` before any
+destination mutation. The migration-oriented error directs the operator to
+remove the legacy DevOps entries and regenerate a version-1 blueprint. The
+configuration and generation behavior above describes the current
+implementation; the planned runnable starter and platform/module work is
+recorded in [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]].
 The planned component gates and optional tool integrations are summarized in
 [[../10-development/SMT - Component Developer Toolchains|Component Developer Toolchains]].
 `remote.url` is optional at initialization but required by `smt push`; it may
@@ -239,12 +257,14 @@ implemented by the CLI or this release:
 - YAML selector rewrites or automatic CI configuration edits;
 - `checkout` and `validate-range` workflows from the earlier design.
 
-The broader module restructure is also planned, not implemented: the five
-layers remain in this repository initially; platform capabilities are named
-`container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd` (with
+The broader runnable-starter and module work is also planned, not implemented:
+the five layers remain in this repository initially; platform capabilities are
+named `container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd` (with
 `argocd` depending on `k8s`); and a thin module contract is being defined.
-`smt extend` and its E2E scaffold are later work and must not be described as
-available CLI behavior. AWS + Apptainer + OpenTofu remains later discovery.
+This release provides no runnable templates, Podman/Compose artifacts, module
+catalog, or `smt extend` command. `smt extend` and its E2E scaffold are later
+work and must not be described as available CLI behavior. AWS + Apptainer +
+OpenTofu remains later discovery.
 
 Git lifecycle operations preflight all configured repositories before a remote
 push or worktree creation. Pushes are child-first and stop after a failure with
@@ -443,7 +463,7 @@ work are complete through `smt-3r2.4`. The human-owned E2E review remains
 `smt-3r2.5` should run `smt new` twice in clean temporary locations: first
 press Enter at the Mobile prompt and confirm `mobile: flutter`, the Mobile
 repository entry, and the Mobile-selected `repo`, `web`, `mobile`, `api`,
-`database`, `infra` order; then explicitly answer no and confirm no Mobile
+`database` order; then explicitly answer no and confirm no Mobile
 configuration. Apply
 each reviewed blueprint to a new destination. For the default case, inspect
 the Git-ready `mobile-app` submodule, `agents/mobile_worker.toml`, Mobile

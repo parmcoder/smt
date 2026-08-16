@@ -8,7 +8,7 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-08-16
+updated: 2026-08-17
 ---
 # SMT — Command Recipes
 
@@ -25,16 +25,17 @@ mkdir -p ../platform-config
 bin/smt new ../platform-config/smt.yaml
 ```
 
-`new` interactively selects the fixed Next.js, Go, PostgreSQL, and
-Docker/OpenTofu components. Immediately after Web, it asks `Include Flutter
-mobile application? [Y/n]`: Enter includes the Android/iOS Flutter component;
-only an explicit no opts out. When Mobile is selected, repositories are ordered
-`repo`, `web`, `mobile`, `api`, `database`, `infra`; an opt-out omits the
-Mobile entry. It writes `smt.yaml` only after
-confirmation and does not create a workspace. The destination file must not
-already exist. Read and adjust the generated `smt.yaml` before applying it; for
-example, inspect the selected repositories and add project-specific check
-profiles.
+`new` interactively selects independent Web (`nextjs`), Mobile (`flutter`), API
+(`go`), and Database (`postgresql`) components. Immediately after Web, it asks
+`Include Flutter mobile application? [Y/n]`: Enter includes the Android/iOS
+Flutter component; only an explicit no opts out. When Mobile is selected,
+repositories are ordered `repo`, `web`, `mobile`, `api`, `database`; an opt-out
+omits the Mobile entry. New blueprints have no DevOps prompt,
+`workspace.stack.devops`, `infra` repository, or Docker/OpenTofu metadata or
+artifacts. It writes `smt.yaml` only after confirmation and does not create a
+workspace. The destination file must not already exist. Read and adjust the
+generated `smt.yaml` before applying it; for example, inspect the selected
+repositories and add project-specific check profiles.
 
 ```sh
 $EDITOR ../platform-config/smt.yaml
@@ -49,6 +50,10 @@ already exist. With Mobile selected, it creates a Git-ready `mobile-app` shell,
 `.tool-versions` Flutter `3.44.9` pin—not application source. It does not
 invoke or require Flutter or its SDK, install dependencies, access the network,
 sign an app, or publish an app. It does not create remote repositories.
+Legacy DevOps-shaped configurations are rejected before destination mutation;
+remove the legacy entries and regenerate the blueprint. This release does not
+provide runnable Web/API/Mobile templates, Podman/Compose artifacts, a module
+catalog, or `smt extend`.
 
 Each created repository receives a scaffold-only `lefthook.yml` with top-level
 `no_auto_install: true` and `assert_lefthook_installed: true`. Its `commit-msg`

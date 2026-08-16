@@ -55,11 +55,10 @@ type Workspace struct {
 
 // WorkspaceStack contains the fixed first-release component profiles.
 type WorkspaceStack struct {
-	Web      string   `yaml:"web,omitempty"`
-	Mobile   string   `yaml:"mobile,omitempty"`
-	API      string   `yaml:"api,omitempty"`
-	Database string   `yaml:"database,omitempty"`
-	DevOps   []string `yaml:"devops,omitempty"`
+	Web      string `yaml:"web,omitempty"`
+	Mobile   string `yaml:"mobile,omitempty"`
+	API      string `yaml:"api,omitempty"`
+	Database string `yaml:"database,omitempty"`
 }
 
 // Providers contains optional provider settings.
@@ -198,6 +197,9 @@ func Load(path string) (*Config, error) {
 // LoadBytes decodes and validates exact configuration bytes using sourcePath
 // only to establish the workspace root for path validation.
 func LoadBytes(raw []byte, sourcePath string) (*Config, error) {
+	if err := LegacyDevOpsError(raw); err != nil {
+		return nil, err
+	}
 	var cfg Config
 	decoder := yaml.NewDecoder(strings.NewReader(string(raw)))
 	decoder.KnownFields(true)
@@ -240,6 +242,11 @@ func (c *Config) Validate(workspaceRoot string) error {
 	}
 	if err := c.Workspace.validate(); err != nil {
 		return err
+	}
+	for _, repository := range c.Repositories {
+		if repository.Component == "devops" && repository.Technology == "docker-opentofu" {
+			return legacyDevOpsMigrationError()
+		}
 	}
 	if err := c.validateMobile(); err != nil {
 		return err
@@ -433,16 +440,6 @@ func (w Workspace) validate() error {
 			return fmt.Errorf("workspace.stack.%s must be %s when set", stack.field, stack.want)
 		}
 	}
-	seen := make(map[string]struct{}, len(w.Stack.DevOps))
-	for _, tool := range w.Stack.DevOps {
-		if tool != "docker" && tool != "opentofu" {
-			return fmt.Errorf("workspace.stack.devops contains unsupported tool %q", tool)
-		}
-		if _, ok := seen[tool]; ok {
-			return fmt.Errorf("workspace.stack.devops contains duplicate tool %q", tool)
-		}
-		seen[tool] = struct{}{}
-	}
 	return nil
 }
 
@@ -483,16 +480,74 @@ func validateComponent(repository Repository) error {
 		"mobile":   "flutter",
 		"api":      "go",
 		"database": "postgresql",
-		"devops":   "docker-opentofu",
 	}
 	want, ok := expected[repository.Component]
 	if !ok {
-		return fmt.Errorf("component must be web, mobile, api, database, or devops")
+		return fmt.Errorf("component must be web, mobile, api, or database")
 	}
 	if repository.Technology != want {
 		return fmt.Errorf("technology for component %q must be %q", repository.Component, want)
 	}
 	return nil
+}
+
+const legacyDevOpsMigrationMessage = "legacy DevOps configuration is no longer supported; remove DevOps settings and regenerate the blueprint"
+
+func legacyDevOpsMigrationError() error { return fmt.Errorf("%s", legacyDevOpsMigrationMessage) }
+
+// LegacyDevOpsError identifies the removed version-1 DevOps stack and infra
+// repository shapes before a caller can mutate a destination. Invalid YAML is
+// left to the regular decoder so its existing diagnostics remain unchanged.
+func LegacyDevOpsError(raw []byte) error {
+	var document yaml.Node
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return nil
+	}
+	root := documentNode(&document)
+	stack := mappingValue(mappingValue(root, "workspace"), "stack")
+	if mappingValue(stack, "devops") != nil {
+		return legacyDevOpsMigrationError()
+	}
+	repositories := mappingValue(root, "repositories")
+	if repositories == nil || repositories.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for _, repository := range repositories.Content {
+		if scalarValue(mappingValue(repository, "component")) == "devops" && scalarValue(mappingValue(repository, "technology")) == "docker-opentofu" {
+			return legacyDevOpsMigrationError()
+		}
+	}
+	return nil
+}
+
+func documentNode(document *yaml.Node) *yaml.Node {
+	if document == nil {
+		return nil
+	}
+	if document.Kind == yaml.DocumentNode && len(document.Content) == 1 {
+		return document.Content[0]
+	}
+	return document
+}
+
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	node = documentNode(node)
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func scalarValue(node *yaml.Node) string {
+	if node == nil || node.Kind != yaml.ScalarNode {
+		return ""
+	}
+	return node.Value
 }
 
 func validateRemoteURL(raw string) error {
