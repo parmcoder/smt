@@ -71,11 +71,16 @@ defaults to action-first output and offers `--tree` plus safe `--verbose` detail
 human decision, never something SMT replaces. Generated `lefthook.yml` is a
 scaffold, not proof that Lefthook has run or that a hook was installed.
 
-## Planned module restructure
+## Module taxonomy and deferred runtime
 
-The next production milestone still prioritizes a five-layer module model while
-keeping the layers in this repository initially: control plane, application
-components, shared infrastructure, quality, and platform/delivery.
+The implemented version-1 module taxonomy uses the five-layer vocabulary
+`control-plane`, `application-components`, `shared-infrastructure`,
+`quality-verification`, and `platform-delivery`, while keeping the layers in
+this repository initially. The static schema-v1 catalog is code-owned rather
+than user YAML. Its built-in selectable entries are exactly Web, Mobile, API,
+Database, and the E2E quality declaration; it has no built-in control-plane or
+platform entry. Web, Mobile, and API are application components, Database is
+shared infrastructure, and E2E is quality verification.
 
 The accepted version-1 taxonomy/configuration change is implemented: new
 blueprints select independent Web, optional Mobile, API, and Database
@@ -87,12 +92,25 @@ component/tooling metadata or generated DevOps artifacts. Legacy
 DevOps-shaped configurations are rejected before `smt apply` mutates the
 destination, with a migration-oriented removal/regeneration error.
 
+Repositories may carry optional `modules: [id...]` metadata, and configurations
+without that field remain valid. Component repositories receive exact catalog
+IDs. After the existing Web/Mobile/API/Database questions, `smt new` offers a
+default-no quality-root declaration; opting in records only `modules: [e2e]` on
+the root, with no E2E repository, scaffold, or generated artifact. The catalog
+also records capabilities, safe placement defaults, agent/skill references, argument-
+array verification requirements including mutability, and reviewed
+scaffold-asset identity. Catalog and configuration validation cover schema,
+duplicates, category/layer pairs, capability references and dependencies,
+unsafe paths, and repository module IDs. Apply requires exact generated
+annotations and persists them, but does not run verification recipes, install
+tools/skills/MCP, mutate host configuration, or create module repositories.
+
 The runnable starter remains planned: Web, API, and PostgreSQL are intended to
 be runnable operational skeletons using Podman/Compose, and Mobile is intended
 as an Android/iOS starter rather than an OCI workload. This release provides
-no runnable templates or Podman/Compose artifacts. The thin module contract and
-module catalog remain planned; `smt extend` is explicitly deferred until the
-starter and contract are accepted. Generation remains offline and byte-stable
+no runnable templates or Podman/Compose artifacts. Platform artifacts and
+capabilities, a remote module registry, and `smt extend` remain deferred.
+Generation remains offline and byte-stable
 for identical selections in fresh destinations. `smt apply` rejects missing,
 unsupported, or unknown provenance before mutation and refuses an existing
 file or directory without overwrite, merge, regeneration, upgrade, or

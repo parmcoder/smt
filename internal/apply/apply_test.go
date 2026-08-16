@@ -22,7 +22,7 @@ provenance: {tool: smt, smt_version: v0.1.0, template_set_version: v1}
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
-  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:
@@ -62,6 +62,81 @@ func TestValidateBlueprintRequiresExactProvenance(t *testing.T) {
 	}
 }
 
+func TestValidateBlueprintRequiresExactModuleMappings(t *testing.T) {
+	valid, err := config.LoadBytes(exactModuleBlueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateBlueprint(*valid); err != nil {
+		t.Fatalf("ValidateBlueprint() valid module mapping error = %v", err)
+	}
+	tests := map[string]func(*config.Config){
+		"root unexpected module":     func(cfg *config.Config) { cfg.Repositories[0].Modules = []string{"web"} },
+		"component wrong module":     func(cfg *config.Config) { cfg.Repositories[1].Modules = []string{"api"} },
+		"component duplicate module": func(cfg *config.Config) { cfg.Repositories[1].Modules = []string{"web", "web"} },
+		"unknown module":             func(cfg *config.Config) { cfg.Repositories[1].Modules = []string{"missing"} },
+		"e2e repository": func(cfg *config.Config) {
+			cfg.Repositories = append(cfg.Repositories, config.Repository{ID: "e2e", Path: "e2e", Scope: "e2e", Modules: []string{"e2e"}})
+			cfg.Commit.Scopes = append(cfg.Commit.Scopes, "e2e")
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			copy := *valid
+			copy.Repositories = append([]config.Repository(nil), valid.Repositories...)
+			copy.Commit.Scopes = append([]string(nil), valid.Commit.Scopes...)
+			mutate(&copy)
+			if err := ValidateBlueprint(copy); err == nil || !strings.Contains(strings.ToLower(err.Error()), "module") {
+				t.Fatalf("ValidateBlueprint() error = %v, want module mapping error", err)
+			}
+		})
+	}
+}
+
+func TestValidateBlueprintAcceptsSharedQualityRootModule(t *testing.T) {
+	valid, err := config.LoadBytes(exactModuleBlueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quality, err := config.QualityRootModule(config.BuiltInModuleCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid.Repositories[0].Modules = []string{quality.ID}
+	if err := ValidateBlueprint(*valid); err != nil {
+		t.Fatalf("ValidateBlueprint() error = %v, want shared quality root module %q accepted", err, quality.ID)
+	}
+}
+
+func TestServicePersistsValidModuleDeclarationsWithoutExecution(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	raw := exactModuleBlueprintBytes()
+	cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateBlueprint(*cfg); err != nil {
+		t.Fatalf("ValidateBlueprint() error = %v", err)
+	}
+	service := Service{
+		Config:        *cfg,
+		Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+		Initialize:    initializerFunc(func(context.Context, string) error { return nil }),
+		Beads:         initializerFunc(func(context.Context, string) error { return nil }),
+	}
+	if err := service.Apply(context.Background(), destination, raw); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(destination, "smt.yaml"))
+	if err != nil || string(got) != string(raw) {
+		t.Fatalf("persisted module blueprint = %q, err=%v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(destination, "e2e")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected E2E artifact = %v", err)
+	}
+}
+
 func TestServiceExistingDestinationProtectionWithValidProvenance(t *testing.T) {
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
@@ -95,7 +170,7 @@ workspace: {ai_assist: codex, stack: {web: nextjs, devops: [docker, opentofu]}}
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
-  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:
@@ -614,7 +689,23 @@ workspace: {ai_assist: codex, stack: {web: nextjs}}
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
-  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`)
+}
+
+func exactModuleBlueprintBytes() []byte {
+	return []byte(`version: 1
+provenance: {tool: smt, smt_version: v0.1.0, template_set_version: v1}
+workspace: {ai_assist: codex, stack: {web: nextjs}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:
@@ -633,8 +724,8 @@ workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter}}
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
-  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
-  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, modules: [mobile], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:
@@ -649,9 +740,9 @@ workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter, database: po
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile, database]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
-  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
-  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
-  - {id: database, path: database, component: database, technology: postgresql, scope: database, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, modules: [mobile], remote: {url: ""}}
+  - {id: database, path: database, component: database, technology: postgresql, scope: database, modules: [database], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:
@@ -683,10 +774,10 @@ workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter, api: go, dat
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile, api, database]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
-  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
-  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
-  - {id: api, path: apis, component: api, technology: go, scope: api, remote: {url: ""}}
-  - {id: database, path: database, component: database, technology: postgresql, scope: database, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
+  - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, modules: [mobile], remote: {url: ""}}
+  - {id: api, path: apis, component: api, technology: go, scope: api, modules: [api], remote: {url: ""}}
+  - {id: database, path: database, component: database, technology: postgresql, scope: database, modules: [database], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:

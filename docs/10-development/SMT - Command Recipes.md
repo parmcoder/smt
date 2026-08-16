@@ -32,10 +32,13 @@ Flutter component; only an explicit no opts out. When Mobile is selected,
 repositories are ordered `repo`, `web`, `mobile`, `api`, `database`; an opt-out
 omits the Mobile entry. New blueprints have no DevOps prompt,
 `workspace.stack.devops`, `infra` repository, or Docker/OpenTofu metadata or
-artifacts. It writes `smt.yaml` only after confirmation and does not create a
-workspace. The generated file carries the exact provenance mapping documented
-in [[../00-project/SMT - Implementation Spec#Configuration contract|the
-implementation specification]], with no timestamp, user, machine/path, Git
+artifacts. After Database, it offers the optional default-no
+`Include E2E quality declaration? [y/N]` question. Opting in records only
+`modules: [e2e]` on the root; component repositories receive exact module IDs,
+and no E2E repository or scaffold is created. It writes `smt.yaml` only after
+confirmation and does not create a workspace. The generated file carries the
+exact provenance mapping documented in [[../00-project/SMT - Implementation Spec#Configuration contract|the implementation
+specification]], with no timestamp, user, machine/path, Git
 SHA, random value, or environment-derived field. Generation is offline and
 byte-stable for identical selections in fresh destinations. The destination
 file must not already exist. Inspect the generated `smt.yaml` before applying
@@ -63,7 +66,22 @@ lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
 release does not provide runnable Web/API/Mobile templates, Podman/Compose
-artifacts, a module catalog, or `smt extend`.
+artifacts, platform artifacts/capabilities, a remote module registry, or
+`smt extend`. Generated module annotations are persisted, but apply does not
+execute their verification recipes, install referenced tools/skills/MCP,
+mutate host configuration, or create module repositories.
+
+### Inspect module declarations
+
+The implementation specification documents the static schema-v1 catalog and
+the exact generated annotations. The built-in entries are `web`, `mobile`,
+`api`, `database`, and `e2e`; the catalog is code-owned, not user YAML. It
+describes safe placement defaults, capabilities, agent/skill references, reviewed
+scaffold-asset identity, and argument-array verification requirements,
+including mutability. Apply validates the catalog and repository IDs, then
+persists the exact annotations without running verification commands or
+installing their prerequisites. The root-only `modules: [e2e]` declaration is
+metadata; it does not create an E2E repository, scaffold, or artifact.
 
 Each created repository receives a scaffold-only `lefthook.yml` with top-level
 `no_auto_install: true` and `assert_lefthook_installed: true`. Its `commit-msg`

@@ -2,6 +2,7 @@ package blueprint
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ import (
 func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("\n\n\n\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("\n\n\n\n\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -78,7 +79,7 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 func TestCreateAllComponentsOmitsDevOpsPromptAndArtifacts(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("\n\n\n\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("\n\n\n\n\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -108,7 +109,7 @@ func TestCreateAllComponentsOmitsDevOpsPromptAndArtifacts(t *testing.T) {
 func TestCreateAllowsExplicitMobileOptOutWithDeterministicSelection(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("y\nn\ny\nn\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("y\nn\ny\nn\nn\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -127,11 +128,139 @@ func TestCreateAllowsExplicitMobileOptOutWithDeterministicSelection(t *testing.T
 	}
 }
 
+func TestCreateE2EQualityDeclarationIsOptionalAndRootOnly(t *testing.T) {
+	for name, input := range map[string]string{
+		"default opt-out": "\n\n\n\nn\ny\n",
+		"selected":        "\n\n\n\ny\ny\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			destination := filepath.Join(t.TempDir(), "smt.yaml")
+			var out bytes.Buffer
+			if _, err := Create(strings.NewReader(input), &out, destination); err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			if !strings.Contains(out.String(), "Include E2E quality declaration? [y/N]") {
+				t.Fatalf("prompts = %q, want catalog-driven E2E prompt", out.String())
+			}
+			cfg, err := config.Load(destination)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := cfg.Repositories[0]
+			if name == "selected" {
+				if len(root.Modules) != 1 || root.Modules[0] != "e2e" {
+					t.Fatalf("root modules = %#v, want [e2e]", root.Modules)
+				}
+			} else if len(root.Modules) != 0 {
+				t.Fatalf("root modules = %#v, want omitted for default opt-out", root.Modules)
+			}
+			for _, repository := range cfg.Repositories[1:] {
+				if repository.ID == "e2e" || strings.Contains(repository.Path, "e2e") {
+					t.Fatalf("unexpected E2E repository = %#v", repository)
+				}
+			}
+		})
+	}
+}
+
+func TestE2EPromptAndRootModuleUseCatalogDefinition(t *testing.T) {
+	definition, err := e2eModuleDefinition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	var out bytes.Buffer
+	if _, err := Create(strings.NewReader("\n\n\n\ny\ny\n"), &out, destination); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	wantPrompt := fmt.Sprintf("Include %s %s declaration? [y/N]", strings.ToUpper(definition.ID), definition.Category)
+	if !strings.Contains(out.String(), wantPrompt) {
+		t.Fatalf("prompts = %q, want catalog-derived prompt %q", out.String(), wantPrompt)
+	}
+	cfg, err := config.Load(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Repositories[0].Modules) != 1 || cfg.Repositories[0].Modules[0] != definition.ID {
+		t.Fatalf("root modules = %#v, want catalog module %q", cfg.Repositories[0].Modules, definition.ID)
+	}
+}
+
+func TestQualityRootLookupFollowsMutatedCatalogDefinition(t *testing.T) {
+	original := moduleCatalogSource
+	t.Cleanup(func() { moduleCatalogSource = original })
+	catalog := config.BuiltInModuleCatalog()
+	for i := range catalog.Modules {
+		if catalog.Modules[i].Category == "quality" && catalog.Modules[i].Repository.Path == "." && catalog.Modules[i].Repository.Scope == "repo" {
+			catalog.Modules[i].ID = "quality-check"
+		}
+	}
+	moduleCatalogSource = func() config.ModuleCatalog { return catalog }
+	definition, err := e2eModuleDefinition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if definition.ID != "quality-check" {
+		t.Fatalf("quality root definition ID = %q, want mutated catalog ID", definition.ID)
+	}
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	var out bytes.Buffer
+	if _, err := Create(strings.NewReader("\n\n\n\ny\ny\n"), &out, destination); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	wantPrompt := fmt.Sprintf("Include %s %s declaration? [y/N]", strings.ToUpper(definition.ID), definition.Category)
+	if !strings.Contains(out.String(), wantPrompt) {
+		t.Fatalf("prompts = %q, want mutated catalog prompt %q", out.String(), wantPrompt)
+	}
+	raw, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "quality-check") || strings.Contains(string(raw), "modules: [e2e]") {
+		t.Fatalf("generated config = %q, want mutated quality module ID", raw)
+	}
+}
+
+func TestQualityRootLookupRejectsMissingOrAmbiguousRole(t *testing.T) {
+	tests := map[string]func(*config.ModuleCatalog){
+		"missing": func(catalog *config.ModuleCatalog) {
+			for i := range catalog.Modules {
+				if catalog.Modules[i].Category == "quality" {
+					catalog.Modules[i].Category = "application"
+					catalog.Modules[i].Layer = "application-components"
+				}
+			}
+		},
+		"ambiguous": func(catalog *config.ModuleCatalog) {
+			for _, module := range catalog.Modules {
+				if module.Category == "quality" && module.Repository.Path == "." && module.Repository.Scope == "repo" {
+					module.ID = "quality-alt"
+					module.Provides = []string{"quality-alt"}
+					catalog.Modules = append(catalog.Modules, module)
+					return
+				}
+			}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			original := moduleCatalogSource
+			t.Cleanup(func() { moduleCatalogSource = original })
+			catalog := config.BuiltInModuleCatalog()
+			mutate(&catalog)
+			moduleCatalogSource = func() config.ModuleCatalog { return catalog }
+			if _, err := e2eModuleDefinition(); err == nil || !strings.Contains(err.Error(), "quality root module") {
+				t.Fatalf("e2eModuleDefinition() error = %v, want safe role lookup error", err)
+			}
+		})
+	}
+}
+
 func TestCreateEmitsDeterministicProvenance(t *testing.T) {
 	var outputs [2][]byte
 	for i := range outputs {
 		destination := filepath.Join(t.TempDir(), "smt.yaml")
-		if _, err := Create(strings.NewReader("y\nn\ny\ny\ny\n"), &bytes.Buffer{}, destination); err != nil {
+		if _, err := Create(strings.NewReader("y\nn\ny\ny\nn\ny\n"), &bytes.Buffer{}, destination); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
 		var err error
@@ -152,7 +281,7 @@ func TestCreateEmitsDeterministicProvenance(t *testing.T) {
 func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	var out bytes.Buffer
-	_, err := Create(strings.NewReader("y\nperhaps\nn\nn\ny\ny\n"), &out, destination)
+	_, err := Create(strings.NewReader("y\nperhaps\nn\nn\ny\nn\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -170,7 +299,7 @@ func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 
 func TestCreateAllowsExplicitMobileOptOut(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
-	_, err := Create(strings.NewReader("y\nn\ny\nn\ny\n"), &bytes.Buffer{}, destination)
+	_, err := Create(strings.NewReader("y\nn\ny\nn\nn\ny\n"), &bytes.Buffer{}, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -231,7 +360,7 @@ func TestCreateRejectsMissingParentAndPreservesExistingSymlink(t *testing.T) {
 }
 
 func TestCreateDeclineAndConfirmationEOFAreNoWriteCancellations(t *testing.T) {
-	for name, input := range map[string]string{"decline": "y\ny\ny\ny\nn\n", "confirmation eof": "y\ny\ny\ny\n"} {
+	for name, input := range map[string]string{"decline": "y\ny\ny\ny\nn\nn\n", "confirmation eof": "y\ny\ny\ny\nn\n"} {
 		t.Run(name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "smt.yaml")
 			result, err := Create(strings.NewReader(input), &bytes.Buffer{}, destination)

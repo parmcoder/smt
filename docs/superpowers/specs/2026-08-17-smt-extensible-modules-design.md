@@ -21,8 +21,9 @@ implemented: new blueprints select Web, optional Mobile, API, and Database,
 with DevOps-shaped configuration removed. Generated blueprints also carry the
 exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
 `smt apply` validates it before mutation. The runnable starter, platform
-capabilities, and thin module contract remain planned work. `smt extend` is
-explicitly deferred until the starter and contract are accepted.
+capabilities, and runnable module assets remain planned work. The static
+schema-v1 module catalog and repository annotations are implemented metadata;
+`smt extend` is explicitly deferred.
 
 The guiding rule is: modules represent capabilities, while repositories
 represent lifecycle and deployment boundaries. A module may remain in the
@@ -34,21 +35,21 @@ or runtime operations.
 Keep the layers in this repository initially. Extraction into separate
 repositories is a later ownership decision.
 
-1. **Control plane** — SMT, agent registry, module catalog, policies,
+1. **`control-plane`** — SMT, agent registry, module catalog, policies,
    compatibility, dependency graph, and workspace/worktree coordination.
-2. **Application components** — Web, Mobile, API, worker, consumer, scheduler,
+2. **`application-components`** — Web, Mobile, API, worker, consumer, scheduler,
    and DAG.
-3. **Shared infrastructure** — queue, database, cache, storage, and search.
-4. **Quality** — integration, E2E, performance, and security.
-5. **Platform and delivery** — container, CI/CD, observability, IaC,
+3. **`shared-infrastructure`** — queue, database, cache, storage, and search.
+4. **`quality-verification`** — integration, E2E, performance, and security.
+5. **`platform-delivery`** — container, CI/CD, observability, IaC,
    Kubernetes, and ArgoCD.
 
 ```mermaid
 flowchart TB
-    C["Control plane"] --> A["Application components"]
-    A --> I["Shared infrastructure"]
-    A --> Q["Quality and verification"]
-    A --> P["Platform and delivery"]
+    C["control-plane"] --> A["application-components"]
+    A --> I["shared-infrastructure"]
+    A --> Q["quality-verification"]
+    A --> P["platform-delivery"]
     I --> Q
     P --> Q
 ```
@@ -99,29 +100,38 @@ Platform capabilities are decomposed into `container`, `cicd`,
 AWS + Apptainer + OpenTofu is a later discovery and compatibility milestone,
 not part of this restructure.
 
-## Thin module contract (planned)
+## Implemented static module catalog
 
-The contract should be small enough to validate before implementation:
+Version 1 implements an optional repository-level `modules: [id...]` metadata
+field; configurations without it remain valid. The static schema-v1 catalog is
+owned by the SMT code and is not loaded from user YAML. Its selectable entries
+are exactly `web`, `mobile`, `api`, `database`, and `e2e` (the quality
+declaration). The full layer vocabulary is `control-plane`,
+`application-components`, `shared-infrastructure`, `quality-verification`, and
+`platform-delivery`, but the built-in catalog has no control-plane or platform
+entry. Web, Mobile, and API use `application-components`, Database uses
+`shared-infrastructure`, and E2E uses `quality-verification`.
 
-```yaml
-module:
-  id: e2e
-  category: quality
-  provides: [e2e]
-  requires: []
-  optional: [web, api, mobile]
-  repository:
-    path: e2e
-    scope: e2e
-```
+Each catalog definition records its ID, category/layer, provided/required and
+optional capabilities, safe placement defaults, agent/skill references,
+argument-array verification requirements including `mutates_worktree`, and
+reviewed scaffold-asset identity. Catalog validation rejects invalid schema,
+duplicate IDs, invalid category/layer pairs, unknown capability references,
+unsafe paths, and dependency cycles. Configuration validation rejects unknown
+or duplicate repository module IDs and missing selected required capabilities.
 
-Definitions should also be able to name agent/skill references, verification
-requirements, and reviewed scaffold assets. Repository metadata should be
-able to record `modules: [e2e]` without changing the existing version number.
-The first catalog entry is an E2E scaffold, not a runtime test suite.
+`smt new` keeps the Web/Mobile/API/Database prompts, then asks the optional
+default-no quality-root question derived from the catalog role and placement.
+The current built-in prompt is `Include E2E quality declaration? [y/N]`.
+Component repositories receive exact IDs. Opting in records only
+`modules: [e2e]` on the root; it creates no E2E repository, scaffold, or
+artifact. `smt apply` requires the exact generated root/component annotations
+and persists them, but it does not execute verification recipes, install
+tools, skills, or MCP integrations, mutate host configuration, or create
+module repositories.
 
-Generated component manifests and lockfiles are reviewed scaffold assets.
-Skills and MCP integrations remain distinct metadata and prerequisite
+Generated component manifests and lockfiles remain deferred runnable-starter
+assets. Skills and MCP integrations remain distinct metadata and prerequisite
 declarations; they are never application dependencies or silently installed by
 SMT.
 
@@ -133,12 +143,12 @@ implementation is deferred until the version-1 restructure is complete.
 ## Boundaries and acceptance
 
 The accepted `.2` scope is the starter component taxonomy and configuration
-gate. Remaining design scope is the five-layer vocabulary, Podman-first local
-runtime skeleton, platform capability names, and thin module contract. Out of
-scope for the current CLI are runnable templates, Podman/Compose artifacts, a
-module catalog, implementing `smt extend`, a remote module registry,
-provider/cloud creation, fake CRUD, Kubernetes or ArgoCD deployment, and AWS
-runtime selection.
+gate; `.4` adds the static catalog and repository module annotations above.
+Remaining design scope is the Podman-first local runtime skeleton and platform
+capability implementation. Out of scope for the current CLI are runnable
+templates, Podman/Compose artifacts, platform artifacts/capabilities, a remote
+module registry, implementing `smt extend`, provider/cloud creation, fake CRUD,
+Kubernetes or ArgoCD deployment, and AWS runtime selection.
 
 Acceptance requires the canonical docs and generated guidance to distinguish
 implemented behavior from planned behavior. Beads is the source of truth for
