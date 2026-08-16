@@ -26,15 +26,12 @@ flowchart LR
     C --> D[Configure remote URLs]
     D --> E[status or doctor]
     E --> F[Optionally install safe hooks]
-    F --> G[Run named check profile]
+    F --> G[Create or claim Beads ticket]
     G --> H[Push children then root]
     G --> I[Create synchronized worktree]
     G --> M[prepare active Beads branch]
     M --> N[switch existing branch]
     N --> O[pull child-first]
-    G --> J[Validate CI contracts]
-    J --> K[Plan guarded literal bump]
-    K --> L[Apply only with explicit approval]
 ```
 
 Safety is the product: argument-array execution, an explicit blueprint review
@@ -43,14 +40,12 @@ effects, child-first pushes, root-first worktree creation, path containment,
 harmless OS metadata filtering, no credential persistence, and no automatic
 hook overwrite. A workspace hook install is all-repository-preflighted, then
 root-first; it never forces, overwrites an unmanaged hook, or rolls back an
-earlier install. Cobra groups
-the discoverable command tree into Getting Started, Workspace, Review
-Workflow, and Developer Tools; help and generated shell completion work
-without workspace configuration. The current CLI covers blueprint creation and
-application, inspection, safe hook installation, checks, contracts, CI audits,
-guarded contract bumps, configured pushes, linked worktrees, Beads-branch
-preparation/switching, child-first pulls, and release
-readiness. The release path is deliberately split: `release:build` makes four
+earlier install. The current CLI covers blueprint creation and application,
+inspection, safe hook installation, configured pushes, linked worktrees,
+Beads-branch preparation/switching, child-first pulls, and status/doctor
+diagnostics. Agents create and claim work directly in Beads; SMT does not
+provide ticket, review-queue, or release-readiness wrappers. The release path
+is deliberately split: `release:build` makes four
 local archives and checksums, while a clean `release:tag` creates and pushes an
 annotated version tag. GitHub Actions now publishes a GitHub Release from that
 tag with the four archives and checksum file.

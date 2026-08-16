@@ -506,174 +506,50 @@ func TestRunInitIsUnknownCommand(t *testing.T) {
 	}
 }
 
-type fakeAgentService struct {
-	ready   []beads.Issue
-	reviews []beads.Issue
-	release beads.ReleaseReadiness
-	queue   beads.QueueResult
-	requeue beads.Recovery
-	err     error
-}
-
-func (f fakeAgentService) ReadyWork(context.Context) ([]beads.Issue, error) { return f.ready, f.err }
-func (f fakeAgentService) ListReviews(context.Context) ([]beads.Issue, error) {
-	return f.reviews, f.err
-}
-func (f fakeAgentService) QueueReview(context.Context, string, string, string) (beads.QueueResult, error) {
-	return f.queue, f.err
-}
-func (f fakeAgentService) RequeueAfterFix(context.Context, string) (beads.Recovery, error) {
-	return f.requeue, f.err
-}
-func (f fakeAgentService) ReleaseReadiness(context.Context) (beads.ReleaseReadiness, error) {
-	return f.release, f.err
-}
-
-func TestCobraReviewWorkflowUsesSafeDTOsAndPreservesBusinessExits(t *testing.T) {
-	original := newBeadsService
-	t.Cleanup(func() { newBeadsService = original })
-	fake := fakeAgentService{ready: []beads.Issue{{ID: "feat-1", Title: "Feature", Status: "open", Type: "feature", Labels: []string{"internal"}}}, reviews: []beads.Issue{{ID: "review-1", Title: "Review", Status: "open", Type: "task", ReviewState: "queued"}}, queue: beads.QueueResult{FeatureID: "feat-1", ReviewID: "review-1"}, requeue: beads.Recovery{ReviewID: "review-1", BugID: "bug-1", Recovery: "retry"}, release: beads.ReleaseReadiness{Ready: false, Blocking: []beads.Issue{{ID: "review-1", Status: "open"}}}}
-	newBeadsService = func(string) agentService { return fake }
-	for _, tc := range []struct {
-		args     []string
-		code     int
-		out, err string
-	}{
-		{[]string{"work", "ready"}, exitOK, "feat-1 open feature state= Feature\n", ""},
-		{[]string{"work", "ready", "--json"}, exitOK, `[{"id":"feat-1","title":"Feature","status":"open","type":"feature","labels":["internal"]}]` + "\n", ""},
-		{[]string{"review", "list", "--json"}, exitOK, `[{"id":"review-1","title":"Review","status":"open","type":"task","labels":null,"review_state":"queued"}]` + "\n", ""},
-		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, exitOK, `{"review_id":"review-1"}` + "\n", ""},
-		{[]string{"review", "requeue", "review-1", "--json"}, exitOK, `{"review_id":"review-1","bug_id":"bug-1","recovery":"retry"}` + "\n", ""},
-		{[]string{"release", "check", "--json"}, exitValidation, `{"ready":false,"blocking":[{"id":"review-1","title":"","status":"open","type":"","labels":null}]}` + "\n", ""},
+func TestCobraRetiredCommandsAreUnknownWithoutConfiguration(t *testing.T) {
+	for _, args := range [][]string{
+		{"release"},
+		{"review"},
+		{"work"},
+		{"check"},
+		{"ci"},
+		{"contracts"},
+		{"completion"},
 	} {
-		out, errOut := new(strings.Builder), new(strings.Builder)
-		code := runWithInput(tc.args, strings.NewReader(""), out, errOut)
-		if code != tc.code || out.String() != tc.out || errOut.String() != tc.err {
-			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
-		}
-	}
-	for _, args := range [][]string{{"work", "ready", "--json"}, {"review", "list", "--json"}, {"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", "docs/e.md", "--json"}, {"review", "requeue", "review-1", "--json"}, {"release", "check", "--json"}} {
-		newBeadsService = func(string) agentService {
-			return fakeAgentService{queue: beads.QueueResult{ReviewID: "review-1", Recovery: "safe retry"}, requeue: beads.Recovery{ReviewID: "review-1", Recovery: "safe retry"}, release: beads.ReleaseReadiness{}, err: errors.New("token=secret")}
-		}
-		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitValidation || strings.Contains(out.String()+errOut.String(), "secret") || !strings.Contains(errOut.String(), "operation failed") {
-			t.Fatalf("failure args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
-		}
+		t.Run(strings.Join(args, "-"), func(t *testing.T) {
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := runWithInput(args, noReadReader{}, out, errOut); code != exitUsage {
+				t.Fatalf("code = %d, want usage; stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if !strings.Contains(errOut.String(), "unknown command") {
+				t.Fatalf("stderr=%q", errOut.String())
+			}
+			if strings.Contains(errOut.String(), "configuration error") || strings.Contains(errOut.String(), "operation failed") {
+				t.Fatalf("retired command loaded runtime services: %q", errOut.String())
+			}
+		})
 	}
 }
 
-func TestCobraReviewWorkflowRejectsInvalidInputBeforeBeads(t *testing.T) {
-	original := newBeadsService
-	t.Cleanup(func() { newBeadsService = original })
-	called := 0
-	newBeadsService = func(string) agentService {
-		called++
-		return fakeAgentService{}
-	}
-	for _, tc := range []struct {
-		args []string
-		use  string
-	}{
-		{[]string{"work", "ready", "extra"}, "work ready"},
-		{[]string{"review", "list", "extra"}, "review list"},
-		{[]string{"review", "queue"}, "review queue FEATURE"},
-		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md"}, "review queue FEATURE"},
-		{[]string{"review", "queue", "feat-1", "--handoff", " ", "--evidence", "docs/e.md"}, "review queue FEATURE"},
-		{[]string{"review", "queue", "feat-1", "--handoff", "docs/h.md", "--evidence", " "}, "review queue FEATURE"},
-		{[]string{"review", "requeue"}, "review requeue REVIEW"},
-		{[]string{"review", "requeue", "review-1", "extra"}, "review requeue REVIEW"},
-		{[]string{"release", "check", "extra"}, "release check"},
-	} {
+func TestCobraHelpRemainsAvailableWithoutCompletion(t *testing.T) {
+	for _, args := range [][]string{{"help"}, {"--help"}} {
 		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitUsage {
-			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
-		}
-		if out.Len() != 0 || !strings.Contains(errOut.String(), "Usage:\n  smt "+tc.use) {
-			t.Fatalf("args=%v stdout=%q stderr=%q", tc.args, out.String(), errOut.String())
-		}
-	}
-	if called != 0 {
-		t.Fatalf("invalid syntax instantiated Beads service %d times", called)
-	}
-}
-
-func TestCobraReviewDecisionCommandsAreUnknownWithoutBeads(t *testing.T) {
-	original := newBeadsService
-	t.Cleanup(func() { newBeadsService = original })
-	called := 0
-	newBeadsService = func(string) agentService {
-		called++
-		return fakeAgentService{}
-	}
-	for _, args := range [][]string{{"review", "pass"}, {"review", "fail"}, {"review", "close"}} {
-		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runWithInput(args, strings.NewReader(""), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "unknown command") {
+		if code := runWithInput(args, noReadReader{}, out, errOut); code != exitOK {
 			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
 		}
-	}
-	if called != 0 {
-		t.Fatalf("unknown decision commands instantiated Beads service %d times", called)
+		if !strings.Contains(out.String(), "help") || strings.Contains(out.String(), "completion") {
+			t.Fatalf("args=%v help=%q", args, out.String())
+		}
+		if errOut.Len() != 0 {
+			t.Fatalf("args=%v stderr=%q", args, errOut.String())
+		}
 	}
 }
 
-func TestCobraReviewWorkflowLeafHelp(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		want []string
-	}{
-		{[]string{"work", "ready", "--help"}, []string{"Usage:\n  smt work ready", "--json"}},
-		{[]string{"review", "queue", "--help"}, []string{"Usage:\n  smt review queue FEATURE", "--handoff string", "--evidence string", "--json"}},
-		{[]string{"release", "check", "--help"}, []string{"Usage:\n  smt release check", "--json"}},
-	} {
-		out, errOut := new(strings.Builder), new(strings.Builder)
-		if code := runWithInput(tc.args, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 {
-			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", tc.args, code, out.String(), errOut.String())
-		}
-		for _, want := range tc.want {
-			if !strings.Contains(out.String(), want) {
-				t.Fatalf("args=%v stdout=%q, want %q", tc.args, out.String(), want)
-			}
-		}
-	}
-}
-func TestRunBareHelpAndReviewTTYRouting(t *testing.T) {
+func TestRunBareHelp(t *testing.T) {
 	out, errOut := new(strings.Builder), new(strings.Builder)
 	if code := runWithInput(nil, strings.NewReader(""), out, errOut); code != exitOK || errOut.Len() != 0 || !strings.Contains(out.String(), "Getting Started") {
 		t.Fatalf("bare code=%d out=%q err=%q", code, out.String(), errOut.String())
-	}
-	oldTTY, oldTUI := reviewIsInteractive, runReviewTUI
-	t.Cleanup(func() { reviewIsInteractive, runReviewTUI = oldTTY, oldTUI })
-	reviewIsInteractive = func(io.Reader, io.Writer) bool { return false }
-	out.Reset()
-	errOut.Reset()
-	if code := runWithInput([]string{"review"}, strings.NewReader(""), out, errOut); code != exitUsage || errOut.String() != "review: interactive terminal input and output are required\n" {
-		t.Fatalf("review code=%d stderr=%q", code, errOut.String())
-	}
-	calls := 0
-	var gotNoColor bool
-	var gotRoot string
-	wantRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	reviewIsInteractive = func(io.Reader, io.Writer) bool { return true }
-	t.Setenv("NO_COLOR", "1")
-	runReviewTUI = func(_ context.Context, noColor bool, root string) error {
-		calls++
-		gotNoColor, gotRoot = noColor, root
-		return nil
-	}
-	out.Reset()
-	errOut.Reset()
-	if code := runWithInput([]string{"review"}, strings.NewReader(""), out, errOut); code != exitOK || calls != 1 || !gotNoColor || gotRoot != wantRoot {
-		t.Fatalf("interactive code=%d calls=%d noColor=%t root=%q", code, calls, gotNoColor, gotRoot)
-	}
-	runReviewTUI = func(context.Context, bool, string) error { return errors.New("private TUI error") }
-	out.Reset()
-	errOut.Reset()
-	if code := runWithInput([]string{"review"}, strings.NewReader(""), out, errOut); code != exitInternal || errOut.String() != "review: terminal interface failed\n" || strings.Contains(errOut.String(), "private TUI error") {
-		t.Fatalf("TUI error code=%d stderr=%q", code, errOut.String())
 	}
 }
 
@@ -700,16 +576,7 @@ General
 Local CI
   hooks            Manage workspace Git hooks
 
-Review Workflow
-  release          Check release readiness
-  review           Open the review terminal interface
-  work             Manage work items
-
 Developer Tools
-  check            Run a check profile
-  ci               Run CI-parity tools
-  completion       Generate the autocompletion script for the specified shell
-  contracts        Inspect reusable contracts
   help             Help about any command
   validate-message Validate a commit message
 
@@ -970,17 +837,6 @@ func TestCobraWorktreeGroupRejectsInvalidSyntaxBeforeConfig(t *testing.T) {
 	}
 }
 
-func TestCobraCompletionDoesNotLoadConfig(t *testing.T) {
-	t.Chdir(t.TempDir())
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"completion", "zsh"}, strings.NewReader(""), out, errOut); code != exitOK {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
-	}
-	if !strings.Contains(out.String(), "#compdef smt") || errOut.Len() != 0 {
-		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
-	}
-}
-
 func TestCobraSyntaxErrorsAreConciseAndUseStderr(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, args := range [][]string{{"stattus"}, {"init", "one", "two"}} {
@@ -1006,16 +862,10 @@ func TestCobraMigratedLeavesRejectInvalidSyntaxBeforeConfig(t *testing.T) {
 		{name: "apply needs path", args: []string{"apply"}, use: "apply PATH"},
 		{name: "status has no args", args: []string{"status", "extra"}, use: "status"},
 		{name: "doctor has no args", args: []string{"doctor", "extra"}, use: "doctor"},
-		{name: "check needs profile", args: []string{"check"}, use: "check"},
-		{name: "check profile is non-empty", args: []string{"check", "--profile", ""}, use: "check"},
 		{name: "push has no args", args: []string{"push", "extra"}, use: "push"},
 		{name: "status rejects unknown flags", args: []string{"status", "--unknown"}, use: "status"},
 		{name: "worktree add needs branch", args: []string{"worktree", "add", "destination"}, use: "worktree add PATH"},
 		{name: "worktree branch is non-empty", args: []string{"worktree", "add", "destination", "--branch", ""}, use: "worktree add PATH"},
-		{name: "contracts validate has no args", args: []string{"contracts", "validate", "extra"}, use: "contracts validate"},
-		{name: "ci audit has no args", args: []string{"ci", "audit", "extra"}, use: "ci audit"},
-		{name: "ci contracts bump needs id", args: []string{"ci", "contracts", "bump"}, use: "ci contracts bump"},
-		{name: "ci contracts bump id is non-empty", args: []string{"ci", "contracts", "bump", "--id", ""}, use: "ci contracts bump"},
 		{name: "validate message needs file", args: []string{"validate-message"}, use: "validate-message FILE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1316,87 +1166,6 @@ func TestRunVerboseInvalidCommandPreservesUsageAndExitCode(t *testing.T) {
 	}
 }
 
-func TestRunVerboseCheckIncludesCommandResultDetails(t *testing.T) {
-	root := t.TempDir()
-	t.Chdir(root)
-	initTestGit(t, root)
-	if err := os.WriteFile("smt.yaml", []byte(`version: 1
-commit:
-  types: [feat]
-  scopes: [repo]
-repositories:
-  - id: repo
-    path: .
-    provider: gitlab
-    project: sanovy/root
-    scope: repo
-    checks:
-      hook:
-        - kind: command
-          argv: [go, version]
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := run([]string{"--verbose", "check", "--profile", "hook"}, out, errOut); code != exitOK {
-		t.Fatalf("run() code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
-	}
-	for _, want := range []string{
-		"repository=repo",
-		"profile=hook",
-		"program=go",
-		"status=success",
-		"exit_code=0",
-		"duration_ms=",
-		"stderr_bytes=0",
-	} {
-		if !strings.Contains(errOut.String(), want) {
-			t.Fatalf("stderr = %q, want field %q", errOut.String(), want)
-		}
-	}
-}
-
-func TestRunVerboseCheckFailureLogsSafeMetadata(t *testing.T) {
-	root := t.TempDir()
-	t.Chdir(root)
-	initTestGit(t, root)
-	if err := os.WriteFile("smt.yaml", []byte(`version: 1
-commit:
-  types: [feat]
-  scopes: [repo]
-repositories:
-  - id: repo
-    path: .
-    provider: gitlab
-    project: sanovy/root
-    scope: repo
-    checks:
-      hook:
-        - kind: command
-          argv: [go, command-that-does-not-exist]
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := run([]string{"--verbose", "check", "--profile", "hook"}, out, errOut); code != exitValidation {
-		t.Fatalf("run() code = %d, want %d, stdout=%q, stderr=%q", code, exitValidation, out.String(), errOut.String())
-	}
-	if !strings.Contains(errOut.String(), "status=failed") ||
-		!strings.Contains(errOut.String(), "repository=repo") ||
-		!strings.Contains(errOut.String(), "profile=hook") ||
-		!strings.Contains(errOut.String(), "program=go") ||
-		!strings.Contains(errOut.String(), "stderr_bytes=") {
-		t.Fatalf("stderr = %q, want safe failure fields", errOut.String())
-	}
-	for _, line := range strings.Split(errOut.String(), "\n") {
-		if strings.Contains(line, "level=debug") && strings.Contains(line, "command-that-does-not-exist") {
-			t.Fatalf("debug log contains full command arguments: %q", line)
-		}
-	}
-}
-
 func writeTestConfig(path string) error {
 	return os.WriteFile(path, []byte("version: 1\ncommit:\n  types: [feat]\n  scopes: [api]\nrepositories:\n  - id: root\n    path: .\n    provider: gitlab\n    project: sanovy/root\n    scope: api\n"), 0o600)
 }
@@ -1633,139 +1402,6 @@ func TestRunDoctorRequiresBareSMTAndLefthookBeforeAbsentHookInstallGuidance(t *t
 	}
 	if !strings.Contains(out.String(), "tools\n") || strings.Contains(out.String(), "from the workspace root") || strings.Contains(out.String(), "run smt hooks install") || strings.Contains(out.String(), "doctor-secret") {
 		t.Fatalf("unsafe guidance/order: %q", out.String())
-	}
-}
-
-func TestRunCheckRefusesMutatingProfileWithoutPermission(t *testing.T) {
-	root := t.TempDir()
-	t.Chdir(root)
-	initTestGit(t, root)
-	if err := os.WriteFile("smt.yaml", []byte(`version: 1
-commit:
-  types: [feat]
-  scopes: [repo]
-repositories:
-  - id: repo
-    path: .
-    provider: gitlab
-    project: sanovy/root
-    scope: repo
-    checks:
-      hook:
-        - kind: sql-format
-          argv: [pg_format]
-          include: ["**/*.sql"]
-          mutates_worktree: true
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := run([]string{"check", "--profile", "hook"}, out, errOut); code == 0 || !strings.Contains(errOut.String(), "--allow-worktree-mutation") {
-		t.Fatalf("check code = %d, stderr=%q, want mutation refusal", code, errOut.String())
-	}
-}
-
-func TestRunContractsValidateReturnsValidationExitForEveryFinding(t *testing.T) {
-	root := t.TempDir()
-	t.Chdir(root)
-	if err := os.WriteFile("smt.yaml", []byte(`version: 1
-commit:
-  types: [feat]
-  scopes: [repo]
-repositories:
-  - id: repo
-    path: .
-    provider: gitlab
-    project: sanovy/root
-    scope: repo
-contracts:
-  artifact:
-    - id: first
-      repository: repo
-      file: first.txt
-      expected: present
-    - id: second
-      repository: repo
-      file: second.txt
-      expected: present
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := run([]string{"contracts", "validate"}, out, errOut); code != exitValidation || !strings.Contains(out.String(), "first") || !strings.Contains(out.String(), "second") {
-		t.Fatalf("code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
-	}
-}
-
-func TestRunCIAuditUsesContractRulesAndValidationExit(t *testing.T) {
-	root := t.TempDir()
-	t.Chdir(root)
-	if err := os.WriteFile("smt.yaml", []byte(`version: 1
-commit:
-  types: [feat]
-  scopes: [repo]
-repositories:
-  - id: repo
-    path: .
-    provider: gitlab
-    project: sanovy/root
-    scope: repo
-contracts:
-  artifact:
-    - id: audit-finding
-      repository: repo
-      file: missing.txt
-      expected: present
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := run([]string{"ci", "audit"}, out, errOut); code != exitValidation || !strings.Contains(out.String(), "audit-finding") {
-		t.Fatalf("code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
-	}
-}
-
-func TestRunBumpPlanDoesNotWriteThenApplyReplaces(t *testing.T) {
-	root := t.TempDir()
-	t.Chdir(root)
-	if err := os.WriteFile("smt.yaml", []byte(`version: 1
-commit:
-  types: [feat]
-  scopes: [repo]
-repositories:
-  - id: repo
-    path: .
-    provider: gitlab
-    project: sanovy/root
-    scope: repo
-contracts:
-  reference:
-    - id: ci-pin
-      repository: repo
-      file: contract.txt
-      expected: old
-      replacement: new
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile("contract.txt", []byte("old\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := run([]string{"ci", "contracts", "bump", "--id", "ci-pin"}, out, errOut); code != 0 || !strings.Contains(out.String(), "old") || !strings.Contains(out.String(), "new") {
-		t.Fatalf("plan code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
-	}
-	content, _ := os.ReadFile("contract.txt")
-	if string(content) != "old\n" {
-		t.Fatalf("plan changed file: %q", content)
-	}
-	out.Reset()
-	if code := run([]string{"ci", "contracts", "bump", "--id", "ci-pin", "--apply"}, out, errOut); code != 0 {
-		t.Fatalf("apply code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
-	}
-	content, _ = os.ReadFile("contract.txt")
-	if string(content) != "new\n" {
-		t.Fatalf("apply content = %q, want replacement", content)
 	}
 }
 

@@ -55,6 +55,15 @@ flowchart TD
     E --> F[work_manager runs final integration validation]
 ```
 
+## Beads ticket ownership
+
+Agents create feature and task tickets directly with Beads before editing
+code. Use `bd prime`, `bd create`, `bd show`, `bd update --claim`, `bd ready`,
+`bd blocked`, and `bd close`; Beads is the source of truth for durable work
+state. SMT no longer wraps ticket creation, review queues, ready-work listing,
+or release readiness. `smt prepare` may still create its special internal
+`Prepared workspace` task for repository lifecycle coordination.
+
 ## Delegation contract
 
 The `work_manager` to `backend_worker` assignment must contain:

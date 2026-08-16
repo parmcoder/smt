@@ -11,10 +11,17 @@ This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full 
 
 ```bash
 bd ready              # Find available work
+bd create             # Create a feature or task ticket directly
 bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
+bd blocked            # Find blocked work
 bd close <id>         # Complete work
 ```
+
+Agents create and manage feature or task tickets directly with Beads; SMT no
+longer wraps ticket creation, review queues, ready-work listing, or release
+readiness. Create the implementation ticket before editing code. `smt prepare`
+may still create its special internal `Prepared workspace` task.
 
 ### Rules
 

@@ -28,12 +28,25 @@ Implement and verify the local workspace diagnostics and hook slice:
 - generated root and child `lefthook.yml` with top-level
   `no_auto_install: true` and `assert_lefthook_installed: true`, delegating to
   bare `smt validate-message --config FILE {1}`;
-- `validate-message [--config FILE] FILE`;
-- `check --profile hook|submit|ci-parity`, with optional `--repo`,
-  `--dry-run`, and explicit `--allow-worktree-mutation`;
-- `contracts validate` and `ci audit`;
-- `ci contracts bump --id ID [--apply]`, plan-only by default, with stale,
-  absent, and ambiguous literal guards.
+- `validate-message [--config FILE] FILE`.
+
+Agents create and manage feature or task tickets directly with Beads before
+editing code:
+
+```sh
+bd prime
+bd create --title="Short task title" --description="Why this exists and what needs to be done" --type=task --priority=2
+bd show <id>
+bd update <id> --claim
+bd ready
+bd blocked
+bd close <id> --reason="Completed"
+```
+
+Profiles and reusable contracts remain configuration summarized by `status`
+and `doctor`; their former standalone check, audit, and guarded-bump commands
+are retired. `smt prepare` may create its special internal `Prepared workspace`
+task for repository lifecycle coordination.
 
 Keep `smt.yaml` at configuration version 1. Support reusable literal
 `reference`, `migration-coverage`, and `artifact` contracts. Contract severity
