@@ -8,7 +8,7 @@ tags:
   - git
   - developer-experience
 created: 2026-07-16
-updated: 2026-08-11
+updated: 2026-08-17
 ---
 # SMT — Product Concept
 
@@ -64,6 +64,21 @@ defaults to action-first output and offers `--tree` plus safe `--verbose` detail
 `commit-msg` hook is absent, current, or unmanaged; an unmanaged hook is a
 human decision, never something SMT replaces. Generated `lefthook.yml` is a
 scaffold, not proof that Lefthook has run or that a hook was installed.
+
+## Planned module restructure
+
+The next production milestone prioritizes a five-layer module model while
+keeping the layers in this repository initially: control plane, application
+components, shared infrastructure, quality, and platform/delivery. The
+approved starter rewrite retains Web, Mobile, API, and Database, removes the
+DevOps prompt, `workspace.stack.devops`, and combined `infra` repository from
+new version-1 blueprints, and makes Podman/Compose the local runtime path.
+Web, API, and PostgreSQL are planned to be runnable operational skeletons;
+Mobile is planned as an Android/iOS starter rather than an OCI workload.
+
+This is planned work, not current CLI behavior. The thin module contract is
+being documented now; `smt extend` is explicitly deferred until the starter
+restructure is implemented and accepted. See [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|SMT v0.1.0 Production Plan]]. Beads remains the delivery status source of truth.
 
 ## Related
 

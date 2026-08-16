@@ -113,4 +113,5 @@ exactly the two workers above.
 ## Related
 
 - [[SMT - Implementation Spec]]
+- [[../10-development/SMT - Component Developer Toolchains|Component Developer Toolchains]]
 - [[../../AGENTS|Repository agent operating agreement]]
