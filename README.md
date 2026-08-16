@@ -1,144 +1,111 @@
-# smt
+<div align="center">
 
-Sanovy Mono Tool is a small Go CLI for inspectable, repeatable work across a
-Git root repository and independent submodules. The v0.1 implementation is
-available locally, including an interactive blueprint-and-apply workspace flow,
-configured repository pushes, synchronized linked worktrees, status/diagnostics,
-safe hooks, and Beads-backed workspace lifecycle operations.
+# SMT
 
-## Minimal onboarding
+### Sanovy Mono Tool
 
-Prerequisites: Git, Go, Task, and Lefthook. Generated Git hooks deliberately
-invoke bare `smt` through Lefthook, so both `smt` and `lefthook` must be
-durably available on `PATH` in every hook-running environment.
+Safely coordinate a Git root repository with independent submodules through
+reviewable blueprints and visible lifecycle operations.
+
+[![Status: In development](https://img.shields.io/badge/status-in%20development-yellow)](https://github.com/parmcoder/smt/blob/main/docs/superpowers/plans/2026-08-17-smt-v0.1.0-production.md)
+[![Go 1.26.5](https://img.shields.io/badge/go-1.26.5-00ADD8?logo=go&logoColor=white)](https://github.com/parmcoder/smt/blob/main/go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/parmcoder/smt/blob/main/LICENSE)
+
+</div>
+
+> **Development status:** source builds are supported. APIs and generated
+> starters remain evolving. SMT does not promise package-manager installation;
+> `apply` creates a deterministic, Git-ready scaffold and does not install
+> dependencies.
+
+## Why SMT
+
+SMT makes coordination inspectable: review the blueprint, see the root and
+each independent repository, and run guarded lifecycle operations with clear
+preflight and recovery boundaries. It uses argument-array Git execution,
+child-first pushes and pulls, root-first worktree creation, Beads-aware branch
+operations, and no credential persistence.
+
+## Available today
+
+| Area | Current capability |
+| --- | --- |
+| Blueprint | `smt new` creates a reviewed configuration; `smt apply` creates the root and selected independent submodules. |
+| Repository lifecycle | `push`, `remote provision`, `pull`, and synchronized `worktree add`. |
+| Beads lifecycle | `prepare` and `switch` coordinate existing Beads-ID branches. |
+| Diagnostics | `status` and `doctor` report repository, executable, remote, hook, and profile readiness. |
+| Hooks | Guarded Lefthook installation and conventional commit validation. |
+| Mobile | Current Mobile output is a Git-ready scaffold-only shell, not generated Flutter application source. |
+
+## Getting started from a fresh clone
+
+Prerequisites: Git, Go 1.26.5, Task, and Beads `bd`. Lefthook is optional
+until you install hooks. Build and verify SMT first:
 
 ```sh
-# From the SMT source checkout.
-task build
+git clone https://github.com/parmcoder/smt.git
+cd smt
 task verify
-mkdir -p ../platform-config
-bin/smt new ../platform-config/smt.yaml
-# Inspect and edit ../platform-config/smt.yaml as needed.
-bin/smt apply --config ../platform-config/smt.yaml ../platform
-```
-
-`smt new` requires a new blueprint file. It prompts for the fixed Next.js, Go,
-PostgreSQL, and Docker/OpenTofu components, and asks whether to include a
-Flutter Mobile application immediately after the Web selection. Mobile targets
-Android and iOS, defaults to included when you press Enter, and is excluded
-only by an explicit no. When Mobile is selected, repositories are ordered
-`repo`, `web`, `mobile`, `api`, `database`, `infra`; an opt-out omits the
-Mobile entry. Inspect and edit the resulting `smt.yaml`
-before `smt apply` creates the root repository and selected local submodules at
-the new destination. A selected Mobile component is a Git-ready `mobile-app`
-shell with a `mobile_worker` manifest, Flutter README and ignore rules, and
-`.tool-versions` pinning Flutter `3.44.9`; it is not generated Flutter app
-source. Applying it does not invoke or require the Flutter CLI or SDK, install
-dependencies, access the network, sign an app, or publish to an app store. Add
-credential-free `remote.url` values after applying the blueprint and before
-using
-`bin/smt push [--dry-run]`. Create a matching root-plus-submodule workspace
-with `bin/smt worktree add PATH --branch NAME [--dry-run]`.
-
-In the SMT source checkout, build the local CLI and make its bare command
-available. Then return to the target workspace to diagnose or install hooks:
-
-```sh
-# From the SMT source checkout.
 task build
+./bin/smt --help
+mkdir -p ../platform-config
+./bin/smt new ../platform-config/smt.yaml
+# Inspect and edit ../platform-config/smt.yaml.
+./bin/smt apply --config ../platform-config/smt.yaml ../platform
 export PATH="$PWD/bin:$PATH"
-# Return to the target/generated workspace.
 cd ../platform
 smt doctor
-smt hooks install --dry-run
-smt hooks install
 ```
 
-`task build` creates `bin/smt` in the SMT source checkout; it does not change
-`PATH`. The generated root and child `lefthook.yml` files have top-level
-`no_auto_install: true` and `assert_lefthook_installed: true`, and deliberately
-invoke bare `smt validate-message --config FILE {1}` with the correct relative
-root configuration. `no_auto_install` prevents Lefthook from automatically
-installing or updating hooks when configuration changes; the assertion makes
-Git reject the hook if Lefthook cannot be found, rather than silently skipping
-commit-message validation. Keep both `smt` and Lefthook available on
-the equivalent durable PATH used by IDE or GUI launchers; do not substitute a
-fragile absolute path. `smt hooks --help` also calls out the two PATH
-requirements.
+`smt new` writes a blueprint only after confirmation. Inspect it before
+`apply`; the destination must be new. `apply` initializes Beads metadata and
+does not install dependencies, call provider APIs, or create remote projects.
 
-`doctor` always checks Git, bare `smt`, and Lefthook. It explains how to build
-and expose `smt`, or install Lefthook and rerun it, before recommending hook
-installation. An absent hook is a warning rather than a failed doctor run when
-the other readiness checks pass. `status --json` is the machine-readable
-version of the human status report. With no configured profiles, the human
-report writes `profiles: none`; JSON keeps the machine-readable empty array,
-`profiles: []`. Commit-message hooks are `absent`, `current`, or `unmanaged`;
-custom, lookalike, modified, symlinked, directory, and other nonregular hook
-targets are never followed or overwritten.
+```mermaid
+flowchart LR
+    A["smt new"] --> B["Inspect smt.yaml"]
+    B --> C["smt apply"]
+    C --> D["Root + selected independent submodules"]
+    D --> E["status / doctor"]
+    E --> F["Lifecycle commands"]
+```
 
-`smt hooks install` resolves both tool names with PATH lookup, then checks
-every initialized configured repository with argument-array
-`git config --get core.hooksPath`. Any nonempty effective setting—including a
-relative path—is a custom hook-path policy that blocks the entire install plan;
-resolve it manually rather than forcing or resetting it. The same all-repository
-preflight requires a regular eligible `commit-msg` target, a `commit-msg`
-mapping in every `lefthook.yml`, and a successful argument-array
-`lefthook validate`. It finishes before changing anything, then runs
-argument-array `lefthook install commit-msg` root-first.
+## Roadmap
 
-Unmanaged hooks, including custom, lookalike, modified, symlinked, directory,
-and other nonregular targets, are never followed or replaced. An exact
-legacy SMT hook is the narrow migration exception, but only when no
-`commit-msg.old` entry exists. Lefthook 2.1.10 may then preserve the hook as
-`commit-msg.old` while installing its dispatcher. If any `.old` entry already
-exists, including a symlink, both `smt hooks install` and `--dry-run` reject the
-whole plan before root-first execution; resolve that collision manually. A
-current Lefthook dispatcher with an existing `.old` entry remains allowed.
-Collision errors do not expose paths or hook contents. This never permits
-`--force`, resetting a collision, a shell, overwriting unmanaged hooks, or
-rollback. A successful run prints installed repository IDs; a later failure
-reports installed and pending IDs for manual recovery. `smt apply` only writes
-the Lefthook scaffold—it never executes Lefthook or installs hooks.
+All roadmap items are planned unless marked as available above.
 
-Fixture evidence is deliberately narrow: a clean fixture installed hooks in all
-configured repositories and accepted a normal commit. In a controlled negative
-test, removing the installer-provided Lefthook binary while leaving `smt` on
-PATH caused Git to reject an otherwise valid commit with Lefthook's assertion
-error. This is evidence for the assertion boundary, not a substitute for human
-end-to-end review in every launch environment.
+| Horizon | Planned direction |
+| --- | --- |
+| Now | v1 module/starter restructure around Web, Mobile, API, and Database with a Podman-first runtime. |
+| Next | Manifest/toolchain Taskfiles, security, integration/runtime verification, and v0.1.0 human/release gates. |
+| Later | `smt extend`, provider-specific CI, observability, managed upgrades, SBOM/signing, and cloud/platform discovery. |
 
-For the active Beads lifecycle, run `smt prepare` (no arguments), then
-`smt switch BEAD_ID` and `smt pull` as needed. Use `smt switch` with no
-argument to return every repository to its effective default branch.
-Preparation creates and reports
-the open `Prepared workspace` task before complete preflight; a failed
-preflight leaves that task open and makes no Git mutation. It stashes tracked
-and untracked changes and leaves ignored files untouched. `smt switch` returns
-to the effective default branch without a Beads lookup; `smt switch BEAD_ID`
-uses an existing local active-task branch. Neither form auto-pops or rolls
-back. Pull is child-first and fast-forward-only. The effective default branch
-is repository `remote.default_branch`, then `main`.
-Default branches use ordinary conventional commits; non-default active Beads
-branches require the exact branch ID as `type(scope): [BEAD-ID] summary`.
-Hooks require Beads readiness.
+## Safety principles
 
-`bin/smt --help` lists the retained workspace, Git, status/doctor, hook, and
-Beads lifecycle commands. Agents create and manage feature or task tickets
-directly with Beads; use `bd prime`, `bd create`, `bd show`, `bd update --claim`,
-`bd ready`, `bd blocked`, and `bd close`. `smt prepare` may still create its
-special internal `Prepared workspace` task.
+- Review before apply; preflight all repositories before side effects.
+- Use argument arrays; never persist credentials or authorization headers.
+- Never force-push, rewrite history, overwrite unmanaged hooks, or silently
+  install tools and integrations.
+- Report completed and pending work after partial lifecycle failures; do not
+  perform destructive automatic rollback.
 
-For copyable command examples, configuration assumptions, and the safe release
-flow, see [SMT Command Recipes](docs/10-development/SMT%20-%20Command%20Recipes.md).
-The implementation contract remains [SMT Implementation Spec](docs/00-project/SMT%20-%20Implementation%20Spec.md).
+## Documentation
 
-In the SMT source checkout, `task build` creates `bin/smt`; `task verify` runs
-the Go test suite. Release tagging is intentionally mutating:
-`task release:tag VERSION=vX.Y.Z` requires a fully clean worktree, verifies and
-builds, creates an annotated tag, and pushes it to `origin`. The pushed tag
-triggers GitHub Actions to publish the four archives and `checksums.txt` as a
-GitHub Release. It was not run during this implementation work.
+- [Documentation index](https://github.com/parmcoder/smt/blob/main/docs/README.md)
+- [Implementation Spec](https://github.com/parmcoder/smt/blob/main/docs/00-project/SMT%20-%20Implementation%20Spec.md)
+- [Product Concept](https://github.com/parmcoder/smt/blob/main/docs/00-project/SMT%20-%20Product%20Concept.md)
+- [Command Recipes](https://github.com/parmcoder/smt/blob/main/docs/10-development/SMT%20-%20Command%20Recipes.md)
+- [Component Developer Toolchains](https://github.com/parmcoder/smt/blob/main/docs/10-development/SMT%20-%20Component%20Developer%20Toolchains.md)
+- [Extensible Modules Design](https://github.com/parmcoder/smt/blob/main/docs/superpowers/specs/2026-08-17-smt-extensible-modules-design.md)
+- [v0.1.0 Production Plan](https://github.com/parmcoder/smt/blob/main/docs/superpowers/plans/2026-08-17-smt-v0.1.0-production.md)
 
-The repository uses `smt.yaml` for workspace configuration. Tokens, when
-needed by future provider integrations, must remain runtime-only and must
-never be printed or committed.
+## Contributing
+
+Contributions are tracked with Beads. Start with `bd ready`, create or claim a
+task before changing files, use the exact task ID as the branch name, and run
+`task verify`. Read [AGENTS.md](https://github.com/parmcoder/smt/blob/main/AGENTS.md)
+for the repository and agent workflow.
+
+## License
+
+SMT is released under the [MIT License](https://github.com/parmcoder/smt/blob/main/LICENSE).
