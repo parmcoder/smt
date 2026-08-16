@@ -926,7 +926,7 @@ func TestRunNewCreatesConfigurationWithoutExistingConfiguration(t *testing.T) {
 	t.Chdir(t.TempDir())
 	allowNewInput(t)
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\n\ny\n"), out, errOut)
+	code := runWithInput([]string{"new"}, strings.NewReader("\n\n\n\ny\n"), out, errOut)
 	if code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
@@ -940,7 +940,7 @@ func TestRunNewCreatesConfigurationAtCustomPath(t *testing.T) {
 	allowNewInput(t)
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\ny\nn\nn\ny\n"), out, errOut); code != exitOK {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("n\ny\ny\nn\ny\n"), out, errOut); code != exitOK {
 		t.Fatalf("run new code = %d, stdout=%q, stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := config.Load(destination); err != nil {
@@ -957,7 +957,7 @@ func TestRunNewUsageAndDecline(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	out.Reset()
 	errOut.Reset()
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\nn\n"), out, errOut); code != exitOK || !strings.Contains(out.String(), "no file was written") {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\nn\n"), out, errOut); code != exitOK || !strings.Contains(out.String(), "no file was written") {
 		t.Fatalf("new decline code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
@@ -971,7 +971,7 @@ func TestRunNewRejectsNonTerminalInputWithoutWriting(t *testing.T) {
 	newInputIsTerminal = func(io.Reader) bool { return false }
 	t.Cleanup(func() { newInputIsTerminal = previous })
 	out, errOut := new(strings.Builder), new(strings.Builder)
-	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\ny\n"), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "interactive terminal") {
+	if code := runWithInput([]string{"new", destination}, strings.NewReader("y\ny\ny\ny\ny\n"), out, errOut); code != exitUsage || !strings.Contains(errOut.String(), "interactive terminal") {
 		t.Fatalf("new non-terminal code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
@@ -1026,7 +1026,7 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "platform")
 	blueprintPath := filepath.Join(t.TempDir(), "smt.yaml")
-	if _, err := blueprint.Create(strings.NewReader("y\ny\ny\nn\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
+	if _, err := blueprint.Create(strings.NewReader("y\ny\ny\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	cfg, err := config.Load(blueprintPath)

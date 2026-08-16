@@ -36,6 +36,50 @@ workflow:
 	}
 }
 
+func TestApplyRejectsLegacyDevOpsBeforeCreatingDestination(t *testing.T) {
+	legacy := map[string][]byte{
+		"workspace stack key": []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs, devops: [docker, opentofu]}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`),
+		"infra repository": []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, infra]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
+  - {id: infra, path: devops, component: devops, technology: docker-opentofu, scope: infra, remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`),
+	}
+	for name, raw := range legacy {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			destination := filepath.Join(parent, "workspace")
+			s := Service{Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return nil })}
+			if err := s.Apply(context.Background(), destination, raw); err == nil || !strings.Contains(err.Error(), "DevOps") {
+				t.Fatalf("Apply() error = %v, want DevOps migration error", err)
+			}
+			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+				t.Fatalf("destination=%v, want no destination after legacy rejection", err)
+			}
+			assertNoStage(t, parent)
+		})
+	}
+}
+
 func TestValidateBlueprintAcceptsOnlyExactSelectedMobileMappingInOrder(t *testing.T) {
 	cfg, err := config.LoadBytes(mobileBlueprintBytes(), "/tmp/smt.yaml")
 	if err != nil {
@@ -78,14 +122,48 @@ func TestValidateBlueprintAcceptsSelectedMobileDatabaseWithoutDevOps(t *testing.
 	}
 }
 
-func TestValidateBlueprintRejectsIncompleteDevOpsWithMobile(t *testing.T) {
-	cfg, err := config.LoadBytes(mobileDevOpsBlueprintBytes(), "/tmp/smt.yaml")
+func TestServiceBuildsAllBasicComponentsWithoutInfrastructureArtifacts(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	raw := fullMobileBlueprintBytes()
+	cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Workspace.Stack.DevOps = []string{"docker"}
-	if err := ValidateBlueprint(*cfg); err == nil {
-		t.Fatal("ValidateBlueprint() error=nil")
+	service := Service{Config: *cfg, Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return nil })}
+	if err := service.Apply(context.Background(), destination, raw); err != nil {
+		t.Fatal(err)
+	}
+	gitmodules, err := os.ReadFile(filepath.Join(destination, ".gitmodules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gitmodules)
+	for _, path := range []string{"web-app", "mobile-app", "apis", "database"} {
+		if !strings.Contains(got, "path = "+path) {
+			t.Fatalf(".gitmodules = %q, missing %s", got, path)
+		}
+	}
+	if strings.Contains(got, "devops") || strings.Contains(got, "infra") {
+		t.Fatalf(".gitmodules = %q, contains removed infrastructure entry", got)
+	}
+	for _, path := range []string{"devops", "infra", ".terraform", ".tofu"} {
+		if _, err := os.Lstat(filepath.Join(destination, path)); !os.IsNotExist(err) {
+			t.Fatalf("unexpected generated infrastructure path %s: %v", path, err)
+		}
+	}
+	toolVersions, err := os.ReadFile(filepath.Join(destination, ".tool-versions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(toolVersions), "opentofu") {
+		t.Fatalf(".tool-versions = %q, contains removed tool pin", toolVersions)
+	}
+}
+
+func TestLoadRejectsLegacyDevOpsBlueprint(t *testing.T) {
+	if _, err := config.LoadBytes(mobileDevOpsBlueprintBytes(), "/tmp/smt.yaml"); err == nil || !strings.Contains(err.Error(), "DevOps") {
+		t.Fatalf("LoadBytes() error = %v, want DevOps migration error", err)
 	}
 }
 
@@ -545,15 +623,14 @@ workflow:
 
 func fullMobileBlueprintBytes() []byte {
 	return []byte(`version: 1
-workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter, api: go, database: postgresql, devops: [docker, opentofu]}}
-commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile, api, database, infra]}
+workspace: {ai_assist: codex, stack: {web: nextjs, mobile: flutter, api: go, database: postgresql}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, mobile, api, database]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
   - {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}
   - {id: mobile, path: mobile-app, component: mobile, technology: flutter, scope: mobile, remote: {url: ""}}
   - {id: api, path: apis, component: api, technology: go, scope: api, remote: {url: ""}}
   - {id: database, path: database, component: database, technology: postgresql, scope: database, remote: {url: ""}}
-  - {id: infra, path: devops, component: devops, technology: docker-opentofu, scope: infra, remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:

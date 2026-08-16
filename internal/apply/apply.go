@@ -76,6 +76,9 @@ func initBeadsWithPrefix(ctx context.Context, dir, prefix string) error {
 func publish(stage, destination string) error { return os.Rename(stage, destination) }
 
 func (s Service) Apply(ctx context.Context, destination string, raw []byte) error {
+	if err := config.LegacyDevOpsError(raw); err != nil {
+		return err
+	}
 	if s.Prerequisites == nil || (s.Beads == nil && !s.DefaultBeads) {
 		return fmt.Errorf("apply service dependencies are required")
 	}
@@ -148,8 +151,16 @@ func (s Service) Apply(ctx context.Context, destination string, raw []byte) erro
 type component struct{ id, path, scope, kind, tech, title string }
 
 func components(cfg config.Config) []component {
-	var out []component
+	byID := make(map[string]config.Repository, len(cfg.Repositories))
 	for _, r := range cfg.Repositories[1:] {
+		byID[r.ID] = r
+	}
+	var out []component
+	for _, id := range []string{"web", "mobile", "api", "database"} {
+		r, ok := byID[id]
+		if !ok {
+			continue
+		}
 		out = append(out, component{r.ID, r.Path, r.Scope, r.Component, r.Technology, r.Component + " component"})
 	}
 	return out
@@ -429,8 +440,6 @@ func toolVersions(cs []component) string {
 			v = append(v, "nodejs 24.18.0")
 		case "mobile":
 			v = append(v, "flutter 3.44.9")
-		case "infra":
-			v = append(v, "opentofu 1.12.3")
 		}
 	}
 	return strings.Join(v, "\n") + "\n"
@@ -447,7 +456,7 @@ func componentIgnore(kind string) string {
 	case "mobile":
 		return base + "\n.dart_tool/\nbuild/\n.flutter-plugins\n.flutter-plugins-dependencies\n.packages\n"
 	default:
-		return base + "\n.terraform/\n.tofu/\n*.tfstate\n.env\n"
+		return base + "\n.env\n"
 	}
 }
 
@@ -477,8 +486,8 @@ func ValidateBlueprint(cfg config.Config) error {
 	if cfg.Repositories[0].HasChecks || len(cfg.Repositories[0].UnknownFields) != 0 {
 		return fmt.Errorf("apply requires only supported blueprint fields")
 	}
-	expected := []component{{"web", "web-app", "web", "web", "nextjs", ""}, {"mobile", "mobile-app", "mobile", "mobile", "flutter", ""}, {"api", "apis", "api", "api", "go", ""}, {"database", "database", "database", "database", "postgresql", ""}, {"infra", "devops", "infra", "devops", "docker-opentofu", ""}}
-	stacks := []string{cfg.Workspace.Stack.Web, cfg.Workspace.Stack.Mobile, cfg.Workspace.Stack.API, cfg.Workspace.Stack.Database, strings.Join(cfg.Workspace.Stack.DevOps, ",")}
+	expected := []component{{"web", "web-app", "web", "web", "nextjs", ""}, {"mobile", "mobile-app", "mobile", "mobile", "flutter", ""}, {"api", "apis", "api", "api", "go", ""}, {"database", "database", "database", "database", "postgresql", ""}}
+	stacks := []string{cfg.Workspace.Stack.Web, cfg.Workspace.Stack.Mobile, cfg.Workspace.Stack.API, cfg.Workspace.Stack.Database}
 	scopes := []string{"repo"}
 	n := 1
 	for i, e := range expected {
@@ -487,9 +496,6 @@ func ValidateBlueprint(cfg config.Config) error {
 		}
 		if i == 1 && stacks[i] != "flutter" {
 			return fmt.Errorf("apply requires the fixed mobile stack")
-		}
-		if e.id == "infra" && stacks[i] != "docker,opentofu" {
-			return fmt.Errorf("apply requires the fixed devops stack")
 		}
 		if n >= len(cfg.Repositories) {
 			return fmt.Errorf("apply repositories do not match selected stack")
