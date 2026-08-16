@@ -19,6 +19,8 @@ The shared, Obsidian-compatible knowledge base for Sanovy Mono Tool.
 - [[00-project/SMT - Product Concept]] — users, value proposition, and boundaries.
 - [[10-development/SMT - Command Recipes]] — concrete CLI, check, CI, and release examples.
 - [[00-project/SMT - Agent Team]] — ownership and handoff rules.
+- [[10-development/SMT - Component Developer Toolchains]] — planned component
+  toolchain, Taskfile, skill, and optional MCP contract.
 - [[../prompts/smt-build|SMT build prompt]] — implementation handoff prompt.
 
 ## Current status

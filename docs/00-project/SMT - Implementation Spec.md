@@ -10,7 +10,7 @@ tags:
   - monorepo
   - developer-experience
 created: 2026-07-15
-updated: 2026-08-11
+updated: 2026-08-17
 ---
 # SMT — Sanovy Mono Tool
 
@@ -193,6 +193,15 @@ The fixed workspace stack values are `nextjs`, `go`, `postgresql`, and the
 DevOps tools `docker` plus `opentofu`; the implemented Mobile extension adds
 only `mobile: flutter` as described above. `ai_assist` is either absent or
 `codex`.
+
+The configuration and generation behavior above describes the current
+implementation. A planned version-1 restructure will rewrite new blueprints
+around Web, Mobile, API, and Database, remove the DevOps prompt,
+`workspace.stack.devops`, and combined `infra` repository, and use Podman with
+Compose for the local runtime skeleton. It is recorded in
+[[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and is not implemented by this specification yet.
+The planned component gates and optional tool integrations are summarized in
+[[../10-development/SMT - Component Developer Toolchains|Component Developer Toolchains]].
 `remote.url` is optional at initialization but required by `smt push`; it may
 not contain embedded credentials. A repository
 used by `smt remote provision` must declare `provider` and a fully qualified
@@ -229,6 +238,13 @@ implemented by the CLI or this release:
   execution;
 - YAML selector rewrites or automatic CI configuration edits;
 - `checkout` and `validate-range` workflows from the earlier design.
+
+The broader module restructure is also planned, not implemented: the five
+layers remain in this repository initially; platform capabilities are named
+`container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd` (with
+`argocd` depending on `k8s`); and a thin module contract is being defined.
+`smt extend` and its E2E scaffold are later work and must not be described as
+available CLI behavior. AWS + Apptainer + OpenTofu remains later discovery.
 
 Git lifecycle operations preflight all configured repositories before a remote
 push or worktree creation. Pushes are child-first and stop after a failure with
