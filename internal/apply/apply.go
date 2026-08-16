@@ -276,6 +276,10 @@ func stageFiles(root string, wt *ggit.Worktree, children []component) error {
 	for _, c := range children {
 		skip[c.path] = true
 	}
+	status, err := wt.Status()
+	if err != nil {
+		return fmt.Errorf("inspect generated files: %w", err)
+	}
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -295,6 +299,10 @@ func stageFiles(root string, wt *ggit.Worktree, children []component) error {
 			return nil
 		}
 		if entry.Type().IsRegular() {
+			fileStatus, tracked := status[filepath.ToSlash(rel)]
+			if !tracked || fileStatus.Worktree == ggit.Unmodified {
+				return nil
+			}
 			if _, err := wt.Add(rel); err != nil {
 				return fmt.Errorf("stage %s: %w", rel, err)
 			}
@@ -363,7 +371,7 @@ func copyDirectory(source, destination string) error {
 func writeArtifacts(root string, cs []component) error {
 	files := map[string]string{
 		".gitignore":                     "**/.DS_Store\n**/Thumbs.db\n**/desktop.ini\n\n.smt/\n",
-		"README.md":                      "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n",
+		"README.md":                      "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n\nBeads configuration is tracked with the workspace; its embedded Dolt database and local runtime files stay on this machine and are ignored by Git.\n",
 		".tool-versions":                 toolVersions(cs),
 		"AGENTS.md":                      "# Project Agent Operating Agreement\n\nGo work uses `$godex:godex-go-backend`. Beads (`bd`) is the canonical task and issue state. The `work_manager` owns delivery decisions.\n\nWorkflow: `work_manager -> component worker -> tests -> manager review -> durable handoff/docs -> human E2E review -> release gate`.\n\nOn the default branch, use ordinary `type(scope): summary` commits. On a Beads-ID branch, commits must use `type(scope): [BEAD-ID] summary`, with the ID exactly matching the branch.\n",
 		"agents/work_manager.toml":       "name = \"work_manager\"\nmodel_reasoning_effort = \"high\"\n\n# Prepared workspace contract\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",

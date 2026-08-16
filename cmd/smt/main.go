@@ -207,7 +207,7 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		}
 		return runRepositoryPrepare(context.Background(), *cfg, root, service, git.ExecRunner{}, out, errOut, logger, verbose)
 	})
-	topSwitchCommand := nativeLeaf("switch BEAD_ID", "Switch every repository to an existing Beads-ID branch", "general", "switch", cobra.ExactArgs(1), func(args []string, logger *logrus.Logger) int {
+	topSwitchCommand := nativeLeaf("switch [BEAD_ID]", "Switch every repository to its default or a Beads-ID branch", "general", "switch", cobra.MaximumNArgs(1), func(args []string, logger *logrus.Logger) int {
 		cfg, root, code := loadConfig(errOut)
 		if code != exitOK {
 			return code
@@ -216,7 +216,11 @@ func newRootCommand(in io.Reader, out, errOut io.Writer, verbose bool) *cobra.Co
 		if verbose {
 			service = newVerboseLifecycleBeadsService(root, errOut)
 		}
-		return runRepositorySwitch(context.Background(), *cfg, root, args[0], service, git.ExecRunner{}, out, errOut, logger, verbose)
+		id := ""
+		if len(args) == 1 {
+			id = args[0]
+		}
+		return runRepositorySwitch(context.Background(), *cfg, root, id, service, git.ExecRunner{}, out, errOut, logger, verbose)
 	})
 
 	var pushDryRun bool

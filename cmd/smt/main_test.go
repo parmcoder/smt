@@ -694,7 +694,7 @@ General
   prepare          Prepare a Beads-ID branch across repositories
   pull             Fast-forward configured repositories
   push             Push configured repositories
-  switch           Switch every repository to an existing Beads-ID branch
+  switch           Switch every repository to its default or a Beads-ID branch
   worktree         Manage linked worktrees
 
 Local CI
@@ -732,11 +732,28 @@ func TestCobraRootHelpMatchesGoldenWithoutConfig(t *testing.T) {
 }
 
 func TestTopLevelPrepareAndSwitchArgumentContracts(t *testing.T) {
-	for _, args := range [][]string{{"prepare", "extra"}, {"prepare", "--dry-run"}, {"switch"}, {"switch", "one", "two"}} {
+	for _, args := range [][]string{{"prepare", "extra"}, {"prepare", "--dry-run"}, {"switch", "one", "two"}} {
 		out, errOut := new(bytes.Buffer), new(bytes.Buffer)
 		if code := runWithInput(args, strings.NewReader(""), out, errOut); code == exitOK {
 			t.Fatalf("args=%v unexpectedly accepted", args)
 		}
+	}
+}
+
+func TestTopLevelSwitchAllowsOmittedBeadsID(t *testing.T) {
+	root := newRootCommand(strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer), false)
+	command, _, err := root.Find([]string{"switch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Args == nil {
+		t.Fatal("switch command has no argument validator")
+	}
+	if err := command.Args(command, nil); err != nil {
+		t.Fatalf("switch without Beads ID rejected: %v", err)
+	}
+	if err := command.Args(command, []string{"one", "two"}); err == nil {
+		t.Fatal("switch accepted more than one optional Beads ID")
 	}
 }
 
