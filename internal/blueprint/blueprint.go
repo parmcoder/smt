@@ -200,7 +200,7 @@ func marshal(selection Selection) ([]byte, error) {
 		repos = append(repos, config.Repository{ID: "database", Path: "database", Component: "database", Technology: "postgresql", Scope: "database", Remote: config.Remote{DefaultBranch: "main"}})
 		scopes = append(scopes, "database")
 	}
-	cfg := config.Config{Version: 1, Workspace: config.Workspace{AIAssist: "codex", Stack: stack}, Commit: config.CommitConfig{Types: []string{"feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"}, Scopes: scopes}, Repositories: repos, Workflow: fixedWorkflow()}
+	cfg := config.Config{Version: 1, Provenance: &config.Provenance{Tool: config.ProvenanceTool, SMTVersion: config.ProvenanceSMTVersion, TemplateSetVersion: config.ProvenanceTemplateSetVersion}, Workspace: config.Workspace{AIAssist: "codex", Stack: stack}, Commit: config.CommitConfig{Types: []string{"feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"}, Scopes: scopes}, Repositories: repos, Workflow: fixedWorkflow()}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("encode blueprint: %w", err)

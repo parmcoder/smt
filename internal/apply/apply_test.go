@@ -18,6 +18,7 @@ import (
 func TestValidateBlueprintAcceptsExactNewConfiguration(t *testing.T) {
 	cfg, err := config.LoadBytes([]byte(`version: 1
 workspace: {ai_assist: codex, stack: {web: nextjs}}
+provenance: {tool: smt, smt_version: v0.1.0, template_set_version: v1}
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
@@ -34,6 +35,57 @@ workflow:
 	if err := ValidateBlueprint(*cfg); err != nil {
 		t.Fatalf("ValidateBlueprint() error = %v", err)
 	}
+}
+
+func TestValidateBlueprintRequiresExactProvenance(t *testing.T) {
+	raw := withValidProvenance(blueprintBytes())
+	valid, err := config.LoadBytes(raw, "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := map[string]func(*config.Config){
+		"missing":                func(cfg *config.Config) { cfg.Provenance = nil },
+		"wrong tool":             func(cfg *config.Config) { cfg.Provenance.Tool = "other" },
+		"wrong smt version":      func(cfg *config.Config) { cfg.Provenance.SMTVersion = "v9.9.9" },
+		"wrong template version": func(cfg *config.Config) { cfg.Provenance.TemplateSetVersion = "v2" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := *valid
+			provenance := *valid.Provenance
+			cfg.Provenance = &provenance
+			mutate(&cfg)
+			if err := ValidateBlueprint(cfg); err == nil || !strings.Contains(err.Error(), "provenance") {
+				t.Fatalf("ValidateBlueprint() error = %v, want provenance validation error", err)
+			}
+		})
+	}
+}
+
+func TestServiceExistingDestinationProtectionWithValidProvenance(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	original := []byte("keep exactly\n")
+	if err := os.WriteFile(destination, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw := withValidProvenance(blueprintBytes())
+	if _, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml")); err != nil {
+		t.Fatalf("LoadBytes() error = %v, want valid provenance", err)
+	}
+	service := Service{
+		Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+		Initialize:    initializerFunc(func(context.Context, string) error { t.Fatal("initializer called"); return nil }),
+		Beads:         initializerFunc(func(context.Context, string) error { t.Fatal("beads called"); return nil }),
+	}
+	if err := service.Apply(context.Background(), destination, raw); err == nil {
+		t.Fatal("Apply() error=nil, want existing destination refusal")
+	}
+	got, err := os.ReadFile(destination)
+	if err != nil || string(got) != string(original) {
+		t.Fatalf("destination = %q, err=%v, want original bytes", got, err)
+	}
+	assertNoStage(t, parent)
 }
 
 func TestApplyRejectsLegacyDevOpsBeforeCreatingDestination(t *testing.T) {
@@ -81,7 +133,7 @@ workflow:
 }
 
 func TestValidateBlueprintAcceptsOnlyExactSelectedMobileMappingInOrder(t *testing.T) {
-	cfg, err := config.LoadBytes(mobileBlueprintBytes(), "/tmp/smt.yaml")
+	cfg, err := config.LoadBytes(withValidProvenance(mobileBlueprintBytes()), "/tmp/smt.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +165,7 @@ func TestValidateBlueprintAcceptsOnlyExactSelectedMobileMappingInOrder(t *testin
 }
 
 func TestValidateBlueprintAcceptsSelectedMobileDatabaseWithoutDevOps(t *testing.T) {
-	cfg, err := config.LoadBytes(mobileDatabaseBlueprintBytes(), "/tmp/smt.yaml")
+	cfg, err := config.LoadBytes(withValidProvenance(mobileDatabaseBlueprintBytes()), "/tmp/smt.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +220,7 @@ func TestLoadRejectsLegacyDevOpsBlueprint(t *testing.T) {
 }
 
 func TestValidateBlueprintAcceptsFullSelectedMobileOrdering(t *testing.T) {
-	cfg, err := config.LoadBytes(fullMobileBlueprintBytes(), "/tmp/smt.yaml")
+	cfg, err := config.LoadBytes(withValidProvenance(fullMobileBlueprintBytes()), "/tmp/smt.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,6 +621,10 @@ workflow:
     - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
     - {source: parmcoder/godex, selectors: [godex-go-backend]}
 `)
+}
+
+func withValidProvenance(raw []byte) []byte {
+	return append([]byte("provenance:\n  tool: smt\n  smt_version: v0.1.0\n  template_set_version: v1\n"), raw...)
 }
 
 func mobileBlueprintBytes() []byte {

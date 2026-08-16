@@ -470,7 +470,16 @@ func componentReadme(c component) string {
 // ValidateBlueprint accepts only the shape emitted by smt new. Remote URL
 // changes are intentionally allowed after generation.
 func ValidateBlueprint(cfg config.Config) error {
-	if cfg.Version != 1 || cfg.Workspace.AIAssist != "codex" || cfg.Workflow == nil {
+	if cfg.Version != 1 {
+		return fmt.Errorf("apply requires an smt new blueprint")
+	}
+	if cfg.Provenance == nil {
+		return fmt.Errorf("apply requires provenance")
+	}
+	if err := cfg.Provenance.Validate(); err != nil {
+		return fmt.Errorf("apply requires %w", err)
+	}
+	if cfg.Workspace.AIAssist != "codex" || cfg.Workflow == nil {
 		return fmt.Errorf("apply requires an smt new blueprint")
 	}
 	wantTypes := []string{"feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore", "revert"}

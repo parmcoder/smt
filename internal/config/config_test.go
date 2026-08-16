@@ -414,6 +414,66 @@ repositories:
 	}
 }
 
+func TestLoadAcceptsExactProvenanceMapping(t *testing.T) {
+	raw := `version: 1
+provenance:
+  tool: smt
+  smt_version: v0.1.0
+  template_set_version: v1
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+`
+	cfg, err := LoadBytes([]byte(raw), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatalf("LoadBytes() error = %v, want exact provenance to load", err)
+	}
+	if cfg.Provenance == nil || cfg.Provenance.Tool != ProvenanceTool || cfg.Provenance.SMTVersion != ProvenanceSMTVersion || cfg.Provenance.TemplateSetVersion != ProvenanceTemplateSetVersion {
+		t.Fatalf("provenance = %#v, want exact current provenance", cfg.Provenance)
+	}
+}
+
+func TestLoadRejectsUnsupportedProvenanceValues(t *testing.T) {
+	base := `version: 1
+provenance:
+  tool: smt
+  smt_version: v0.1.0
+  template_set_version: v1
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+`
+	for name, replacement := range map[string][2]string{
+		"tool":                 {"tool: smt", "tool: other"},
+		"smt version":          {"smt_version: v0.1.0", "smt_version: v9.9.9"},
+		"template set version": {"template_set_version: v1", "template_set_version: v2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := strings.Replace(base, replacement[0], replacement[1], 1)
+			_, err := LoadBytes([]byte(raw), "/tmp/smt.yaml")
+			if err == nil || !strings.Contains(err.Error(), "provenance") {
+				t.Fatalf("LoadBytes() error = %v, want clear provenance validation error", err)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsUnknownProvenanceFields(t *testing.T) {
+	raw := `version: 1
+provenance:
+  tool: smt
+  smt_version: v0.1.0
+  template_set_version: v1
+  unknown: value
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+`
+	if _, err := LoadBytes([]byte(raw), "/tmp/smt.yaml"); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("LoadBytes() error = %v, want unknown provenance field rejection", err)
+	}
+}
+
 func TestLoadRejectsInvalidWorkflowConfiguration(t *testing.T) {
 	base := `version: 1
 commit: {types: [feat], scopes: [repo]}

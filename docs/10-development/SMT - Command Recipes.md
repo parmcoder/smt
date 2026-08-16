@@ -33,9 +33,13 @@ repositories are ordered `repo`, `web`, `mobile`, `api`, `database`; an opt-out
 omits the Mobile entry. New blueprints have no DevOps prompt,
 `workspace.stack.devops`, `infra` repository, or Docker/OpenTofu metadata or
 artifacts. It writes `smt.yaml` only after confirmation and does not create a
-workspace. The destination file must not already exist. Read and adjust the
-generated `smt.yaml` before applying it; for example, inspect the selected
-repositories and add project-specific check profiles.
+workspace. The generated file carries the exact provenance mapping documented
+in [[../00-project/SMT - Implementation Spec#Configuration contract|the
+implementation specification]], with no timestamp, user, machine/path, Git
+SHA, random value, or environment-derived field. Generation is offline and
+byte-stable for identical selections in fresh destinations. The destination
+file must not already exist. Inspect the generated `smt.yaml` before applying
+it.
 
 ```sh
 $EDITOR ../platform-config/smt.yaml
@@ -51,9 +55,15 @@ already exist. With Mobile selected, it creates a Git-ready `mobile-app` shell,
 invoke or require Flutter or its SDK, install dependencies, access the network,
 sign an app, or publish an app. It does not create remote repositories.
 Legacy DevOps-shaped configurations are rejected before destination mutation;
-remove the legacy entries and regenerate the blueprint. This release does not
-provide runnable Web/API/Mobile templates, Podman/Compose artifacts, a module
-catalog, or `smt extend`.
+remove the legacy entries and regenerate the blueprint. Generated blueprints
+must carry the exact supported provenance; missing, unsupported, or unknown
+provenance fails before service or destination mutation. A general
+non-generated version-1 configuration without provenance remains usable for
+lifecycle and diagnostic commands, but is not applyable as a new generated
+blueprint. An existing destination file or directory is refused without
+overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
+release does not provide runnable Web/API/Mobile templates, Podman/Compose
+artifacts, a module catalog, or `smt extend`.
 
 Each created repository receives a scaffold-only `lefthook.yml` with top-level
 `no_auto_install: true` and `assert_lefthook_installed: true`. Its `commit-msg`
@@ -96,7 +106,10 @@ history.
 The pending human review (`smt-3r2.5`) should create one default Mobile
 blueprint (press Enter) and one explicit opt-out blueprint, then apply each in
 new destinations. Verify the default YAML order and Mobile artifacts listed
-above; verify the opt-out contains no Mobile stack or repository. This review
+above, including the exact provenance mapping from the implementation spec;
+verify the opt-out contains no Mobile stack or repository. Repeat identical
+selections in fresh destinations and compare bytes to confirm deterministic
+offline generation. This review
 does not require Flutter installation and must not expect generated app source,
 dependency installation, network access, signing, or store publication. At one
 additional fresh destination, exercise one safe prerequisite, staging, Beads,

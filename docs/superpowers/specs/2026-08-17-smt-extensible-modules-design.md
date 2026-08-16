@@ -18,7 +18,9 @@ updated: 2026-08-17
 This is the approved design direction for the next SMT production milestone.
 The taxonomy and configuration portion of the version-1 starter restructure is
 implemented: new blueprints select Web, optional Mobile, API, and Database,
-with DevOps-shaped configuration removed. The runnable starter, platform
+with DevOps-shaped configuration removed. Generated blueprints also carry the
+exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
+`smt apply` validates it before mutation. The runnable starter, platform
 capabilities, and thin module contract remain planned work. `smt extend` is
 explicitly deferred until the starter and contract are accepted.
 
@@ -71,6 +73,14 @@ after Web. They omit `workspace.stack.devops`, the DevOps prompt, the combined
 `infra` repository, and Docker/OpenTofu component or tooling metadata. Legacy
 DevOps-shaped configurations are rejected before apply mutation with a
 migration-oriented removal/regeneration error.
+
+Generation is offline and byte-stable for identical selections in fresh
+destinations. Missing, unsupported, or unknown provenance fails before service
+or destination mutation; a general non-generated version-1 configuration may
+remain usable for lifecycle and diagnostics without provenance but is not
+applyable as a new generated blueprint. Existing destination files and
+directories are refused without overwrite, merge, regeneration, upgrade, or
+`smt extend` execution.
 
 ## Deferred runnable starter and platform work
 

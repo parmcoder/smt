@@ -17,12 +17,39 @@ import (
 // Config is the typed SMT configuration file.
 type Config struct {
 	Version      int          `yaml:"version"`
+	Provenance   *Provenance  `yaml:"provenance,omitempty"`
 	Workspace    Workspace    `yaml:"workspace,omitempty"`
 	Providers    Providers    `yaml:"providers,omitempty"`
 	Commit       CommitConfig `yaml:"commit"`
 	Repositories []Repository `yaml:"repositories"`
 	Contracts    Contracts    `yaml:"contracts,omitempty"`
 	Workflow     *Workflow    `yaml:"workflow,omitempty"`
+}
+
+const (
+	ProvenanceTool               = "smt"
+	ProvenanceSMTVersion         = "v0.1.0"
+	ProvenanceTemplateSetVersion = "v1"
+)
+
+// Provenance identifies the deterministic generator contract for a blueprint.
+type Provenance struct {
+	Tool               string `yaml:"tool"`
+	SMTVersion         string `yaml:"smt_version"`
+	TemplateSetVersion string `yaml:"template_set_version"`
+}
+
+func (p Provenance) Validate() error {
+	if p.Tool != ProvenanceTool {
+		return fmt.Errorf("provenance.tool must be %q", ProvenanceTool)
+	}
+	if p.SMTVersion != ProvenanceSMTVersion {
+		return fmt.Errorf("provenance.smt_version must be %q", ProvenanceSMTVersion)
+	}
+	if p.TemplateSetVersion != ProvenanceTemplateSetVersion {
+		return fmt.Errorf("provenance.template_set_version must be %q", ProvenanceTemplateSetVersion)
+	}
+	return nil
 }
 
 // Workflow records the fixed Codex delivery roles and plugins for a generated
@@ -223,6 +250,11 @@ func LoadBytes(raw []byte, sourcePath string) (*Config, error) {
 func (c *Config) Validate(workspaceRoot string) error {
 	if c.Version != 1 {
 		return fmt.Errorf("version must be 1")
+	}
+	if c.Provenance != nil {
+		if err := c.Provenance.Validate(); err != nil {
+			return err
+		}
 	}
 	if len(c.Commit.Types) == 0 {
 		return fmt.Errorf("commit.types must not be empty")
