@@ -17,6 +17,12 @@ Git repository with independent submodules. It creates a reviewable blueprint
 before applying a local platform workspace, then safely coordinates its normal
 Git lifecycle without hiding state.
 
+Generated blueprints carry the exact deterministic provenance contract described
+in [[SMT - Implementation Spec#Configuration contract|the implementation
+specification]]. Provenance contains only the SMT tool/version and template-set
+version: no timestamp, user, machine or path, Git SHA, random value, or
+environment-derived field.
+
 Its local workflow is:
 
 ```mermaid
@@ -86,7 +92,13 @@ be runnable operational skeletons using Podman/Compose, and Mobile is intended
 as an Android/iOS starter rather than an OCI workload. This release provides
 no runnable templates or Podman/Compose artifacts. The thin module contract and
 module catalog remain planned; `smt extend` is explicitly deferred until the
-starter and contract are accepted. See [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|SMT v0.1.0 Production Plan]]. Beads remains the delivery status source of truth.
+starter and contract are accepted. Generation remains offline and byte-stable
+for identical selections in fresh destinations. `smt apply` rejects missing,
+unsupported, or unknown provenance before mutation and refuses an existing
+file or directory without overwrite, merge, regeneration, upgrade, or
+`smt extend` execution. A general non-generated version-1 configuration may
+still serve lifecycle and diagnostic commands without provenance, but it is not
+applyable as a new generated blueprint. See [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|SMT v0.1.0 Production Plan]]. Beads remains the delivery status source of truth.
 
 ## Related
 

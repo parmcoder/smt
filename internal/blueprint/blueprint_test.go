@@ -127,6 +127,28 @@ func TestCreateAllowsExplicitMobileOptOutWithDeterministicSelection(t *testing.T
 	}
 }
 
+func TestCreateEmitsDeterministicProvenance(t *testing.T) {
+	var outputs [2][]byte
+	for i := range outputs {
+		destination := filepath.Join(t.TempDir(), "smt.yaml")
+		if _, err := Create(strings.NewReader("y\nn\ny\ny\ny\n"), &bytes.Buffer{}, destination); err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+		var err error
+		outputs[i], err = os.ReadFile(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "provenance:\n    tool: smt\n    smt_version: v0.1.0\n    template_set_version: v1\n"
+		if !strings.Contains(string(outputs[i]), want) {
+			t.Fatalf("generated config = %q, want exact provenance mapping", outputs[i])
+		}
+	}
+	if string(outputs[0]) != string(outputs[1]) {
+		t.Fatalf("identical selections produced different bytes:\n%s\n---\n%s", outputs[0], outputs[1])
+	}
+}
+
 func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	var out bytes.Buffer

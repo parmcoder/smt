@@ -32,12 +32,17 @@ Beads lifecycle commands. Implemented commands are:
   after the Web selection it asks `Include Flutter mobile application? [Y/n]`.
   Enter includes the Android/iOS Flutter Mobile component and an explicit no
   excludes it. It writes a validated `smt.yaml` blueprint only after
-  confirmation and does not create a repository or workspace.
+  confirmation and does not create a repository or workspace. Generation is
+  offline and byte-stable for identical selections in fresh destinations.
+  Existing destination files are refused; `smt new` never overwrites, merges,
+  regenerates, or upgrades a blueprint.
 - `smt apply [--config FILE] PATH` — validate the supplied workspace
   blueprint/configuration, then create the root Git repository, selected local
   bootstrap submodules, ignore files, Beads metadata, and repository-local
   agent workflow files at a new destination. It does not install dependencies,
-  create remote repositories, or call provider APIs.
+  create remote repositories, or call provider APIs. It refuses an existing
+  destination file or directory; apply has no overwrite, merge, regenerate,
+  upgrade, or `smt extend` path.
 - `smt push [--dry-run]` — preflight every configured repository, then push
   each child repository's current branch before the root. Remote URLs come from
   `repositories[].remote.url`; dry-run validates and prints the order without
@@ -142,10 +147,17 @@ rollback after a later submit failure.
 
 ## Configuration contract
 
-The root `smt.yaml` uses this shape (the existing file is canonical):
+Generated blueprints from `smt new` carry this exact top-level provenance
+mapping. It identifies the generator and reviewed template set without a
+timestamp, user, machine or path, Git SHA, random value, or environment-derived
+field. The root `smt.yaml` uses this shape (the existing file is canonical):
 
 ```yaml
 version: 1
+provenance:
+  tool: smt
+  smt_version: v0.1.0
+  template_set_version: v1
 workspace:
   ai_assist: codex
   stack:
@@ -203,6 +215,14 @@ contracts:
       file: dist/app.js
       expected: present
 ```
+
+The provenance mapping in a generated blueprint must contain exactly `tool: smt`,
+`smt_version: v0.1.0`, and `template_set_version: v1`; unknown provenance fields
+are rejected. `smt apply` accepts only this exact provenance for a
+generated blueprint. Missing or unsupported provenance fails validation before
+service or destination mutation. A general, non-generated version-1
+configuration without provenance remains usable by lifecycle and diagnostic
+commands, but it is not applyable as a new generated blueprint.
 
 The supported version-1 stack values are `web: nextjs`, optional
 `mobile: flutter`, `api: go`, and `database: postgresql`; `ai_assist` is either

@@ -408,6 +408,7 @@ type noReadReader struct{}
 func (noReadReader) Read([]byte) (int, error) { panic("unexpected stdin read") }
 func applyBlueprint() []byte {
 	return []byte(`version: 1
+provenance: {tool: smt, smt_version: v0.1.0, template_set_version: v1}
 workspace: {ai_assist: codex, stack: {web: nextjs}}
 commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web]}
 repositories: [{id: repo, path: ., scope: repo, remote: {url: ""}}, {id: web, path: web-app, component: web, technology: nextjs, scope: web, remote: {url: ""}}]
@@ -492,6 +493,64 @@ func TestRunApplyRejectsInvalidConfigurationBeforePublication(t *testing.T) {
 	}
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		t.Fatalf("destination stat=%v, want no publication", err)
+	}
+}
+
+func TestRunApplyRejectsInvalidProvenanceBeforeServiceMutation(t *testing.T) {
+	const validProvenance = "provenance: {tool: smt, smt_version: v0.1.0, template_set_version: v1}\n"
+	tests := map[string]struct {
+		old string
+		new string
+	}{
+		"missing": {
+			old: validProvenance,
+		},
+		"wrong tool": {
+			old: "tool: smt",
+			new: "tool: other",
+		},
+		"wrong smt version": {
+			old: "smt_version: v0.1.0",
+			new: "smt_version: v9.9.9",
+		},
+		"wrong template version": {
+			old: "template_set_version: v1",
+			new: "template_set_version: v2",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			original := newApplyService
+			t.Cleanup(func() { newApplyService = original })
+			called := false
+			newApplyService = func() applypkg.Service {
+				called = true
+				return applypkg.Service{}
+			}
+			root := t.TempDir()
+			configPath := filepath.Join(root, "invalid-provenance.yaml")
+			raw := strings.Replace(string(applyBlueprint()), tt.old, tt.new, 1)
+			if err := os.WriteFile(configPath, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, "workspace")
+			out, errOut := new(strings.Builder), new(strings.Builder)
+			if code := runWithInput([]string{"apply", "--config", configPath, destination}, strings.NewReader(""), out, errOut); code != exitValidation || called || !strings.Contains(errOut.String(), "provenance") {
+				t.Fatalf("code=%d service called=%t stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+			}
+			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+				t.Fatalf("destination stat=%v, want no mutation", err)
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.Contains(entry.Name(), ".smt-") {
+					t.Fatalf("staging remnant %q", entry.Name())
+				}
+			}
+		})
 	}
 }
 
