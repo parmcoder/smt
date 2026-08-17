@@ -100,9 +100,18 @@ func TestCreateAllComponentsOmitsDevOpsPromptAndArtifacts(t *testing.T) {
 		t.Fatalf("repositories = %#v, want root plus four components", cfg.Repositories)
 	}
 	for _, repository := range cfg.Repositories {
-		if repository.ID == "infra" || repository.Component == "devops" || repository.Technology == "docker-opentofu" {
+		if repository.ID == "infra" || repository.Component == "devops" || repository.Technology == "docker-opentofu" || isPlatformModuleID(repository.ID) {
 			t.Fatalf("unexpected DevOps repository = %#v", repository)
 		}
+	}
+}
+
+func isPlatformModuleID(id string) bool {
+	switch id {
+	case "container", "cicd", "observability", "iac", "k8s", "argocd":
+		return true
+	default:
+		return false
 	}
 }
 

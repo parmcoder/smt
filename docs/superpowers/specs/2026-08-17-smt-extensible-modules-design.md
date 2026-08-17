@@ -21,7 +21,7 @@ implemented: new blueprints select Web, optional Mobile, API, and Database,
 with DevOps-shaped configuration removed. Generated blueprints also carry the
 exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
 `smt apply` validates it before mutation. The runnable starter, platform
-capabilities, and runnable module assets remain planned work. The static
+runtimes/artifacts, and runnable module assets remain planned work. The static
 schema-v1 module catalog and repository annotations are implemented metadata;
 `smt extend` is explicitly deferred.
 
@@ -83,7 +83,7 @@ applyable as a new generated blueprint. Existing destination files and
 directories are refused without overwrite, merge, regeneration, upgrade, or
 `smt extend` execution.
 
-## Deferred runnable starter and platform work
+## Deferred runnable starter and platform runtime work
 
 The planned starter is operational rather than a fake product: Web and API
 are runnable, PostgreSQL is orchestrated locally with Podman Compose, and
@@ -96,7 +96,9 @@ templates or Podman/Compose artifacts are provided by the accepted taxonomy
 change.
 
 Platform capabilities are decomposed into `container`, `cicd`,
-`observability`, `iac`, `k8s`, and `argocd`. `argocd` depends on `k8s`.
+`observability`, `iac`, `k8s`, and `argocd`; the `.5` catalog implements these
+as non-selectable declarations, and `argocd` depends on `k8s`. Their platform
+repositories, scaffolds, runtime artifacts, and execution remain deferred.
 AWS + Apptainer + OpenTofu is a later discovery and compatibility milestone,
 not part of this restructure.
 
@@ -104,31 +106,52 @@ not part of this restructure.
 
 Version 1 implements an optional repository-level `modules: [id...]` metadata
 field; configurations without it remain valid. The static schema-v1 catalog is
-owned by the SMT code and is not loaded from user YAML. Its selectable entries
-are exactly `web`, `mobile`, `api`, `database`, and `e2e` (the quality
-declaration). The full layer vocabulary is `control-plane`,
-`application-components`, `shared-infrastructure`, `quality-verification`, and
-`platform-delivery`, but the built-in catalog has no control-plane or platform
-entry. Web, Mobile, and API use `application-components`, Database uses
-`shared-infrastructure`, and E2E uses `quality-verification`.
+owned by the SMT code and is not loaded from user YAML. It contains exactly 11
+declarations: selectable `web`, `mobile`, `api`, `database`, and `e2e`; and
+non-selectable platform declarations `container`, `cicd`, `observability`,
+`iac`, `k8s`, and `argocd`.
 
-Each catalog definition records its ID, category/layer, provided/required and
-optional capabilities, safe placement defaults, agent/skill references,
-argument-array verification requirements including `mutates_worktree`, and
-reviewed scaffold-asset identity. Catalog validation rejects invalid schema,
-duplicate IDs, invalid category/layer pairs, unknown capability references,
-unsafe paths, and dependency cycles. Configuration validation rejects unknown
-or duplicate repository module IDs and missing selected required capabilities.
+Each catalog definition records its ID, selectable flag, category/layer,
+provided/required and optional capabilities, safe placement defaults, stable
+completion-criterion IDs, agent/skill references, argument-array verification
+requirements including `mutates_worktree`, and reviewed scaffold-asset
+identity where applicable. Placement modes are declarative and validated as
+`attached`, `shared`, or `independent`; `.5` uses `attached` and `independent`
+in its built-in declarations. The authoritative matrix is:
+
+| ID | Placement (`path`, `scope`, `mode`, `targets`) | Completion criteria | Requires |
+| --- | --- | --- | --- |
+| `web` | `web-app`, `web`, `independent`, `[web]` | `web.declaration` | — |
+| `mobile` | `mobile-app`, `mobile`, `independent`, `[mobile]` | `mobile.declaration` | — |
+| `api` | `apis`, `api`, `independent`, `[api]` | `api.declaration` | — |
+| `database` | `database`, `database`, `independent`, `[database]` | `database.declaration` | — |
+| `e2e` | `.`, `repo`, `attached`, `[repo]` | `e2e.declaration` | — |
+| `container` | `.`, `repo`, `attached`, `[web, api]` | `container.declaration` | — |
+| `cicd` | `.`, `repo`, `attached`, `[repo, web, mobile, api, database]` | `cicd.repository-boundary` | — |
+| `observability` | `.`, `repo`, `attached`, `[web, api, database]` | `observability.boundary` | — |
+| `iac` | `platform/iac`, `iac`, `independent`, `[repo]` | `iac.provider-neutral` | — |
+| `k8s` | `platform/k8s`, `k8s`, `independent`, `[repo]` | `k8s.static-validation` | — |
+| `argocd` | `platform/argocd`, `argocd`, `independent`, `[repo]` | `argocd.sync-policy` | `k8s` |
+
+Catalog validation rejects invalid schema, duplicate IDs/references, invalid
+category/layer pairs, unknown module or capability references, unsafe paths,
+invalid placement targets, duplicate completion criteria, and dependency
+cycles. Configuration validation rejects unknown or duplicate repository module
+IDs and missing selected required capabilities. `Config.LoadBytes` accepts
+known non-selectable platform metadata when references and dependencies are
+valid, while `Apply` and `ValidateBlueprint` reject non-selectable platform
+metadata before topology checks, staging, or destination mutation.
 
 `smt new` keeps the Web/Mobile/API/Database prompts, then asks the optional
 default-no quality-root question derived from the catalog role and placement.
 The current built-in prompt is `Include E2E quality declaration? [y/N]`.
-Component repositories receive exact IDs. Opting in records only
+Component repositories receive exact selectable IDs. Opting in records only
 `modules: [e2e]` on the root; it creates no E2E repository, scaffold, or
-artifact. `smt apply` requires the exact generated root/component annotations
-and persists them, but it does not execute verification recipes, install
-tools, skills, or MCP integrations, mutate host configuration, or create
-module repositories.
+artifact. The `.5` slice adds declarations and validation only: it creates no
+platform repositories, platform scaffolds, or platform runtime artifacts; does
+not install tools, skills, or MCP integrations; does not mutate host
+configuration; and does not run Compose, Podman, Kubernetes, ArgoCD, or
+OpenTofu. Runnable starters and `smt extend` remain deferred.
 
 Generated component manifests and lockfiles remain deferred runnable-starter
 assets. Skills and MCP integrations remain distinct metadata and prerequisite
@@ -143,12 +166,14 @@ implementation is deferred until the version-1 restructure is complete.
 ## Boundaries and acceptance
 
 The accepted `.2` scope is the starter component taxonomy and configuration
-gate; `.4` adds the static catalog and repository module annotations above.
-Remaining design scope is the Podman-first local runtime skeleton and platform
-capability implementation. Out of scope for the current CLI are runnable
-templates, Podman/Compose artifacts, platform artifacts/capabilities, a remote
-module registry, implementing `smt extend`, provider/cloud creation, fake CRUD,
-Kubernetes or ArgoCD deployment, and AWS runtime selection.
+gate; `.4` adds the selectable catalog and repository module annotations, and
+`.5` adds the six non-selectable platform declarations plus catalog/config
+validation boundaries above. Remaining design scope is the Podman-first local
+runtime skeleton and platform runtime implementation. Out of scope for the
+current CLI are runnable starters, platform repositories/scaffolds/runtime
+artifacts, Podman/Compose execution, Kubernetes or ArgoCD deployment, OpenTofu
+execution, a remote module registry, implementing `smt extend`, provider/cloud
+creation, fake CRUD, and AWS runtime selection.
 
 Acceptance requires the canonical docs and generated guidance to distinguish
 implemented behavior from planned behavior. Beads is the source of truth for
