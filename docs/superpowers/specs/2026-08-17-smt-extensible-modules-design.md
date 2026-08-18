@@ -130,6 +130,32 @@ offline and does not invoke Preflight, Podman, Compose, socket probing, or
 health checks. Component build contexts, Containerfiles, lifecycle tasks, and
 application-domain behavior remain deferred to `.3.2` through `.3.6`.
 
+## Implemented `.3.3.1` API manifest contract
+
+When API is selected, apply writes deterministic static `go.mod` and `go.sum`
+files into the API child repository. The module is `example.com/smt/apis` with
+`go 1.26.5`. API-only requires Huma
+`github.com/danielgtaylor/huma/v2 v2.39.1`; API+Database additionally requires
+pgx `github.com/jackc/pgx/v5 v5.10.0` and golang-migrate
+`github.com/golang-migrate/migrate/v4 v4.19.1`. No API selection emits no API
+manifests.
+
+The Go `tool` directives pin govulncheck
+`golang.org/x/vuln/cmd/govulncheck` with `golang.org/x/vuln v1.7.0` and
+golangci-lint
+`github.com/golangci/golangci-lint/v2/cmd/golangci-lint` with
+`github.com/golangci/golangci-lint/v2 v2.12.2`. API+Database additionally pins
+`github.com/golang-migrate/migrate/v4/cmd/migrate`. Direct pinned sums are
+present; full transitive closure is deferred.
+
+Apply writes static templates only and performs no `go`, `go mod`,
+package-manager, network, or tool installation work; PATH-empty tests cover
+that boundary. gofmt, vet, test, race, coverage, fuzzing, Godex, and gopls are
+SDK/editor/agent tools, not module dependencies. `go mod tidy` and `go mod verify`
+are later checks against the eventual source closure, not proven
+results here. API source imports, Huma/OpenAPI generation, tests, Containerfile,
+and runtime verification remain deferred to `.3.3.2-.4`.
+
 ## Implemented static module catalog
 
 Version 1 implements an optional repository-level `modules: [id...]` metadata

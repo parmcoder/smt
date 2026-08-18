@@ -148,6 +148,22 @@ Future component build contexts, Containerfiles, lifecycle tasks, runnable
 starters, platform runtime work, a remote module registry, and `smt extend`
 remain deferred; `.3.1` adds no app-domain behavior.
 
+The implemented `.3.3.1` API manifest slice adds static `go.mod` and `go.sum`
+only to selected API child repositories. They use module
+`example.com/smt/apis` and `go 1.26.5`; Huma v2.39.1 is always present for
+API, while pgx v5.10.0 and golang-migrate v4.19.1 appear only for
+API+Database. Tool directives pin govulncheck with `golang.org/x/vuln v1.7.0`,
+golangci-lint v2 with `github.com/golangci/golangci-lint/v2 v2.12.2`, and the
+migrate tool only for API+Database. API-only excludes pgx/migrate, and no API
+selection emits no API manifests. Direct pinned sums are committed; full
+transitive closure, source imports, OpenAPI generation, tests, Containerfiles,
+and runtime verification remain deferred to `.3.3.2-.4`.
+
+Apply writes these static files without invoking Go, `go mod`, a package
+manager, the network, or tool installation. SDK/editor/agent tools are not
+module dependencies, and `go mod tidy`/`go mod verify` are later source-closure
+checks rather than proven results here.
+
 Generation remains offline and byte-stable for identical selections in fresh
 destinations. `smt apply` rejects missing, unsupported, or unknown provenance
 before mutation and refuses an existing file or directory without overwrite,

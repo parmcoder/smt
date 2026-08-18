@@ -350,6 +350,35 @@ Podman, Compose, socket probing, or runtime health checks. Future component
 build contexts, Containerfiles, and lifecycle tasks belong to `smt-4xf.3.2`
 through `.3.6`.
 
+### Implemented `.3.3.1` API module manifests
+
+When API is selected, the generated API child repository receives deterministic
+static `go.mod` and `go.sum` files. The module is `example.com/smt/apis` and
+the language line is `go 1.26.5`. API-only requires Huma
+`github.com/danielgtaylor/huma/v2 v2.39.1`. API+Database additionally requires
+pgx `github.com/jackc/pgx/v5 v5.10.0` and golang-migrate
+`github.com/golang-migrate/migrate/v4 v4.19.1`. Without API selection, no API
+child repository and no API manifests are emitted.
+
+The Go `tool` block pins govulncheck
+`golang.org/x/vuln/cmd/govulncheck` with `golang.org/x/vuln v1.7.0` and
+golangci-lint
+`github.com/golangci/golangci-lint/v2/cmd/golangci-lint` with
+`github.com/golangci/golangci-lint/v2 v2.12.2`. API+Database additionally pins
+the migrate tool `github.com/golang-migrate/migrate/v4/cmd/migrate`. Direct
+pinned checksums for these emitted modules and tool backings are present in
+`go.sum`; the full transitive checksum closure is not asserted by this slice.
+
+Apply writes these static templates only. It performs no `go`, `go mod`,
+package-manager, network, or tool installation work; PATH-empty focused tests
+cover that boundary. `gofmt`, `go vet`, `go test`, race, coverage, fuzzing,
+Godex, and gopls are SDK/editor/agent tools, not module dependencies.
+`go mod tidy` and `go mod verify` are later checks against the eventual source
+closure,
+not already-proven results. API source imports, Huma/OpenAPI generation,
+tests, Containerfiles, and runtime verification remain deferred to
+`.3.3.2-.4`.
+
 Legacy DevOps-shaped configurations are rejected by `smt apply` before any
 destination mutation. The migration-oriented error directs the operator to
 remove the legacy DevOps entries and regenerate a version-1 blueprint. The

@@ -684,6 +684,131 @@ func TestMobileAbsentLeavesExistingArtifactOutputUnchanged(t *testing.T) {
 	}
 }
 
+func TestServiceGeneratesSelectionCorrectAPIModuleManifests(t *testing.T) {
+	tests := map[string]struct {
+		raw      []byte
+		database bool
+	}{
+		"api-only":     {raw: apiBlueprintBytes()},
+		"api-database": {raw: fullMobileBlueprintBytes(), database: true},
+		"without-api":  {raw: blueprintBytes()},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			destination := filepath.Join(parent, "workspace")
+			cfg, err := config.LoadBytes(tt.raw, filepath.Join(parent, "blueprint.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", "")
+			service := Service{
+				Config:        *cfg,
+				Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+				Beads:         initializerFunc(func(context.Context, string) error { return nil }),
+			}
+			if err := service.Apply(context.Background(), destination, tt.raw); err != nil {
+				t.Fatal(err)
+			}
+			modulePath := filepath.Join(destination, "apis")
+			if !tt.database && name == "without-api" {
+				if _, err := os.Lstat(modulePath); !os.IsNotExist(err) {
+					t.Fatalf("unexpected API repository: %v", err)
+				}
+				return
+			}
+			goMod, err := os.ReadFile(filepath.Join(modulePath, "go.mod"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			goSum, err := os.ReadFile(filepath.Join(modulePath, "go.sum"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			mod := string(goMod)
+			sum := string(goSum)
+			for _, want := range []string{
+				"module example.com/smt/apis\n",
+				"go 1.26.5\n",
+				"github.com/danielgtaylor/huma/v2 v2.39.1",
+				"github.com/golangci/golangci-lint/v2 v2.12.2",
+				"golang.org/x/vuln v1.7.0",
+				"github.com/golangci/golangci-lint/v2/cmd/golangci-lint",
+				"golang.org/x/vuln/cmd/govulncheck",
+			} {
+				if !strings.Contains(mod, want) {
+					t.Fatalf("go.mod missing %q:\n%s", want, mod)
+				}
+			}
+			for _, want := range []string{
+				"github.com/danielgtaylor/huma/v2 v2.39.1",
+				"github.com/golangci/golangci-lint/v2 v2.12.2",
+				"golang.org/x/vuln v1.7.0",
+			} {
+				if !strings.Contains(sum, want) {
+					t.Fatalf("go.sum missing pinned module %q:\n%s", want, sum)
+				}
+			}
+			for _, forbidden := range []string{"gofmt", "go vet", "go test", "race", "coverage", "fuzz", "gopls", "Godex"} {
+				if strings.Contains(mod, forbidden) {
+					t.Fatalf("go.mod contains external SDK/editor/agent tool %q:\n%s", forbidden, mod)
+				}
+			}
+			if tt.database {
+				for _, want := range []string{
+					"github.com/jackc/pgx/v5 v5.10.0",
+					"github.com/golang-migrate/migrate/v4 v4.19.1",
+					"github.com/golang-migrate/migrate/v4/cmd/migrate",
+				} {
+					if !strings.Contains(mod, want) {
+						t.Fatalf("database-enabled go.mod missing %q:\n%s", want, mod)
+					}
+				}
+			} else {
+				for _, forbidden := range []string{"pgx", "migrate", "golang-migrate"} {
+					if strings.Contains(mod, forbidden) || strings.Contains(sum, forbidden) {
+						t.Fatalf("API-only manifest contains database dependency %q", forbidden)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestServiceAPIModuleManifestsAreDeterministicAcrossDestinations(t *testing.T) {
+	raw := fullMobileBlueprintBytes()
+	var manifests [2]map[string][]byte
+	for i := range manifests {
+		parent := t.TempDir()
+		destination := filepath.Join(parent, "workspace")
+		cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		service := Service{
+			Config:        *cfg,
+			Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+			Beads:         initializerFunc(func(context.Context, string) error { return nil }),
+		}
+		if err := service.Apply(context.Background(), destination, raw); err != nil {
+			t.Fatal(err)
+		}
+		manifests[i] = make(map[string][]byte)
+		for _, name := range []string{"go.mod", "go.sum"} {
+			contents, err := os.ReadFile(filepath.Join(destination, "apis", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifests[i][name] = contents
+		}
+	}
+	for _, name := range []string{"go.mod", "go.sum"} {
+		if string(manifests[0][name]) != string(manifests[1][name]) {
+			t.Fatalf("API %s differs across fresh destinations", name)
+		}
+	}
+}
+
 func TestServiceWritesDeterministicRuntimeArtifactsForSelectedOCIComponents(t *testing.T) {
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "Runtime Workspace")
@@ -760,6 +885,22 @@ commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
   - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`)
+}
+
+func apiBlueprintBytes() []byte {
+	return []byte(`version: 1
+workspace: {ai_assist: codex, stack: {web: nextjs, api: go}}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, web, api]}
+repositories:
+  - {id: repo, path: ., scope: repo, remote: {url: ""}}
+  - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
+  - {id: api, path: apis, component: api, technology: go, scope: api, modules: [api], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:

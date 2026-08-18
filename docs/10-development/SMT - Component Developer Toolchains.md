@@ -86,19 +86,28 @@ Containerfiles, lifecycle tasks, and app-domain behavior remain deferred to
 
 ## Deferred generated manifest ownership
 
-The following are planned scaffold behavior, not `.5` outputs. Future generator
-work may copy reviewed manifests and lockfiles deterministically and offline;
+The Web, Mobile, Database, and future runtime manifests below are planned
+scaffold behavior, not `.5` or `.3.1` outputs. The API `go.mod`/`go.sum`
+exception is implemented in `.3.3.1`; future generator work may copy the
+remaining reviewed manifests and lockfiles deterministically and offline.
 `smt apply` never runs a package manager.
 
 - **Web** owns `package.json` and `package-lock.json`: runtime Next.js 16.2.9
   plus compatible React; devDependencies include ESLint and `eslint-config-next`,
   Prettier, TypeScript/types, Vitest/Vite React/jsdom, React Testing Library,
   and Playwright. Scripts and configuration make every dependency reachable.
-- **API** owns `go.mod` and `go.sum`: runtime Huma 2.39.1; pgx 5.10.0 and
-  migrate 4.19.1 only when API+Database are selected. Go tool directives pin
-  govulncheck, golangci-lint v2, and conditional migrate. gofmt/vet/test,
-  race, coverage, and fuzz are SDK built-ins, not dependencies. Godex and
-  gopls are not module dependencies.
+- **API** is the implemented `.3.3.1` manifest exception: when API is selected,
+  apply writes deterministic `go.mod` and `go.sum` for module
+  `example.com/smt/apis` with `go 1.26.5` and Huma
+  `github.com/danielgtaylor/huma/v2 v2.39.1`. pgx
+  `github.com/jackc/pgx/v5 v5.10.0` and golang-migrate
+  `github.com/golang-migrate/migrate/v4 v4.19.1` are added only for
+  API+Database. Tool directives pin govulncheck with `golang.org/x/vuln v1.7.0`
+  and golangci-lint with `github.com/golangci/golangci-lint/v2 v2.12.2`; the
+  migrate tool is conditional on Database. API-only excludes pgx/migrate, and
+  no API emits no API manifests. Direct pinned sums are present, but the full
+  transitive closure is deferred. gofmt/vet/test, race, coverage, and fuzz are
+  SDK commands, not dependencies; Godex and gopls are not module dependencies.
 - **Mobile** owns `pubspec.yaml`, `pubspec.lock`, and
   `analysis_options.yaml`: `flutter_test` and `integration_test` SDK
   dependencies plus `flutter_lints` in `dev_dependencies`. dart format,
@@ -112,9 +121,12 @@ never belong in application manifests.
 
 ## Go API
 
-Baseline: Go 1.26.5, Huma v2.39.1, pgx v5.10.0. Planned gates are gofmt
-check, `go vet ./...`, `go test ./...`, race, coverage, focused fuzz,
-`govulncheck ./...`, and pinned golangci-lint v2 configuration/version.
+Baseline: Go 1.26.5, Huma v2.39.1, pgx v5.10.0. The `.3.3.1` files are static
+templates; apply performs no Go, `go mod`, package-manager, network, or tool
+installation work. Planned gates are gofmt check, `go vet ./...`,
+`go test ./...`, race, coverage, focused fuzz, `govulncheck ./...`, and pinned
+golangci-lint v2 configuration/version. `go mod tidy` and `go mod verify` are
+later checks against the eventual source closure, not proven by this slice.
 Integration tests use disposable PostgreSQL; OpenAPI generation is checked
 for drift and migrations are explicit/API-owned. `golint` is deprecated and
 frozen; use go vet and Staticcheck-class checks through golangci-lint instead.
