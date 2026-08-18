@@ -104,6 +104,34 @@ occupied-port, missing-Podman, and missing-Podman-Compose errors for future
 Taskfile/CLI consumers. `smt apply` does not invoke that preflight, Podman,
 Compose, socket probing, or health checks.
 
+### Inspect generated API manifests
+
+.3.3.1 implements deterministic static API child `go.mod` and `go.sum`
+manifests when API is selected; inspect them without downloading or resolving
+modules:
+
+```sh
+sed -n '1,220p' ../platform/apis/go.mod
+cat ../platform/apis/go.sum
+```
+
+The module is `example.com/smt/apis` with `go 1.26.5`. API-only contains Huma
+`github.com/danielgtaylor/huma/v2 v2.39.1` plus tool directives for govulncheck
+(`golang.org/x/vuln v1.7.0`) and golangci-lint
+(`github.com/golangci/golangci-lint/v2 v2.12.2`). API+Database additionally
+contains pgx `github.com/jackc/pgx/v5 v5.10.0`, golang-migrate
+`github.com/golang-migrate/migrate/v4 v4.19.1`, and the migrate tool directive.
+API-only excludes pgx/migrate; no API selection emits no API manifests.
+
+Direct pinned sums are present in `go.sum`, but this slice does not prove the
+full transitive closure. Apply writes static templates only: it does not invoke
+`go`, `go mod`, a package manager, the network, or tool installation. `gofmt`,
+vet, test, race, coverage, fuzzing, Godex, and gopls remain SDK/editor/agent
+tools rather than module dependencies. `go mod tidy` and `go mod verify` are
+later checks against the eventual source closure. API imports, Huma/OpenAPI
+generation, tests, Containerfiles, and runtime verification are deferred to
+`.3.3.2-.4`.
+
 ### Inspect module declarations
 
 The implementation specification documents the static schema-v1 catalog and

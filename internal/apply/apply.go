@@ -201,8 +201,15 @@ func buildWorkspace(ctx context.Context, root, publishedRoot string, cfg config.
 	if err := writeArtifacts(root, publishedRoot, cs); err != nil {
 		return err
 	}
+	databaseSelected := false
 	for _, c := range cs {
-		if _, err := addChild(ctx, root, publishedRoot, c); err != nil {
+		if c.id == "database" {
+			databaseSelected = true
+			break
+		}
+	}
+	for _, c := range cs {
+		if _, err := addChildWithDatabase(ctx, root, publishedRoot, c, databaseSelected); err != nil {
 			return err
 		}
 	}
@@ -211,6 +218,10 @@ func buildWorkspace(ctx context.Context, root, publishedRoot string, cfg config.
 }
 
 func addChild(ctx context.Context, root, publishedRoot string, c component) (plumbing.Hash, error) {
+	return addChildWithDatabase(ctx, root, publishedRoot, c, false)
+}
+
+func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c component, databaseSelected bool) (plumbing.Hash, error) {
 	if err := ctx.Err(); err != nil {
 		return plumbing.ZeroHash, err
 	}
@@ -232,6 +243,15 @@ func addChild(ctx context.Context, root, publishedRoot string, c component) (plu
 	}
 	if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root); err != nil {
 		return plumbing.ZeroHash, err
+	}
+	if c.id == "api" {
+		goMod, goSum := apiManifests(databaseSelected)
+		if err := writeFile(filepath.Join(bootstrap, "go.mod"), goMod); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		if err := writeFile(filepath.Join(bootstrap, "go.sum"), goSum); err != nil {
+			return plumbing.ZeroHash, err
+		}
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
