@@ -122,10 +122,31 @@ IDs. After the existing Web/Mobile/API/Database questions, `smt new` offers a
 default-no quality-root declaration; opting in records only `modules: [e2e]` on
 the root, with no E2E repository, scaffold, or generated artifact. The catalog
 and its verification/scaffold fields are declarations only. The `.5` slice
-does not create platform repositories, platform scaffolds, or runtime artifacts;
-install tools, skills, or MCP; mutate host configuration; or run
-Compose/Podman/Kubernetes/ArgoCD/OpenTofu. Runnable starters, platform runtime
-work, a remote module registry, and `smt extend` remain deferred.
+does not create platform repositories or platform scaffolds, install tools,
+skills, or MCP, mutate host configuration, or run platform runtimes.
+
+The implemented `.3.1` slice adds a deterministic root runtime contract:
+`smt apply` writes `compose.yaml` and `.env.example`, and root `.gitignore`
+ignores `.env`. Compose contains only selected `web`, `api`, and `database`
+services; Mobile remains outside OCI Compose. API-only, Database-only, Web-only,
+API+Database, all-OCI, empty, and Mobile-only selections remain valid. Default
+bindings are Web `3000:3000`, API `8080:8080`, and Database `5432:5432`, with
+`WEB_PORT`, `API_PORT`, and `DATABASE_PORT` overrides. The project name is the
+safe lowercase-hyphen destination basename capped at 63 characters, falling
+back to `smt-workspace`.
+
+Web probes `/healthz`; API health/readiness are `/healthz` and `/readyz`; and
+Database health uses `pg_isready`. Web depends conditionally on a healthy API,
+and API depends conditionally on a healthy Database. `.env.example` contains
+examples only with an empty `DATABASE_PASSWORD=`; no credentials or `.env`
+file is generated. The pure preflight API reports invalid or occupied ports
+and missing Podman/Podman Compose prerequisites through injectable checks, but
+`smt apply` remains offline and does not invoke Preflight, Podman, Compose,
+socket probing, or health checks.
+
+Future component build contexts, Containerfiles, lifecycle tasks, runnable
+starters, platform runtime work, a remote module registry, and `smt extend`
+remain deferred; `.3.1` adds no app-domain behavior.
 
 Generation remains offline and byte-stable for identical selections in fresh
 destinations. `smt apply` rejects missing, unsupported, or unknown provenance

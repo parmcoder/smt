@@ -44,14 +44,15 @@ Beads lifecycle commands. Implemented commands are:
 - `smt apply [--config FILE] PATH` — validate the supplied workspace
   blueprint/configuration, then create the root Git repository, selected local
   bootstrap submodules, ignore files, Beads metadata, and repository-local
-  agent workflow files at a new destination. It does not install dependencies,
-  create remote repositories, or call provider APIs. It refuses an existing
-  destination file or directory; apply has no overwrite, merge, regenerate,
-  upgrade, or `smt extend` path. Generated blueprints must contain the exact
-  repository module annotations from the static catalog; apply persists those
-  annotations but does not execute their verification recipes, install their
-  tools, skills, or MCP integrations, mutate host configuration, or create
-  module repositories.
+  agent workflow files plus deterministic root `compose.yaml` and
+  `.env.example` at a new destination; root `.gitignore` ignores `.env`. It
+  does not install dependencies, create remote repositories, call provider
+  APIs, or invoke Podman/Compose. It refuses an existing destination file or
+  directory; apply has no overwrite, merge, regenerate, upgrade, or `smt extend`
+  path. Generated blueprints must contain the exact repository module
+  annotations from the static catalog; apply persists those annotations but
+  does not execute their verification recipes, install their tools, skills, or
+  MCP integrations, mutate host configuration, or create module repositories.
 - `smt push [--dry-run]` — preflight every configured repository, then push
   each child repository's current branch before the root. Remote URLs come from
   `repositories[].remote.url`; dry-run validates and prints the order without
@@ -303,11 +304,51 @@ role and placement. Component repositories receive exact selectable IDs
 (`web`, `mobile`, `api`, and `database`). Opting into the quality declaration
 adds only `modules: [e2e]` to the root; it creates no E2E repository, scaffold,
 or other artifact. `smt apply` persists accepted selectable annotations, but
-the `.5` slice adds declarations and validation only: it creates no platform
-repositories, platform scaffolds, or platform runtime artifacts; installs no
-tools, skills, or MCP integrations; mutates no host configuration; and does not
-run Compose, Podman, Kubernetes, ArgoCD, or OpenTofu. Runnable starters and
-`smt extend` remain deferred.
+the `.5` slice adds declarations and validation only. The implemented `.3.1`
+slice adds the root runtime contract files below; it does not create platform
+repositories, platform scaffolds, or platform runtime artifacts; install tools,
+skills, or MCP integrations; mutate host configuration; or run Compose,
+Podman, Kubernetes, ArgoCD, or OpenTofu. Runnable starters and `smt extend`
+remain deferred.
+
+### Implemented `.3.1` local OCI runtime contract
+
+Applying a blueprint writes deterministic root `compose.yaml` and
+`.env.example` files and adds `.env` to the root `.gitignore`. The renderer is
+offline and declarative. Compose service IDs are only `web`, `api`, and
+`database`; Mobile remains outside OCI Compose. The valid API-only,
+Database-only, Web-only, API+Database, all-OCI, empty, and Mobile-only
+selections remain valid, and Compose emits only the selected OCI services. An
+empty or Mobile-only selection emits `services: {}`.
+
+The default host bindings are `3000:3000` for Web, `8080:8080` for API, and
+`5432:5432` for Database. The canonical overrides are `WEB_PORT`, `API_PORT`,
+and `DATABASE_PORT`; zero uses the reviewed default and a non-zero override
+must be a TCP port from 1 through 65535. The Compose project name is derived
+only from the destination basename: lowercase, safe hyphen form, capped at 63
+characters, with `smt-workspace` as the fallback. The same values appear in
+`.env.example`, which contains examples only and an empty
+`DATABASE_PASSWORD=`. Its declarative examples include `COMPOSE_PROJECT_NAME`,
+the three port overrides, `API_BASE_URL`, `DATABASE_HOST`, `DATABASE_NAME`, and
+`DATABASE_USER`; no credentials or `.env` file is generated.
+
+Web's contract probes `/healthz`. API health/readiness are `/healthz` and
+`/readyz`, and Database health uses `pg_isready`. When both services are
+selected, Web depends on API with `condition: service_healthy`; when API and
+Database are selected, API depends on Database with the same condition. The
+generated contract may reference the future component build contexts at
+`./web-app`, `./apis`, and `./database`, but `.3.1` does not generate their
+Containerfiles or add application-domain behavior.
+
+The pure `runtime.Preflight` API validates override ranges and selected-port
+collisions, can report occupied ports through an injected port check, and can
+report missing Podman or Podman Compose through injected prerequisite checks.
+Its errors identify the service/port or environment key and an actionable
+change/install/configuration step. It does not execute external commands by
+itself. `smt apply` invokes rendering only: it does not invoke Preflight,
+Podman, Compose, socket probing, or runtime health checks. Future component
+build contexts, Containerfiles, and lifecycle tasks belong to `smt-4xf.3.2`
+through `.3.6`.
 
 Legacy DevOps-shaped configurations are rejected by `smt apply` before any
 destination mutation. The migration-oriented error directs the operator to
@@ -357,12 +398,14 @@ implemented by the CLI or this release:
 The broader runnable-starter and platform work is planned, not implemented:
 the five layers remain in this repository initially, and the six platform
 capabilities above are declarations only. This release provides no runnable
-templates, platform repositories or scaffolds, Podman/Compose artifacts,
-Kubernetes/ArgoCD/OpenTofu runtime, remote module registry, or `smt extend`
-command. The static module catalog and repository annotations above are
-implemented metadata only: verification recipes are not executed, and no
-platform runtime artifact or E2E/module repository is generated. AWS +
-Apptainer + OpenTofu remains later discovery.
+component templates or Containerfiles, platform repositories or scaffolds,
+Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime, remote module
+registry, or `smt extend` command. The `.3.1` `compose.yaml` and `.env.example`
+are contract-only root artifacts; they do not imply a runnable stack. The
+static module catalog and repository annotations above are implemented metadata
+only: verification recipes are not executed, and no platform runtime artifact
+or E2E/module repository is generated. AWS + Apptainer + OpenTofu remains later
+discovery.
 
 Git lifecycle operations preflight all configured repositories before a remote
 push or worktree creation. Pushes are child-first and stop after a failure with

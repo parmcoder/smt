@@ -16,8 +16,8 @@ updated: 2026-08-17
 
 ## Purpose and status
 
-This is a researched planned contract for generated component repositories,
-not implemented behavior. It refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice is narrower: it adds a static schema-v1 catalog and validation metadata only. Current `smt apply` remains deterministic and offline: it must not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration, and it rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in declarations and `doctor` guidance.
+This is a researched planned contract for generated component repositories; its
+component toolchain sections are not implemented behavior. It refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it. Current `smt apply` remains deterministic and offline: it must not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration, and it rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
 
 Each component has four layers: native CLI/toolchain; repeatable Taskfile
 gates; agent skills; and optional MCP/live-runtime integration. Taskfiles use
@@ -54,10 +54,35 @@ non-selectable platform metadata before topology or staging/destination
 mutation.
 
 The catalog's verification, agent/skill, and scaffold-asset fields are
-declarations. This slice creates no platform repositories, scaffolds, or
-runtime artifacts; installs no tools, skills, or MCP; mutates no host
+declarations. The `.5` slice creates no platform repositories, scaffolds, or
+platform runtime artifacts; installs no tools, skills, or MCP; mutates no host
 configuration; and runs no Compose, Podman, Kubernetes, ArgoCD, or OpenTofu
 runtime. Runnable starters and `smt extend` remain deferred.
+
+## Implemented `.3.1` runtime boundary
+
+`smt apply` now emits deterministic root `compose.yaml` and `.env.example`,
+and root `.gitignore` ignores `.env`. Compose contains only selected `web`,
+`api`, and `database` services; Mobile remains outside OCI Compose. API-only,
+Database-only, Web-only, API+Database, all-OCI, empty, and Mobile-only
+selections remain valid. Default host bindings are Web `3000:3000`, API
+`8080:8080`, and Database `5432:5432`, overridden by `WEB_PORT`, `API_PORT`,
+and `DATABASE_PORT`. The project name is the normalized destination basename
+in safe lowercase-hyphen form, capped at 63 characters, with
+`smt-workspace` fallback.
+
+Web uses `/healthz`; API health/readiness use `/healthz` and `/readyz`; and
+Database uses `pg_isready`. Web-to-API and API-to-Database dependencies are
+conditional on `service_healthy`. `.env.example` is examples-only with an
+empty `DATABASE_PASSWORD=` and no generated credentials.
+
+`runtime.Preflight` is a pure, injectable contract for future Taskfile/CLI use:
+it reports invalid or colliding/occupied ports and missing Podman or Podman
+Compose prerequisites with actionable guidance. It does not execute external
+commands itself. Apply renders the files but does not invoke Preflight, Podman,
+Compose, socket probing, or health checks. Component build contexts,
+Containerfiles, lifecycle tasks, and app-domain behavior remain deferred to
+`.3.2` through `.3.6`.
 
 ## Deferred generated manifest ownership
 
@@ -135,9 +160,10 @@ golang-migrate v4.19.1 up/version checks, API-owned migrations, and disposable
 Podman-backed integration tests. No automatic migration, down, drop, or force.
 Reuse Godex database guidance; no DB MCP is required for v0.1.0.
 
-## Container / root workspace (deferred)
+## Container / root workspace
 
-The future root Taskfile will orchestrate component gates and Beads-aware verification.
+The root runtime contract is implemented, but the future root Taskfile will
+orchestrate component gates and Beads-aware verification.
 Podman/Compose smoke tests cover build, start, health/readiness, shutdown, and
 non-root identity. Gitleaks/security tasks are required before a production
 candidate. SBOM, signing, and remote CI are deferred.
@@ -150,7 +176,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Next.js Web | `package.json`, `package-lock.json` | Node, Next.js, npm lockfile | Prettier, ESLint, TypeScript, Vitest/RTL, build, Playwright | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml` | Flutter/Dart, Android/iOS debug toolchains | format, analyze, unit/widget, integration, debug builds | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
-| Root/container | None | Podman/Compose, Taskfile, Beads, Gitleaks | smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | live runtime checks opt-in; no `.5` runtime |
+| Root/container | `compose.yaml`, `.env.example` | none for apply; Podman/Compose for deferred runtime | contract inspection; future smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | no runtime execution in `.3.1` |
 
 ## Research sources
 

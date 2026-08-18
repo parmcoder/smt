@@ -51,12 +51,14 @@ bin/smt apply --config ../platform-config/smt.yaml ../platform
 
 `apply` validates the supplied workspace blueprint/configuration, creates a
 root repository plus one local submodule per selected component, and writes the
-workspace files and local workflow metadata at a destination that does not
-already exist. With Mobile selected, it creates a Git-ready `mobile-app` shell,
+workspace files, local workflow metadata, deterministic `compose.yaml`, and
+`.env.example` at a destination that does not already exist. Root `.gitignore`
+ignores `.env`. With Mobile selected, it creates a Git-ready `mobile-app` shell,
 `mobile_worker` manifest, Flutter README and ignore rules, and a
 `.tool-versions` Flutter `3.44.9` pin—not application source. It does not
 invoke or require Flutter or its SDK, install dependencies, access the network,
-sign an app, or publish an app. It does not create remote repositories.
+invoke Podman or Compose, sign an app, or publish an app. It does not create
+remote repositories.
 Legacy DevOps-shaped configurations are rejected before destination mutation;
 remove the legacy entries and regenerate the blueprint. Generated blueprints
 must carry the exact supported provenance; missing, unsupported, or unknown
@@ -65,11 +67,42 @@ non-generated version-1 configuration without provenance remains usable for
 lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
-release does not provide runnable Web/API/Mobile templates, Podman/Compose
-artifacts, platform repositories/scaffolds/runtime artifacts, a remote module
-registry, or `smt extend`. Generated module annotations are persisted, but apply does not
+release does not provide runnable Web/API/Mobile templates, component
+Containerfiles, platform repositories/scaffolds/runtime artifacts, Podman or
+Compose execution, a remote module registry, or `smt extend`. The generated
+`compose.yaml` and `.env.example` are contract-only artifacts. Generated module
+annotations are persisted, but apply does not
 execute their verification recipes, install referenced tools/skills/MCP,
 mutate host configuration, or create module repositories.
+
+### Inspect the generated runtime contract
+
+After applying a blueprint, inspect the offline contract without starting any
+runtime:
+
+```sh
+sed -n '1,220p' ../platform/compose.yaml
+cat ../platform/.env.example
+grep -n '\.env' ../platform/.gitignore
+```
+
+Compose service IDs are only `web`, `api`, and `database`, in that order when
+selected; Mobile is not an OCI service. API-only, Database-only, Web-only,
+API+Database, all-OCI, empty, and Mobile-only selections remain valid, with
+only selected OCI services emitted. Default host bindings are `3000:3000`,
+`8080:8080`, and `5432:5432`; override them with `WEB_PORT`, `API_PORT`, and
+`DATABASE_PORT`. The project name is the safe lowercase-hyphen destination
+basename, capped at 63 characters, with `smt-workspace` fallback.
+
+Web probes `/healthz`; API probes `/healthz` and `/readyz`; Database probes with
+`pg_isready`. Web-to-API and API-to-Database dependencies are conditional and
+use `service_healthy`. `.env.example` contains examples only and leaves
+`DATABASE_PASSWORD=` empty; no credentials or `.env` file are generated.
+
+The pure preflight API has actionable invalid-port, selected-port collision,
+occupied-port, missing-Podman, and missing-Podman-Compose errors for future
+Taskfile/CLI consumers. `smt apply` does not invoke that preflight, Podman,
+Compose, socket probing, or health checks.
 
 ### Inspect module declarations
 

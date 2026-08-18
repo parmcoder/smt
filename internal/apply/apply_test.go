@@ -684,6 +684,42 @@ func TestMobileAbsentLeavesExistingArtifactOutputUnchanged(t *testing.T) {
 	}
 }
 
+func TestServiceWritesDeterministicRuntimeArtifactsForSelectedOCIComponents(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "Runtime Workspace")
+	raw := blueprintBytes()
+	cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		Config:        *cfg,
+		Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+		Beads:         initializerFunc(func(context.Context, string) error { return nil }),
+	}
+	if err := service.Apply(context.Background(), destination, raw); err != nil {
+		t.Fatal(err)
+	}
+	compose, err := os.ReadFile(filepath.Join(destination, "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(compose), "name: runtime-workspace") || !strings.Contains(string(compose), "  web:\n") || strings.Contains(string(compose), "  mobile:\n") {
+		t.Fatalf("runtime Compose = %s", compose)
+	}
+	envExample, err := os.ReadFile(filepath.Join(destination, ".env.example"))
+	if err != nil || !strings.Contains(string(envExample), "COMPOSE_PROJECT_NAME=runtime-workspace\n") {
+		t.Fatalf("runtime env example = %q, err=%v", envExample, err)
+	}
+	if _, err := os.Lstat(filepath.Join(destination, ".env")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected generated .env: %v", err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(destination, ".gitignore"))
+	if err != nil || !strings.Contains(string(ignore), "\n.env\n") {
+		t.Fatalf("root .gitignore = %q, err=%v", ignore, err)
+	}
+}
+
 func TestServiceWritesPortableLefthookConfigurationWithoutLefthookOnPath(t *testing.T) {
 	parent := t.TempDir()
 	raw := []byte(`version: 1

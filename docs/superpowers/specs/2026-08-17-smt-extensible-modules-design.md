@@ -91,9 +91,10 @@ Mobile is a runnable Android/iOS starter but not an OCI workload. It should
 include health/readiness, graceful shutdown, migrations owned by the API,
 non-root container images, lockfiles, and smoke commands without inventing
 CRUD or domain behavior. Workspace creation remains deterministic and offline;
-runtime tools are used only by later verification. None of those runnable
-templates or Podman/Compose artifacts are provided by the accepted taxonomy
-change.
+runtime tools are used only by later verification. `.3.1` now emits the
+contract-only root `compose.yaml` and `.env.example`, but none of the runnable
+component templates, Containerfiles, or Podman/Compose execution are provided
+by this contract.
 
 Platform capabilities are decomposed into `container`, `cicd`,
 `observability`, `iac`, `k8s`, and `argocd`; the `.5` catalog implements these
@@ -101,6 +102,33 @@ as non-selectable declarations, and `argocd` depends on `k8s`. Their platform
 repositories, scaffolds, runtime artifacts, and execution remain deferred.
 AWS + Apptainer + OpenTofu is a later discovery and compatibility milestone,
 not part of this restructure.
+
+## Implemented `.3.1` root runtime contract
+
+The generated root contains deterministic `compose.yaml` and `.env.example`
+files, and root `.gitignore` ignores `.env`. Compose service IDs are only
+`web`, `api`, and `database`; Mobile remains outside OCI Compose. API-only,
+Database-only, Web-only, API+Database, all-OCI, empty, and Mobile-only
+selections remain valid, with only selected OCI services emitted.
+
+Default host bindings are Web `3000:3000`, API `8080:8080`, and Database
+`5432:5432`, with canonical `WEB_PORT`, `API_PORT`, and `DATABASE_PORT`
+overrides. The Compose project name is the normalized destination basename in
+safe lowercase-hyphen form, capped at 63 characters, with
+`smt-workspace` fallback. `.env.example` contains examples only, including an
+empty `DATABASE_PASSWORD=`; no credentials or `.env` file is generated.
+
+Web probes `/healthz`; API health/readiness are `/healthz` and `/readyz`; and
+Database health uses `pg_isready`. Web-to-API and API-to-Database dependencies
+are conditional and use `service_healthy`.
+
+The pure `runtime.Preflight` API provides actionable invalid-port,
+selected-port collision, occupied-port, missing-Podman, and missing Podman
+Compose errors through injectable checks for later Taskfile/CLI use. It does
+not execute external commands itself. `smt apply` renders the contract files
+offline and does not invoke Preflight, Podman, Compose, socket probing, or
+health checks. Component build contexts, Containerfiles, lifecycle tasks, and
+application-domain behavior remain deferred to `.3.2` through `.3.6`.
 
 ## Implemented static module catalog
 
@@ -166,14 +194,16 @@ implementation is deferred until the version-1 restructure is complete.
 ## Boundaries and acceptance
 
 The accepted `.2` scope is the starter component taxonomy and configuration
-gate; `.4` adds the selectable catalog and repository module annotations, and
-`.5` adds the six non-selectable platform declarations plus catalog/config
-validation boundaries above. Remaining design scope is the Podman-first local
-runtime skeleton and platform runtime implementation. Out of scope for the
-current CLI are runnable starters, platform repositories/scaffolds/runtime
-artifacts, Podman/Compose execution, Kubernetes or ArgoCD deployment, OpenTofu
-execution, a remote module registry, implementing `smt extend`, provider/cloud
-creation, fake CRUD, and AWS runtime selection.
+gate; `.4` adds the selectable catalog and repository module annotations, `.5`
+adds the six non-selectable platform declarations plus catalog/config
+validation boundaries, and `.3.1` adds the root runtime contract artifacts.
+Remaining design scope is the Podman-first runnable runtime skeleton and
+platform runtime implementation. Out of scope for the current CLI are
+runnable component templates, Containerfiles, platform
+repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
+or ArgoCD deployment, OpenTofu execution, a remote module registry,
+implementing `smt extend`, provider/cloud creation, fake CRUD, and AWS runtime
+selection.
 
 Acceptance requires the canonical docs and generated guidance to distinguish
 implemented behavior from planned behavior. Beads is the source of truth for

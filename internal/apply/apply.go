@@ -15,6 +15,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/parmcoder/smt/internal/config"
+	"github.com/parmcoder/smt/internal/runtime"
 )
 
 type Prerequisite interface{ Check(context.Context) error }
@@ -197,7 +198,7 @@ func buildWorkspace(ctx context.Context, root, publishedRoot string, cfg config.
 		return err
 	}
 	cs := components(cfg)
-	if err := writeArtifacts(root, cs); err != nil {
+	if err := writeArtifacts(root, publishedRoot, cs); err != nil {
 		return err
 	}
 	for _, c := range cs {
@@ -399,9 +400,26 @@ func copyDirectory(source, destination string) error {
 	return nil
 }
 
-func writeArtifacts(root string, cs []component) error {
+func writeArtifacts(root, publishedRoot string, cs []component) error {
+	selection := runtime.Selection{}
+	for _, c := range cs {
+		switch c.id {
+		case runtime.ServiceWeb:
+			selection.Web = true
+		case runtime.ServiceAPI:
+			selection.API = true
+		case runtime.ServiceDatabase:
+			selection.Database = true
+		}
+	}
+	runtimeArtifacts, err := runtime.Render(runtime.RenderOptions{WorkspacePath: publishedRoot, Selection: selection})
+	if err != nil {
+		return fmt.Errorf("render runtime artifacts: %w", err)
+	}
 	files := map[string]string{
-		".gitignore":                     "**/.DS_Store\n**/Thumbs.db\n**/desktop.ini\n\n.smt/\n",
+		".gitignore":                     "**/.DS_Store\n**/Thumbs.db\n**/desktop.ini\n\n.smt/\n.env\n",
+		"compose.yaml":                   string(runtimeArtifacts.Compose),
+		".env.example":                   string(runtimeArtifacts.EnvExample),
 		"README.md":                      "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n\nBeads configuration is tracked with the workspace; its embedded Dolt database and local runtime files stay on this machine and are ignored by Git.\n",
 		".tool-versions":                 toolVersions(cs),
 		"AGENTS.md":                      "# Project Agent Operating Agreement\n\nGo work uses `$godex:godex-go-backend`. Beads (`bd`) is the canonical task and issue state. Agents create tickets directly with `bd create`; the `work_manager` owns delivery decisions.\n\nWorkflow: `bd create -> worker -> tests -> manager review -> durable handoff/docs -> validation`. SMT does not wrap ticket creation, review queues, ready-work listing, or release readiness.\n\nOn the default branch, use ordinary `type(scope): summary` commits. On a Beads-ID branch, commits must use `type(scope): [BEAD-ID] summary`, with the ID exactly matching the branch.\n",
