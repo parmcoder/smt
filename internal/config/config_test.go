@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -529,6 +530,31 @@ repositories:
 	}
 }
 
+func TestRepositoryModulesAcceptNonSelectablePlatformMetadata(t *testing.T) {
+	raw := `version: 1
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, modules: [container]}
+`
+	if _, err := LoadBytes([]byte(raw), "/tmp/smt.yaml"); err != nil {
+		t.Fatalf("LoadBytes() error = %v, want known non-selectable metadata accepted", err)
+	}
+}
+
+func TestRepositoryModulesValidateNonSelectableDependencies(t *testing.T) {
+	base := `version: 1
+commit: {types: [feat], scopes: [repo]}
+repositories:
+  - {id: repo, path: ., scope: repo, modules: [%s]}
+`
+	if _, err := LoadBytes([]byte(fmt.Sprintf(base, "argocd")), "/tmp/smt.yaml"); err == nil || !strings.Contains(err.Error(), `requires capability "k8s"`) {
+		t.Fatalf("LoadBytes() error = %v, want argocd dependency validation", err)
+	}
+	if _, err := LoadBytes([]byte(fmt.Sprintf(base, "argocd, k8s")), "/tmp/smt.yaml"); err != nil {
+		t.Fatalf("LoadBytes() error = %v, want known platform metadata with satisfied dependency", err)
+	}
+}
+
 func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 	catalog := BuiltInModuleCatalog()
 	if err := catalog.Validate(); err != nil {
@@ -537,7 +563,7 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 	if catalog.SchemaVersion != 1 {
 		t.Fatalf("schema version = %d, want 1", catalog.SchemaVersion)
 	}
-	wantIDs := []string{"web", "mobile", "api", "database", "e2e"}
+	wantIDs := []string{"web", "mobile", "api", "database", "e2e", "container", "cicd", "observability", "iac", "k8s", "argocd"}
 	if len(catalog.Modules) != len(wantIDs) {
 		t.Fatalf("catalog IDs = %#v, want exactly %#v", catalog.Modules, wantIDs)
 	}
@@ -545,8 +571,20 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 		if catalog.Modules[i].ID != want {
 			t.Fatalf("catalog module %d = %#v, want ID %q", i, catalog.Modules[i], want)
 		}
-		if len(catalog.Modules[i].Verification) == 0 || len(catalog.Modules[i].ScaffoldAssets) == 0 || len(catalog.Modules[i].Agents) == 0 || len(catalog.Modules[i].Skills) == 0 {
-			t.Fatalf("catalog module %q lacks declarative verification/assets/agent/skill fields: %#v", want, catalog.Modules[i])
+		if catalog.Modules[i].Selectable != (i < 5) {
+			t.Fatalf("catalog module %q selectable = %t, want %t", want, catalog.Modules[i].Selectable, i < 5)
+		}
+		if i >= 5 && (catalog.Modules[i].Category != "platform" || catalog.Modules[i].Layer != "platform-delivery") {
+			t.Fatalf("platform module %q category/layer = %q/%q, want platform/platform-delivery", want, catalog.Modules[i].Category, catalog.Modules[i].Layer)
+		}
+		if len(catalog.Modules[i].CompletionCriteria) == 0 {
+			t.Fatalf("catalog module %q lacks completion criteria", want)
+		}
+		if i < 5 && (len(catalog.Modules[i].Verification) == 0 || len(catalog.Modules[i].ScaffoldAssets) == 0 || len(catalog.Modules[i].Agents) == 0 || len(catalog.Modules[i].Skills) == 0) {
+			t.Fatalf("selectable catalog module %q lacks declarative verification/assets/agent/skill fields: %#v", want, catalog.Modules[i])
+		}
+		if i >= 5 && len(catalog.Modules[i].ScaffoldAssets) != 0 {
+			t.Fatalf("platform module %q has scaffold assets: %#v", want, catalog.Modules[i].ScaffoldAssets)
 		}
 		for _, verification := range catalog.Modules[i].Verification {
 			if verification.ID == "" || len(verification.Argv) == 0 || verification.MutatesWorktree {
@@ -554,28 +592,127 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 			}
 		}
 	}
-	if got := catalog.Modules[0].Repository; got.Path != "web-app" || got.Scope != "web" {
-		t.Fatalf("web placement = %#v", got)
+	wantPlacements := map[string]ModuleRepositoryPlacement{
+		"web":           {Path: "web-app", Scope: "web", Mode: "independent", Targets: []string{"web"}},
+		"mobile":        {Path: "mobile-app", Scope: "mobile", Mode: "independent", Targets: []string{"mobile"}},
+		"api":           {Path: "apis", Scope: "api", Mode: "independent", Targets: []string{"api"}},
+		"database":      {Path: "database", Scope: "database", Mode: "independent", Targets: []string{"database"}},
+		"e2e":           {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo"}},
+		"container":     {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"web", "api"}},
+		"cicd":          {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo", "web", "mobile", "api", "database"}},
+		"observability": {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"web", "api", "database"}},
+		"iac":           {Path: "platform/iac", Scope: "iac", Mode: "independent", Targets: []string{"repo"}},
+		"k8s":           {Path: "platform/k8s", Scope: "k8s", Mode: "independent", Targets: []string{"repo"}},
+		"argocd":        {Path: "platform/argocd", Scope: "argocd", Mode: "independent", Targets: []string{"repo"}},
 	}
-	if got := catalog.Modules[1].Repository; got.Path != "mobile-app" || got.Scope != "mobile" {
-		t.Fatalf("mobile placement = %#v", got)
+	for _, module := range catalog.Modules {
+		want, ok := wantPlacements[module.ID]
+		if !ok || !reflect.DeepEqual(module.Repository, want) {
+			t.Fatalf("module %q placement = %#v, want %#v", module.ID, module.Repository, want)
+		}
 	}
-	if got := catalog.Modules[2].Repository; got.Path != "apis" || got.Scope != "api" {
-		t.Fatalf("api placement = %#v", got)
+	for _, module := range catalog.Modules[5:] {
+		if strings.Join(module.Provides, ",") != module.ID {
+			t.Fatalf("platform module %q provides = %v, want its own capability", module.ID, module.Provides)
+		}
 	}
-	if got := catalog.Modules[3].Repository; got.Path != "database" || got.Scope != "database" {
-		t.Fatalf("database placement = %#v", got)
+	argocd := catalog.Modules[len(catalog.Modules)-1]
+	if strings.Join(argocd.Requires, ",") != "k8s" {
+		t.Fatalf("argocd requires = %v, want k8s", argocd.Requires)
 	}
-	if got := catalog.Modules[4].Repository; got.Path != "." || got.Scope != "repo" {
-		t.Fatalf("e2e placement = %#v", got)
+}
+
+func TestModuleCatalogRejectsArgocdWithoutK8sProvider(t *testing.T) {
+	catalog := BuiltInModuleCatalog()
+	filtered := catalog.Modules[:0]
+	for _, module := range catalog.Modules {
+		if module.ID != "k8s" {
+			filtered = append(filtered, module)
+		}
 	}
+	catalog.Modules = filtered
+	if err := catalog.Validate(); err == nil || !strings.Contains(err.Error(), `unknown capability "k8s"`) {
+		t.Fatalf("catalog.Validate() error = %v, want missing k8s provider error", err)
+	}
+}
+
+func TestModuleCatalogRejectsInvalidPlacementAndCompletionCriteria(t *testing.T) {
+	tests := map[string]func(*ModuleCatalog){
+		"unsupported mode": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "component", []string{"web"}, []string{"build web"})
+		},
+		"missing mode": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "", []string{"web"}, []string{"build web"})
+		},
+		"empty target": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "independent", []string{""}, []string{"build web"})
+		},
+		"unknown target": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "independent", []string{"missing"}, []string{"build web"})
+		},
+		"duplicate target": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "independent", []string{"web", "web"}, []string{"build web"})
+		},
+		"missing completion criteria": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "independent", []string{"web"}, nil)
+		},
+		"blank completion criteria": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "independent", []string{"web"}, []string{" "})
+		},
+		"duplicate completion criteria": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "independent", []string{"web"}, []string{"web.declaration", "web.declaration"})
+		},
+		"prose completion criteria": func(catalog *ModuleCatalog) {
+			setModuleContractForTest(t, catalog, "web", "independent", []string{"web"}, []string{"build web"})
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			catalog := BuiltInModuleCatalog()
+			setValidModuleContractsForTest(t, &catalog)
+			mutate(&catalog)
+			err := catalog.Validate()
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "module") && !strings.Contains(strings.ToLower(err.Error()), "placement") && !strings.Contains(strings.ToLower(err.Error()), "completion") {
+				t.Fatalf("catalog.Validate() error = %v, want placement/completion validation error", err)
+			}
+		})
+	}
+}
+
+func setValidModuleContractsForTest(t *testing.T, catalog *ModuleCatalog) {
+	t.Helper()
+	for i := range catalog.Modules {
+		mode, targets := "independent", []string{catalog.Modules[i].ID}
+		if catalog.Modules[i].ID == "e2e" {
+			mode, targets = "attached", []string{"repo"}
+		}
+		setModuleContractForTest(t, catalog, catalog.Modules[i].ID, mode, targets, []string{catalog.Modules[i].ID + ".declaration"})
+	}
+}
+
+func setModuleContractForTest(t *testing.T, catalog *ModuleCatalog, id, mode string, targets, criteria []string) {
+	t.Helper()
+	for i := range catalog.Modules {
+		if catalog.Modules[i].ID != id {
+			continue
+		}
+		catalog.Modules[i].Repository.Mode = mode
+		catalog.Modules[i].Repository.Targets = targets
+		catalog.Modules[i].CompletionCriteria = criteria
+		return
+	}
+	t.Fatalf("module %q not found", id)
 }
 
 func TestModuleCatalogAcceptsAllFiveLayerVocabularyPairs(t *testing.T) {
 	catalog := BuiltInModuleCatalog()
+	shared := moduleDefinitionForTest("shared-extra", "control-plane", "control-plane", "shared-extra")
+	shared.Repository.Mode = "shared"
+	shared.Repository.Targets = []string{"repo"}
 	catalog.Modules = append(catalog.Modules,
-		moduleDefinitionForTest("control", "control-plane", "control-plane", "control"),
-		moduleDefinitionForTest("platform", "platform", "platform-delivery", "platform"),
+		moduleDefinitionForTest("control-extra", "control-plane", "control-plane", "control-extra"),
+		moduleDefinitionForTest("platform-extra", "platform", "platform-delivery", "platform-extra"),
+		shared,
 	)
 	if err := catalog.Validate(); err != nil {
 		t.Fatalf("catalog.Validate() error = %v, want all five taxonomy pairs accepted", err)
@@ -584,7 +721,7 @@ func TestModuleCatalogAcceptsAllFiveLayerVocabularyPairs(t *testing.T) {
 
 func TestModuleCatalogRejectsMismatchedLayerPair(t *testing.T) {
 	catalog := BuiltInModuleCatalog()
-	catalog.Modules = append(catalog.Modules, moduleDefinitionForTest("platform", "platform", "control-plane", "platform"))
+	catalog.Modules = append(catalog.Modules, moduleDefinitionForTest("platform-invalid", "platform", "control-plane", "platform-invalid"))
 	if err := catalog.Validate(); err == nil || !strings.Contains(err.Error(), "category/layer") {
 		t.Fatalf("catalog.Validate() error = %v, want category/layer mismatch", err)
 	}
@@ -620,8 +757,8 @@ func TestModuleCatalogRejectsWindowsDrivePathOnUnix(t *testing.T) {
 
 func moduleDefinitionForTest(id, category, layer, capability string) ModuleDefinition {
 	return ModuleDefinition{
-		ID: id, Category: category, Layer: layer, Provides: []string{capability},
-		Repository: ModuleRepositoryPlacement{Path: id, Scope: id}, Agents: []string{id + "_worker"}, Skills: []string{id + "_skill"},
+		ID: id, Selectable: true, Category: category, Layer: layer, Provides: []string{capability},
+		Repository: ModuleRepositoryPlacement{Path: id, Scope: id, Mode: "independent", Targets: []string{id}}, CompletionCriteria: []string{id + ".declaration"}, Agents: []string{id + "_worker"}, Skills: []string{id + "_skill"},
 		Verification:   []VerificationRequirement{{ID: id + "-verify", Argv: []string{"task", "verify"}}},
 		ScaffoldAssets: []ScaffoldAsset{{ID: id + "-asset", Path: id, Revision: "v1"}},
 	}

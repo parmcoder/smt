@@ -79,6 +79,9 @@ func (s Service) Apply(ctx context.Context, destination string, raw []byte) erro
 	if err := config.LegacyDevOpsError(raw); err != nil {
 		return err
 	}
+	if err := validateSelectableModuleMetadata(s.Config); err != nil {
+		return err
+	}
 	if s.Prerequisites == nil || (s.Beads == nil && !s.DefaultBeads) {
 		return fmt.Errorf("apply service dependencies are required")
 	}
@@ -144,6 +147,23 @@ func (s Service) Apply(ctx context.Context, destination string, raw []byte) erro
 	}
 	if err := s.Publish(stage, abs); err != nil {
 		return fmt.Errorf("publish staged workspace: %w", err)
+	}
+	return nil
+}
+
+func validateSelectableModuleMetadata(cfg config.Config) error {
+	definitions := config.BuiltInModuleCatalog().Modules
+	byModuleID := make(map[string]config.ModuleDefinition, len(definitions))
+	for _, definition := range definitions {
+		byModuleID[definition.ID] = definition
+	}
+	for _, repository := range cfg.Repositories {
+		for _, moduleID := range repository.Modules {
+			definition, ok := byModuleID[moduleID]
+			if ok && !definition.Selectable {
+				return fmt.Errorf("apply does not support non-selectable module %q", moduleID)
+			}
+		}
 	}
 	return nil
 }
@@ -488,6 +508,9 @@ func ValidateBlueprint(cfg config.Config) error {
 	}
 	if cfg.Providers.GitLab.APIBaseURL != "" || cfg.Providers.GitLab.EnterpriseBaseURL != "" || cfg.Providers.GitLab.EnterpriseUploadURL != "" || cfg.Providers.GitHub.APIBaseURL != "" || cfg.Providers.GitHub.EnterpriseBaseURL != "" || cfg.Providers.GitHub.EnterpriseUploadURL != "" || len(cfg.Contracts.Reference)+len(cfg.Contracts.Artifact)+len(cfg.Contracts.MigrationCoverage) != 0 {
 		return fmt.Errorf("apply requires only supported blueprint fields")
+	}
+	if err := validateSelectableModuleMetadata(cfg); err != nil {
+		return err
 	}
 	if len(cfg.Repositories) < 2 || cfg.Repositories[0].ID != "repo" || cfg.Repositories[0].Path != "." || cfg.Repositories[0].Scope != "repo" || cfg.Repositories[0].Provider != "" || cfg.Repositories[0].Project != "" {
 		return fmt.Errorf("apply requires the root blueprint repository")

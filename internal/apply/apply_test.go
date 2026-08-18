@@ -108,6 +108,40 @@ func TestValidateBlueprintAcceptsSharedQualityRootModule(t *testing.T) {
 	}
 }
 
+func TestValidateBlueprintRejectsNonSelectablePlatformMetadata(t *testing.T) {
+	valid, err := config.LoadBytes(exactModuleBlueprintBytes(), "/tmp/smt.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid.Repositories[0].Modules = []string{"container"}
+	if err := ValidateBlueprint(*valid); err == nil || !strings.Contains(err.Error(), "non-selectable module") {
+		t.Fatalf("ValidateBlueprint() error = %v, want non-selectable platform rejection", err)
+	}
+}
+
+func TestServiceApplyRejectsNonSelectablePlatformMetadataBeforeStaging(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "workspace")
+	raw := []byte(strings.Replace(string(exactModuleBlueprintBytes()), `{id: repo, path: ., scope: repo, remote: {url: ""}}`, `{id: repo, path: ., scope: repo, modules: [container], remote: {url: ""}}`, 1))
+	cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		Config:        *cfg,
+		Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+		Initialize:    initializerFunc(func(context.Context, string) error { t.Fatal("initializer called"); return nil }),
+		Beads:         initializerFunc(func(context.Context, string) error { t.Fatal("beads called"); return nil }),
+	}
+	if err := service.Apply(context.Background(), destination, raw); err == nil || !strings.Contains(err.Error(), "non-selectable module") {
+		t.Fatalf("Apply() error = %v, want non-selectable platform rejection", err)
+	}
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("destination=%v, want no destination after early rejection", err)
+	}
+	assertNoStage(t, parent)
+}
+
 func TestServicePersistsValidModuleDeclarationsWithoutExecution(t *testing.T) {
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
@@ -274,7 +308,7 @@ func TestServiceBuildsAllBasicComponentsWithoutInfrastructureArtifacts(t *testin
 	if strings.Contains(got, "devops") || strings.Contains(got, "infra") {
 		t.Fatalf(".gitmodules = %q, contains removed infrastructure entry", got)
 	}
-	for _, path := range []string{"devops", "infra", ".terraform", ".tofu"} {
+	for _, path := range []string{"devops", "infra", "container", "cicd", "observability", "iac", "k8s", "argocd", ".terraform", ".tofu"} {
 		if _, err := os.Lstat(filepath.Join(destination, path)); !os.IsNotExist(err) {
 			t.Fatalf("unexpected generated infrastructure path %s: %v", path, err)
 		}

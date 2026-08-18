@@ -77,46 +77,63 @@ The implemented version-1 module taxonomy uses the five-layer vocabulary
 `control-plane`, `application-components`, `shared-infrastructure`,
 `quality-verification`, and `platform-delivery`, while keeping the layers in
 this repository initially. The static schema-v1 catalog is code-owned rather
-than user YAML. Its built-in selectable entries are exactly Web, Mobile, API,
-Database, and the E2E quality declaration; it has no built-in control-plane or
-platform entry. Web, Mobile, and API are application components, Database is
-shared infrastructure, and E2E is quality verification.
+than user YAML and contains exactly 11 declarations: selectable `web`,
+`mobile`, `api`, `database`, and `e2e`, plus non-selectable platform
+declarations `container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd`.
+
+Placement is declarative. The validated mode vocabulary is `attached`, `shared`,
+and `independent`; the built-in `.5` declarations use `attached` or
+`independent` and reserve `shared` for a later declaration. The authoritative
+placement and completion matrix is:
+
+| Modules | Mode and targets | Stable completion IDs |
+| --- | --- | --- |
+| `web`, `mobile`, `api`, `database` | independent self-targets (`web`, `mobile`, `api`, `database`) | `web.declaration`, `mobile.declaration`, `api.declaration`, `database.declaration` |
+| `e2e` | attached to `repo` | `e2e.declaration` |
+| `container` | attached to `web` + `api` | `container.declaration` |
+| `cicd` | attached to `repo` + `web` + `mobile` + `api` + `database` | `cicd.repository-boundary` |
+| `observability` | attached to `web` + `api` + `database` | `observability.boundary` |
+| `iac` | independent at `platform/iac` | `iac.provider-neutral` |
+| `k8s` | independent at `platform/k8s` | `k8s.static-validation` |
+| `argocd` | independent at `platform/argocd`; requires `k8s` | `argocd.sync-policy` |
+
+The full declarations, including scopes, categories/layers, and exact target
+arrays, are canonical in [[SMT - Implementation Spec#Implemented `.5` module declaration contract|the implementation specification]].
+Catalog validation covers schema, duplicate and unknown references, safe paths,
+placement, capabilities, stable completion IDs, and dependency cycles.
+Configuration validation covers repository module IDs and required
+capabilities. `Config.LoadBytes` accepts known platform metadata when its
+references and dependencies are valid, including non-selectable declarations,
+but `Apply` and `ValidateBlueprint` reject non-selectable platform metadata
+before topology or staging/destination mutation.
 
 The accepted version-1 taxonomy/configuration change is implemented: new
 blueprints select independent Web, optional Mobile, API, and Database
 components in deterministic `repo`, `web`, `mobile`, `api`, `database` order,
 with omitted selections absent and the Mobile question immediately after Web;
-they have no DevOps prompt,
-`workspace.stack.devops`, combined `infra` repository, or Docker/OpenTofu
-component/tooling metadata or generated DevOps artifacts. Legacy
-DevOps-shaped configurations are rejected before `smt apply` mutates the
-destination, with a migration-oriented removal/regeneration error.
+they have no DevOps prompt, `workspace.stack.devops`, combined `infra`
+repository, or Docker/OpenTofu component/tooling metadata or generated DevOps
+artifacts. Legacy DevOps-shaped configurations are rejected before `smt apply`
+mutates the destination, with a migration-oriented removal/regeneration error.
 
 Repositories may carry optional `modules: [id...]` metadata, and configurations
 without that field remain valid. Component repositories receive exact catalog
 IDs. After the existing Web/Mobile/API/Database questions, `smt new` offers a
 default-no quality-root declaration; opting in records only `modules: [e2e]` on
 the root, with no E2E repository, scaffold, or generated artifact. The catalog
-also records capabilities, safe placement defaults, agent/skill references, argument-
-array verification requirements including mutability, and reviewed
-scaffold-asset identity. Catalog and configuration validation cover schema,
-duplicates, category/layer pairs, capability references and dependencies,
-unsafe paths, and repository module IDs. Apply requires exact generated
-annotations and persists them, but does not run verification recipes, install
-tools/skills/MCP, mutate host configuration, or create module repositories.
+and its verification/scaffold fields are declarations only. The `.5` slice
+does not create platform repositories, platform scaffolds, or runtime artifacts;
+install tools, skills, or MCP; mutate host configuration; or run
+Compose/Podman/Kubernetes/ArgoCD/OpenTofu. Runnable starters, platform runtime
+work, a remote module registry, and `smt extend` remain deferred.
 
-The runnable starter remains planned: Web, API, and PostgreSQL are intended to
-be runnable operational skeletons using Podman/Compose, and Mobile is intended
-as an Android/iOS starter rather than an OCI workload. This release provides
-no runnable templates or Podman/Compose artifacts. Platform artifacts and
-capabilities, a remote module registry, and `smt extend` remain deferred.
-Generation remains offline and byte-stable
-for identical selections in fresh destinations. `smt apply` rejects missing,
-unsupported, or unknown provenance before mutation and refuses an existing
-file or directory without overwrite, merge, regeneration, upgrade, or
-`smt extend` execution. A general non-generated version-1 configuration may
-still serve lifecycle and diagnostic commands without provenance, but it is not
-applyable as a new generated blueprint. See [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|SMT v0.1.0 Production Plan]]. Beads remains the delivery status source of truth.
+Generation remains offline and byte-stable for identical selections in fresh
+destinations. `smt apply` rejects missing, unsupported, or unknown provenance
+before mutation and refuses an existing file or directory without overwrite,
+merge, regeneration, upgrade, or `smt extend` execution. A general non-generated
+version-1 configuration may still serve lifecycle and diagnostic commands
+without provenance, but it is not applyable as a new generated blueprint. See
+[[../superpowers/specs/2026-08-17-smt-extensible-modules-design|SMT Extensible Modules Design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|SMT v0.1.0 Production Plan]]. Beads remains the delivery status source of truth.
 
 ## Related
 

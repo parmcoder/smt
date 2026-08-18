@@ -20,23 +20,27 @@ type ModuleCatalog struct {
 
 // ModuleDefinition declares one module's capabilities and reviewed metadata.
 type ModuleDefinition struct {
-	ID             string
-	Category       string
-	Layer          string
-	Provides       []string
-	Requires       []string
-	Optional       []string
-	Repository     ModuleRepositoryPlacement
-	Agents         []string
-	Skills         []string
-	Verification   []VerificationRequirement
-	ScaffoldAssets []ScaffoldAsset
+	ID                 string
+	Selectable         bool
+	Category           string
+	Layer              string
+	Provides           []string
+	Requires           []string
+	Optional           []string
+	Repository         ModuleRepositoryPlacement
+	CompletionCriteria []string
+	Agents             []string
+	Skills             []string
+	Verification       []VerificationRequirement
+	ScaffoldAssets     []ScaffoldAsset
 }
 
 // ModuleRepositoryPlacement is the safe default repository location for a module.
 type ModuleRepositoryPlacement struct {
-	Path  string
-	Scope string
+	Path    string
+	Scope   string
+	Mode    string
+	Targets []string
 }
 
 // VerificationRequirement is a declaration only. SMT never executes Argv.
@@ -55,6 +59,7 @@ type ScaffoldAsset struct {
 }
 
 var moduleIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+var completionCriteriaPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
 
 var moduleCategoryLayers = map[string]string{
 	"application":    "application-components",
@@ -96,7 +101,11 @@ func QualityRootModule(catalog ModuleCatalog) (ModuleDefinition, error) {
 }
 
 func (c *Config) validateRepositoryModules() error {
-	definitions := BuiltInModuleCatalog().Modules
+	catalog := BuiltInModuleCatalog()
+	if err := catalog.Validate(); err != nil {
+		return fmt.Errorf("built-in module catalog is invalid: %w", err)
+	}
+	definitions := catalog.Modules
 	byID := make(map[string]ModuleDefinition, len(definitions))
 	for _, definition := range definitions {
 		byID[definition.ID] = definition
@@ -164,6 +173,9 @@ func (catalog ModuleCatalog) Validate() error {
 		if err := validatePlacement(module.ID, module.Repository); err != nil {
 			return err
 		}
+		if err := validateCompletionCriteria(module.ID, module.CompletionCriteria); err != nil {
+			return err
+		}
 		if err := validateReferences(module.ID, "agent", module.Agents); err != nil {
 			return err
 		}
@@ -181,6 +193,20 @@ func (catalog ModuleCatalog) Validate() error {
 				return fmt.Errorf("module capability %q is provided by both %q and %q", capability, provider, module.ID)
 			}
 			providers[capability] = module.ID
+		}
+	}
+	byID := make(map[string]ModuleDefinition, len(catalog.Modules))
+	for _, module := range catalog.Modules {
+		byID[module.ID] = module
+	}
+	for _, module := range catalog.Modules {
+		for _, target := range module.Repository.Targets {
+			if target == "repo" {
+				continue
+			}
+			if _, exists := byID[target]; !exists {
+				return fmt.Errorf("module %q repository placement target %q is unknown", module.ID, target)
+			}
 		}
 	}
 
@@ -225,6 +251,45 @@ func validatePlacement(moduleID string, placement ModuleRepositoryPlacement) err
 	}
 	if err := validateSafeRelativePath(placement.Path); err != nil {
 		return fmt.Errorf("module %q repository path: %w", moduleID, err)
+	}
+	switch placement.Mode {
+	case "attached", "shared", "independent":
+	default:
+		return fmt.Errorf("module %q repository placement mode %q is unsupported", moduleID, placement.Mode)
+	}
+	if len(placement.Targets) == 0 {
+		return fmt.Errorf("module %q repository placement targets must not be empty", moduleID)
+	}
+	seen := make(map[string]struct{}, len(placement.Targets))
+	for _, target := range placement.Targets {
+		if !moduleIDPattern.MatchString(target) {
+			return fmt.Errorf("module %q repository placement target %q is not a safe identifier", moduleID, target)
+		}
+		if _, exists := seen[target]; exists {
+			return fmt.Errorf("module %q has duplicate repository placement target %q", moduleID, target)
+		}
+		seen[target] = struct{}{}
+	}
+	return nil
+}
+
+func validateCompletionCriteria(moduleID string, criteria []string) error {
+	if len(criteria) == 0 {
+		return fmt.Errorf("module %q completion criteria must not be empty", moduleID)
+	}
+	seen := make(map[string]struct{}, len(criteria))
+	for _, criterion := range criteria {
+		trimmed := strings.TrimSpace(criterion)
+		if trimmed == "" {
+			return fmt.Errorf("module %q completion criterion must not be blank", moduleID)
+		}
+		if !completionCriteriaPattern.MatchString(criterion) {
+			return fmt.Errorf("module %q completion criterion %q must be a stable safe ID", moduleID, criterion)
+		}
+		if _, exists := seen[trimmed]; exists {
+			return fmt.Errorf("module %q has duplicate completion criterion %q", moduleID, criterion)
+		}
+		seen[trimmed] = struct{}{}
 	}
 	return nil
 }
@@ -350,6 +415,8 @@ func cloneModuleCatalog(catalog ModuleCatalog) ModuleCatalog {
 		clone.Modules[i].Provides = append([]string(nil), module.Provides...)
 		clone.Modules[i].Requires = append([]string(nil), module.Requires...)
 		clone.Modules[i].Optional = append([]string(nil), module.Optional...)
+		clone.Modules[i].Repository.Targets = append([]string(nil), module.Repository.Targets...)
+		clone.Modules[i].CompletionCriteria = append([]string(nil), module.CompletionCriteria...)
 		clone.Modules[i].Agents = append([]string(nil), module.Agents...)
 		clone.Modules[i].Skills = append([]string(nil), module.Skills...)
 		clone.Modules[i].Verification = append([]VerificationRequirement(nil), module.Verification...)
@@ -365,39 +432,74 @@ var builtInModuleCatalog = ModuleCatalog{
 	SchemaVersion: ModuleCatalogSchemaVersion,
 	Modules: []ModuleDefinition{
 		{
-			ID: "web", Category: "application", Layer: "application-components", Provides: []string{"web"},
-			Repository: ModuleRepositoryPlacement{Path: "web-app", Scope: "web"}, Agents: []string{"web_worker"},
+			ID: "web", Selectable: true, Category: "application", Layer: "application-components", Provides: []string{"web"},
+			Repository:         ModuleRepositoryPlacement{Path: "web-app", Scope: "web", Mode: "independent", Targets: []string{"web"}},
+			CompletionCriteria: []string{"web.declaration"}, Agents: []string{"web_worker"},
 			Skills:         []string{"build-web-apps:react-best-practices", "build-web-apps:frontend-testing-debugging"},
 			Verification:   []VerificationRequirement{{ID: "web-verify", Argv: []string{"npm", "run", "verify"}, MutatesWorktree: false}},
 			ScaffoldAssets: []ScaffoldAsset{{ID: "web-manifest", Path: "package.json", Revision: "nextjs-16.2.9", Version: "v1"}},
 		},
 		{
-			ID: "mobile", Category: "application", Layer: "application-components", Provides: []string{"mobile"},
-			Repository: ModuleRepositoryPlacement{Path: "mobile-app", Scope: "mobile"}, Agents: []string{"mobile_worker"},
+			ID: "mobile", Selectable: true, Category: "application", Layer: "application-components", Provides: []string{"mobile"},
+			Repository:         ModuleRepositoryPlacement{Path: "mobile-app", Scope: "mobile", Mode: "independent", Targets: []string{"mobile"}},
+			CompletionCriteria: []string{"mobile.declaration"}, Agents: []string{"mobile_worker"},
 			Skills:         []string{"flutter-apply-architecture-best-practices", "flutter-add-integration-test"},
 			Verification:   []VerificationRequirement{{ID: "mobile-verify", Argv: []string{"flutter", "analyze"}, MutatesWorktree: false}},
 			ScaffoldAssets: []ScaffoldAsset{{ID: "mobile-manifest", Path: "pubspec.yaml", Revision: "flutter-3.44.9", Version: "v1"}},
 		},
 		{
-			ID: "api", Category: "application", Layer: "application-components", Provides: []string{"api"},
-			Repository: ModuleRepositoryPlacement{Path: "apis", Scope: "api"}, Agents: []string{"api_worker"},
+			ID: "api", Selectable: true, Category: "application", Layer: "application-components", Provides: []string{"api"},
+			Repository:         ModuleRepositoryPlacement{Path: "apis", Scope: "api", Mode: "independent", Targets: []string{"api"}},
+			CompletionCriteria: []string{"api.declaration"}, Agents: []string{"api_worker"},
 			Skills:         []string{"godex:godex-go-backend"},
 			Verification:   []VerificationRequirement{{ID: "api-verify", Argv: []string{"go", "test", "./..."}, MutatesWorktree: false}},
 			ScaffoldAssets: []ScaffoldAsset{{ID: "api-manifest", Path: "go.mod", Revision: "go-1.26.5", Version: "v1"}},
 		},
 		{
-			ID: "database", Category: "infrastructure", Layer: "shared-infrastructure", Provides: []string{"database"},
-			Repository: ModuleRepositoryPlacement{Path: "database", Scope: "database"}, Agents: []string{"database_worker"},
+			ID: "database", Selectable: true, Category: "infrastructure", Layer: "shared-infrastructure", Provides: []string{"database"},
+			Repository:         ModuleRepositoryPlacement{Path: "database", Scope: "database", Mode: "independent", Targets: []string{"database"}},
+			CompletionCriteria: []string{"database.declaration"}, Agents: []string{"database_worker"},
 			Skills:         []string{"godex:godex-go-backend"},
 			Verification:   []VerificationRequirement{{ID: "database-verify", Argv: []string{"pg_isready"}, MutatesWorktree: false}},
 			ScaffoldAssets: []ScaffoldAsset{{ID: "database-declaration", Path: "migrations", Revision: "postgresql-18", Version: "v1"}},
 		},
 		{
-			ID: "e2e", Category: "quality", Layer: "quality-verification", Provides: []string{"e2e"},
-			Optional: []string{"web", "api", "mobile"}, Repository: ModuleRepositoryPlacement{Path: ".", Scope: "repo"},
-			Agents: []string{"e2e_worker"}, Skills: []string{"build-web-apps:frontend-testing-debugging"},
+			ID: "e2e", Selectable: true, Category: "quality", Layer: "quality-verification", Provides: []string{"e2e"},
+			Optional: []string{"web", "api", "mobile"}, Repository: ModuleRepositoryPlacement{Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo"}},
+			CompletionCriteria: []string{"e2e.declaration"},
+			Agents:             []string{"e2e_worker"}, Skills: []string{"build-web-apps:frontend-testing-debugging"},
 			Verification:   []VerificationRequirement{{ID: "e2e-verify", Argv: []string{"task", "verify"}, MutatesWorktree: false}},
 			ScaffoldAssets: []ScaffoldAsset{{ID: "e2e-declaration", Path: "e2e", Revision: "v1", Version: "v1"}},
+		},
+		{
+			ID: "container", Category: "platform", Layer: "platform-delivery", Provides: []string{"container"},
+			Repository:         ModuleRepositoryPlacement{Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"web", "api"}},
+			CompletionCriteria: []string{"container.declaration"},
+		},
+		{
+			ID: "cicd", Category: "platform", Layer: "platform-delivery", Provides: []string{"cicd"},
+			Repository:         ModuleRepositoryPlacement{Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo", "web", "mobile", "api", "database"}},
+			CompletionCriteria: []string{"cicd.repository-boundary"},
+		},
+		{
+			ID: "observability", Category: "platform", Layer: "platform-delivery", Provides: []string{"observability"},
+			Repository:         ModuleRepositoryPlacement{Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"web", "api", "database"}},
+			CompletionCriteria: []string{"observability.boundary"},
+		},
+		{
+			ID: "iac", Category: "platform", Layer: "platform-delivery", Provides: []string{"iac"},
+			Repository:         ModuleRepositoryPlacement{Path: "platform/iac", Scope: "iac", Mode: "independent", Targets: []string{"repo"}},
+			CompletionCriteria: []string{"iac.provider-neutral"},
+		},
+		{
+			ID: "k8s", Category: "platform", Layer: "platform-delivery", Provides: []string{"k8s"},
+			Repository:         ModuleRepositoryPlacement{Path: "platform/k8s", Scope: "k8s", Mode: "independent", Targets: []string{"repo"}},
+			CompletionCriteria: []string{"k8s.static-validation"},
+		},
+		{
+			ID: "argocd", Category: "platform", Layer: "platform-delivery", Provides: []string{"argocd"}, Requires: []string{"k8s"},
+			Repository:         ModuleRepositoryPlacement{Path: "platform/argocd", Scope: "argocd", Mode: "independent", Targets: []string{"repo"}},
+			CompletionCriteria: []string{"argocd.sync-policy"},
 		},
 	},
 }

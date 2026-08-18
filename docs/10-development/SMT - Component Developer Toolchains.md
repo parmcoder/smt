@@ -17,7 +17,7 @@ updated: 2026-08-17
 ## Purpose and status
 
 This is a researched planned contract for generated component repositories,
-not implemented behavior. It refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. Current `smt apply` remains deterministic and offline: it must not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration. Future generator work may emit checked-in declarations and `doctor` guidance.
+not implemented behavior. It refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice is narrower: it adds a static schema-v1 catalog and validation metadata only. Current `smt apply` remains deterministic and offline: it must not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration, and it rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in declarations and `doctor` guidance.
 
 Each component has four layers: native CLI/toolchain; repeatable Taskfile
 gates; agent skills; and optional MCP/live-runtime integration. Taskfiles use
@@ -26,10 +26,44 @@ deterministic. Skills teach workflows; MCP provides explicitly opted-in live
 context/actions. Required and conditional dependencies are declared at the
 component boundary, and MCP configuration must never contain secrets.
 
-## Generated manifest ownership
+## Implemented module declarations
 
-As planned scaffold behavior, `smt apply` copies reviewed manifests and
-lockfiles deterministically and offline; it never runs a package manager.
+The code-owned schema-v1 catalog contains exactly 11 declarations: selectable
+`web`, `mobile`, `api`, `database`, and `e2e`; and non-selectable platform
+declarations `container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd`.
+Placement modes are declarative and validated as `attached`, `shared`, or
+`independent`; the built-in `.5` matrix is:
+
+| Module(s) | Placement | Stable completion criteria |
+| --- | --- | --- |
+| `web`, `mobile`, `api`, `database` | independent self-targets | `web.declaration`, `mobile.declaration`, `api.declaration`, `database.declaration` |
+| `e2e` | attached `repo` | `e2e.declaration` |
+| `container` | attached `web` + `api` | `container.declaration` |
+| `cicd` | attached `repo` + `web` + `mobile` + `api` + `database` | `cicd.repository-boundary` |
+| `observability` | attached `web` + `api` + `database` | `observability.boundary` |
+| `iac` | independent `platform/iac` | `iac.provider-neutral` |
+| `k8s` | independent `platform/k8s` | `k8s.static-validation` |
+| `argocd` | independent `platform/argocd`; requires `k8s` | `argocd.sync-policy` |
+
+Catalog validation covers schema, duplicate/unknown references, safe paths,
+capabilities, placement targets, stable completion IDs, and dependency cycles.
+Configuration validation covers repository module IDs and required
+capabilities. `Config.LoadBytes` accepts known platform metadata when valid,
+including `[argocd, k8s]`; `Apply` and `ValidateBlueprint` reject
+non-selectable platform metadata before topology or staging/destination
+mutation.
+
+The catalog's verification, agent/skill, and scaffold-asset fields are
+declarations. This slice creates no platform repositories, scaffolds, or
+runtime artifacts; installs no tools, skills, or MCP; mutates no host
+configuration; and runs no Compose, Podman, Kubernetes, ArgoCD, or OpenTofu
+runtime. Runnable starters and `smt extend` remain deferred.
+
+## Deferred generated manifest ownership
+
+The following are planned scaffold behavior, not `.5` outputs. Future generator
+work may copy reviewed manifests and lockfiles deterministically and offline;
+`smt apply` never runs a package manager.
 
 - **Web** owns `package.json` and `package-lock.json`: runtime Next.js 16.2.9
   plus compatible React; devDependencies include ESLint and `eslint-config-next`,
@@ -101,14 +135,14 @@ golang-migrate v4.19.1 up/version checks, API-owned migrations, and disposable
 Podman-backed integration tests. No automatic migration, down, drop, or force.
 Reuse Godex database guidance; no DB MCP is required for v0.1.0.
 
-## Container / root workspace
+## Container / root workspace (deferred)
 
-The root Taskfile orchestrates component gates and Beads-aware verification.
+The future root Taskfile will orchestrate component gates and Beads-aware verification.
 Podman/Compose smoke tests cover build, start, health/readiness, shutdown, and
 non-root identity. Gitleaks/security tasks are required before a production
 candidate. SBOM, signing, and remote CI are deferred.
 
-## Ownership matrix
+## Deferred ownership matrix
 
 | Component | Generated manifest/lockfile | Required local tools | Task gates | Required skills | Optional MCP/runtime |
 | --- | --- | --- | --- | --- | --- |
@@ -116,7 +150,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Next.js Web | `package.json`, `package-lock.json` | Node, Next.js, npm lockfile | Prettier, ESLint, TypeScript, Vitest/RTL, build, Playwright | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml` | Flutter/Dart, Android/iOS debug toolchains | format, analyze, unit/widget, integration, debug builds | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
-| Root/container | None | Podman/Compose, Taskfile, Beads, Gitleaks | smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | live runtime checks opt-in |
+| Root/container | None | Podman/Compose, Taskfile, Beads, Gitleaks | smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | live runtime checks opt-in; no `.5` runtime |
 
 ## Research sources
 

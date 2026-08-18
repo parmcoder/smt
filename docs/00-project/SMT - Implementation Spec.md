@@ -248,31 +248,66 @@ or generated DevOps artifacts.
 
 Repositories may also carry optional `modules: [id...]` metadata. Omitting the
 field remains valid for existing general version-1 configurations. Version 1
-uses a static, schema-v1 catalog owned by the SMT code; it is not user YAML.
-The built-in selectable entries are exactly `web`, `mobile`, `api`, `database`,
-and the quality declaration `e2e`. The catalog records each ID's category and
-layer, provided/required/optional capabilities, safe placement defaults,
-agent and skill references, argument-array verification requirements including
-`mutates_worktree`, and reviewed scaffold-asset identity. Its complete layer
-vocabulary is `control-plane`, `application-components`,
-`shared-infrastructure`, `quality-verification`, and `platform-delivery`; the
-built-in catalog has no selectable control-plane or platform entry.
+uses a static, schema-versioned catalog owned by the SMT code; it is not user
+YAML. The implemented schema-v1 catalog contains exactly 11 declarations: five
+selectable modules (`web`, `mobile`, `api`, `database`, and `e2e`) and six
+non-selectable platform declarations (`container`, `cicd`, `observability`,
+`iac`, `k8s`, and `argocd`).
+
+### Implemented `.5` module declaration contract
+
+Every declaration records its ID, selectable flag, category/layer,
+provided/required/optional capabilities, safe repository placement, stable
+completion-criterion IDs, agent and skill references, argument-array
+verification requirements, and reviewed scaffold-asset identity where
+applicable. The placement mode is declarative and must be one of `attached`,
+`shared`, or `independent`; `.5` uses `attached` and `independent` in the
+built-in catalog, while `shared` remains an available mode for a later
+declaration. `Targets` names the module IDs or the root `repo` boundary that a
+placement is attached to.
+
+The following matrix is authoritative for the built-in catalog:
+
+| ID | Selectable | Placement (`path`, `scope`, `mode`, `targets`) | Completion criteria | Requires |
+| --- | --- | --- | --- | --- |
+| `web` | yes | `web-app`, `web`, `independent`, `[web]` | `web.declaration` | — |
+| `mobile` | yes | `mobile-app`, `mobile`, `independent`, `[mobile]` | `mobile.declaration` | — |
+| `api` | yes | `apis`, `api`, `independent`, `[api]` | `api.declaration` | — |
+| `database` | yes | `database`, `database`, `independent`, `[database]` | `database.declaration` | — |
+| `e2e` | yes | `.`, `repo`, `attached`, `[repo]` | `e2e.declaration` | — |
+| `container` | no | `.`, `repo`, `attached`, `[web, api]` | `container.declaration` | — |
+| `cicd` | no | `.`, `repo`, `attached`, `[repo, web, mobile, api, database]` | `cicd.repository-boundary` | — |
+| `observability` | no | `.`, `repo`, `attached`, `[web, api, database]` | `observability.boundary` | — |
+| `iac` | no | `platform/iac`, `iac`, `independent`, `[repo]` | `iac.provider-neutral` | — |
+| `k8s` | no | `platform/k8s`, `k8s`, `independent`, `[repo]` | `k8s.static-validation` | — |
+| `argocd` | no | `platform/argocd`, `argocd`, `independent`, `[repo]` | `argocd.sync-policy` | `k8s` |
+
 Web, Mobile, and API use the `application`/`application-components` pairing;
-Database uses `infrastructure`/`shared-infrastructure`; and E2E uses
-`quality`/`quality-verification`.
+Database uses `infrastructure`/`shared-infrastructure`; E2E uses
+`quality`/`quality-verification`; and all six platform declarations use
+`platform`/`platform-delivery`. Completion criteria are stable declarative IDs,
+not commands that SMT executes. `argocd` requires the `k8s` capability.
+
+Catalog validation rejects an unsupported schema, duplicate IDs or declaration
+references, invalid category/layer pairs, unknown module or capability
+references, unsafe paths, invalid placement modes/targets, duplicate
+completion criteria, and dependency cycles. Configuration validation rejects
+unknown or duplicate repository module IDs and missing selected required
+capabilities. `Config.LoadBytes` accepts known non-selectable platform metadata
+when its references and dependencies are valid (for example, `[argocd, k8s]`),
+but `Apply` and `ValidateBlueprint` reject any non-selectable platform metadata
+before topology checks, staging, or destination mutation.
 
 `smt new` derives the quality prompt and emitted module ID from the catalog's
-role and placement. Component repositories receive exact IDs (`web`, `mobile`,
-`api`, and `database`). Opting into the quality declaration adds only
-`modules: [e2e]` to the root; it creates no E2E repository, scaffold, or other
-artifact. Catalog validation rejects invalid schema, duplicate IDs, invalid
-category/layer pairs, unknown capability references, unsafe paths, and
-dependency cycles. Configuration validation
-rejects unknown or duplicate repository module IDs and missing selected
-required capabilities. `smt apply` requires the exact generated root/component
-annotations and persists them, but it does not execute verification recipes,
-install referenced tools, skills, or MCP integrations, mutate host
-configuration, or provide `smt extend`.
+role and placement. Component repositories receive exact selectable IDs
+(`web`, `mobile`, `api`, and `database`). Opting into the quality declaration
+adds only `modules: [e2e]` to the root; it creates no E2E repository, scaffold,
+or other artifact. `smt apply` persists accepted selectable annotations, but
+the `.5` slice adds declarations and validation only: it creates no platform
+repositories, platform scaffolds, or platform runtime artifacts; installs no
+tools, skills, or MCP integrations; mutates no host configuration; and does not
+run Compose, Podman, Kubernetes, ArgoCD, or OpenTofu. Runnable starters and
+`smt extend` remain deferred.
 
 Legacy DevOps-shaped configurations are rejected by `smt apply` before any
 destination mutation. The migration-oriented error directs the operator to
@@ -320,13 +355,13 @@ implemented by the CLI or this release:
 - `checkout` and `validate-range` workflows from the earlier design.
 
 The broader runnable-starter and platform work is planned, not implemented:
-the five layers remain in this repository initially; platform capabilities are
-named `container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd` (with
-`argocd` depending on `k8s`). This release provides no runnable templates,
-Podman/Compose artifacts, platform artifacts or capabilities, remote module
-registry, or `smt extend` command. The static module catalog and repository
-annotations above are implemented metadata only: verification recipes are not
-executed, and no E2E/module repository or scaffold is generated. AWS +
+the five layers remain in this repository initially, and the six platform
+capabilities above are declarations only. This release provides no runnable
+templates, platform repositories or scaffolds, Podman/Compose artifacts,
+Kubernetes/ArgoCD/OpenTofu runtime, remote module registry, or `smt extend`
+command. The static module catalog and repository annotations above are
+implemented metadata only: verification recipes are not executed, and no
+platform runtime artifact or E2E/module repository is generated. AWS +
 Apptainer + OpenTofu remains later discovery.
 
 Git lifecycle operations preflight all configured repositories before a remote

@@ -66,22 +66,48 @@ lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
 release does not provide runnable Web/API/Mobile templates, Podman/Compose
-artifacts, platform artifacts/capabilities, a remote module registry, or
-`smt extend`. Generated module annotations are persisted, but apply does not
+artifacts, platform repositories/scaffolds/runtime artifacts, a remote module
+registry, or `smt extend`. Generated module annotations are persisted, but apply does not
 execute their verification recipes, install referenced tools/skills/MCP,
 mutate host configuration, or create module repositories.
 
 ### Inspect module declarations
 
 The implementation specification documents the static schema-v1 catalog and
-the exact generated annotations. The built-in entries are `web`, `mobile`,
-`api`, `database`, and `e2e`; the catalog is code-owned, not user YAML. It
-describes safe placement defaults, capabilities, agent/skill references, reviewed
-scaffold-asset identity, and argument-array verification requirements,
-including mutability. Apply validates the catalog and repository IDs, then
-persists the exact annotations without running verification commands or
-installing their prerequisites. The root-only `modules: [e2e]` declaration is
-metadata; it does not create an E2E repository, scaffold, or artifact.
+the exact generated annotations. The implemented catalog is code-owned, not
+user YAML, and contains exactly 11 declarations: selectable `web`, `mobile`,
+`api`, `database`, and `e2e`; and non-selectable platform declarations
+`container`, `cicd`, `observability`, `iac`, `k8s`, and `argocd`.
+
+Placement modes are declarative and validated as `attached`, `shared`, or
+`independent`. The `.5` catalog uses this authoritative matrix:
+
+| Module(s) | Placement mode and targets | Stable completion criterion IDs |
+| --- | --- | --- |
+| `web`, `mobile`, `api`, `database` | independent self-targets | `web.declaration`, `mobile.declaration`, `api.declaration`, `database.declaration` |
+| `e2e` | attached to `repo` | `e2e.declaration` |
+| `container` | attached to `web` + `api` | `container.declaration` |
+| `cicd` | attached to `repo` + `web` + `mobile` + `api` + `database` | `cicd.repository-boundary` |
+| `observability` | attached to `web` + `api` + `database` | `observability.boundary` |
+| `iac` | independent at `platform/iac` | `iac.provider-neutral` |
+| `k8s` | independent at `platform/k8s` | `k8s.static-validation` |
+| `argocd` | independent at `platform/argocd`; requires `k8s` | `argocd.sync-policy` |
+
+The full matrix also records each declaration's path and scope in [[../00-project/SMT - Implementation Spec|the implementation specification]]. Catalog validation covers schema, duplicate/unknown module and capability references, safe paths, placement targets, stable completion IDs, and capability dependency cycles. Configuration validation rejects unknown or duplicate repository module IDs and missing required capabilities.
+
+`Config.LoadBytes` accepts known non-selectable platform metadata when the
+references and dependencies are valid, so `[argocd, k8s]` is loadable while
+`[argocd]` is rejected for its missing capability. `Apply` and
+`ValidateBlueprint` reject non-selectable platform metadata before topology
+checks or staging/destination mutation. The root-only `modules: [e2e]`
+declaration remains metadata; it does not create an E2E repository, scaffold,
+or artifact.
+
+This `.5` slice adds declarations and validation only. Apply does not execute
+verification commands, install tools/skills/MCP, mutate host configuration,
+create platform repositories/scaffolds/runtime artifacts, or run
+Compose/Podman/Kubernetes/ArgoCD/OpenTofu. Runnable starters and `smt extend`
+remain deferred.
 
 Each created repository receives a scaffold-only `lefthook.yml` with top-level
 `no_auto_install: true` and `assert_lefthook_installed: true`. Its `commit-msg`
