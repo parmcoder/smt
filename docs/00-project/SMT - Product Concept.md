@@ -144,9 +144,9 @@ and missing Podman/Podman Compose prerequisites through injectable checks, but
 `smt apply` remains offline and does not invoke Preflight, Podman, Compose,
 socket probing, or health checks.
 
-Future component build contexts, Containerfiles, lifecycle tasks, runnable
-starters, platform runtime work, a remote module registry, and `smt extend`
-remain deferred; `.3.1` adds no app-domain behavior.
+Future Web/Mobile/Database build contexts, Containerfiles, lifecycle tasks,
+broader runnable starters, platform runtime work, a remote module registry, and
+`smt extend` remain deferred; `.3.1` adds no app-domain behavior.
 
 The implemented `.3.3.1` API manifest slice adds static `go.mod` and `go.sum`
 only to selected API child repositories. They use module
@@ -156,13 +156,65 @@ API+Database. Tool directives pin govulncheck with `golang.org/x/vuln v1.7.0`,
 golangci-lint v2 with `github.com/golangci/golangci-lint/v2 v2.12.2`, and the
 migrate tool only for API+Database. API-only excludes pgx/migrate, and no API
 selection emits no API manifests. Direct pinned sums are committed; full
-transitive closure, source imports, OpenAPI generation, tests, Containerfiles,
-and runtime verification remain deferred to `.3.3.2-.4`.
+transitive closure remains outside the manifest slice.
 
 Apply writes these static files without invoking Go, `go mod`, a package
 manager, the network, or tool installation. SDK/editor/agent tools are not
-module dependencies, and `go mod tidy`/`go mod verify` are later source-closure
-checks rather than proven results here.
+module dependencies. `go mod tidy` remains a later source-closure check;
+`go mod verify` is exercised only through the generated child `mod` task.
+
+The implemented `.3.3.2` API runtime slice emits deterministic API-selected
+`main.go`, `internal/server/server.go`, `cmd/openapi/main.go`, `.env.example`,
+`openapi.yaml`, and `Taskfile.yml` assets in addition to the `.3.3.1` manifests. No API
+selection emits no API child or API assets. The module remains
+`example.com/smt/apis` on Go `1.26.5`, using Huma v2.39.1 through the Gin
+adapter, Gin v1.12.0, and Prometheus `github.com/prometheus/client_golang v1.24.1`. API-only source
+has no pgx, migrate, or database code; API+Database keeps pgx/migrate manifest
+dependencies only.
+
+The generated runtime uses JSON `slog` and defaults
+`HTTP_ADDR=:8080`, `APP_ENV=development`, `LOG_LEVEL=info`,
+`HTTP_READ_TIMEOUT=15s`, `HTTP_READ_HEADER_TIMEOUT=5s`,
+`HTTP_WRITE_TIMEOUT=15s`, `HTTP_IDLE_TIMEOUT=60s`,
+`HTTP_MAX_HEADER_BYTES=1048576`, and `HTTP_SHUTDOWN_TIMEOUT=10s`. Huma emits
+OpenAPI 3.1 metadata title `SMT API`, version `v0.1.0`, and `/docs`,
+`/openapi.json`, and `/openapi.yaml` routes. The offline `cmd/openapi` command
+constructs the shared Huma API and writes `api.OpenAPI().YAML()` without a
+listener; the committed YAML is byte-identical to regeneration across fresh
+Apply destinations.
+
+The generated server `Config` carries direct `github.com/caarlos0/env/v11
+v11.4.1` `env`/`envDefault` tags on its typed fields, including `slog.Level`
+for `LogLevel` and `time.Duration` for the timeout fields. `LoadConfig()` calls
+plain `env.Parse(&cfg)`; native caarlos/TextUnmarshaler parsing controls
+malformed-value errors; no separate semantic conversion or post-parse
+validation is added. `Run` logs a structured `configuration load failed`
+event and panics with the native parse error before constructing the
+application. Normal Gin/Huma runtime and graceful-shutdown behavior is
+unchanged. The exact pin and direct checksums are present in both static API
+manifest variants.
+
+Each API selection also receives a deterministic child `Taskfile.yml` with
+top-level `dotenv: ['.env']`; it never copies or mutates `.env`. Tasks are
+`build` (trimpath binary `bin/apis`), `run` (built binary), `test`, `coverage`,
+`mod` (`go mod verify`), offline byte-comparing `openapi`, and `verify` with
+`build`, `test`, `mod`, `openapi`, and `go vet ./...` dependencies. API+Database
+receives the same API Taskfile but no database migration/readiness tasks yet;
+those belong to `smt-4xf.6.1.2` and later. Task v3.52.0 verified dotenv-driven
+`/healthz` behavior and bounded process cleanup in the generated child harness.
+
+`/healthz` returns 200 `ok`; `/readyz` returns 503 `not_ready` before bootstrap
+or during shutdown and 200 `ready` after bootstrap. `/metrics` shares the
+listener and exposes Go/process plus bounded request metrics. Safe
+`X-Request-ID` values are accepted or generated and returned. Gin panic recovery logs panic/stack,
+route, method, and request ID through JSON `slog` before returning generic 500;
+SIGINT/SIGTERM performs timed graceful shutdown. Apply writes embedded assets
+only and performs no network, Go/package-manager command, tool installation,
+Task execution, Podman, listener, or runtime execution. Credentials, domain CRUD, DB
+connectivity/readiness, migrations, root Taskfile changes, Containerfiles, non-root
+packaging, and `smt extend` remain out of scope. Durable unit/race/fuzz/
+integration tests are `.3.3.3`; non-root packaging/runtime verification is
+`.3.3.4`, with later human and Podman gates still required.
 
 Generation remains offline and byte-stable for identical selections in fresh
 destinations. `smt apply` rejects missing, unsupported, or unknown provenance

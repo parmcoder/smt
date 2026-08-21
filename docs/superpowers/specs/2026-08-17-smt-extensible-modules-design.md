@@ -20,10 +20,11 @@ The taxonomy and configuration portion of the version-1 starter restructure is
 implemented: new blueprints select Web, optional Mobile, API, and Database,
 with DevOps-shaped configuration removed. Generated blueprints also carry the
 exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
-`smt apply` validates it before mutation. The runnable starter, platform
-runtimes/artifacts, and runnable module assets remain planned work. The static
-schema-v1 module catalog and repository annotations are implemented metadata;
-`smt extend` is explicitly deferred.
+`smt apply` validates it before mutation. The platform runtimes/artifacts and
+remaining Web/Mobile/Database runnable module assets remain planned work.
+`.3.3.2` now implements the generated API runtime and OpenAPI starter assets.
+The static schema-v1 module catalog and repository annotations are implemented
+metadata; `smt extend` is explicitly deferred.
 
 The guiding rule is: modules represent capabilities, while repositories
 represent lifecycle and deployment boundaries. A module may remain in the
@@ -62,8 +63,9 @@ sixth layer.
 The approved production baseline for the planned starter is Go 1.26.5, pgx
 v5.10.0, Next.js 16.2.9 on Node 24.18.0, Flutter 3.44.9, PostgreSQL 18, and
 Podman 5.8.3 or newer with a Compose provider. These are reviewed target
-constraints for the milestone, not evidence that the current CLI generates or
-verifies them today.
+constraints for the milestone; the current CLI now generates the accepted Go
+API assets, while broader component generation and runtime verification remain
+deferred.
 
 ## Implemented version-1 taxonomy change
 
@@ -91,10 +93,10 @@ Mobile is a runnable Android/iOS starter but not an OCI workload. It should
 include health/readiness, graceful shutdown, migrations owned by the API,
 non-root container images, lockfiles, and smoke commands without inventing
 CRUD or domain behavior. Workspace creation remains deterministic and offline;
-runtime tools are used only by later verification. `.3.1` now emits the
-contract-only root `compose.yaml` and `.env.example`, but none of the runnable
-component templates, Containerfiles, or Podman/Compose execution are provided
-by this contract.
+runtime tools are used only by later verification. `.3.1` emits the
+contract-only root `compose.yaml` and `.env.example`; `.3.3.2` emits the API
+source/OpenAPI starter assets, but Web/Mobile/Database templates, Containerfiles,
+packaging, and Podman/Compose execution remain outside this contract.
 
 Platform capabilities are decomposed into `container`, `cicd`,
 `observability`, `iac`, `k8s`, and `argocd`; the `.5` catalog implements these
@@ -127,8 +129,9 @@ selected-port collision, occupied-port, missing-Podman, and missing Podman
 Compose errors through injectable checks for later Taskfile/CLI use. It does
 not execute external commands itself. `smt apply` renders the contract files
 offline and does not invoke Preflight, Podman, Compose, socket probing, or
-health checks. Component build contexts, Containerfiles, lifecycle tasks, and
-application-domain behavior remain deferred to `.3.2` through `.3.6`.
+health checks. Remaining Web/Mobile/Database build contexts, Containerfiles,
+lifecycle tasks, and application-domain behavior remain deferred; `.3.3.2`
+owns the generated API source/Taskfile contract.
 
 ## Implemented `.3.3.1` API manifest contract
 
@@ -151,10 +154,69 @@ present; full transitive closure is deferred.
 Apply writes static templates only and performs no `go`, `go mod`,
 package-manager, network, or tool installation work; PATH-empty tests cover
 that boundary. gofmt, vet, test, race, coverage, fuzzing, Godex, and gopls are
-SDK/editor/agent tools, not module dependencies. `go mod tidy` and `go mod verify`
-are later checks against the eventual source closure, not proven
-results here. API source imports, Huma/OpenAPI generation, tests, Containerfile,
-and runtime verification remain deferred to `.3.3.2-.4`.
+SDK/editor/agent tools, not module dependencies. `go mod tidy` remains a later
+source-closure check; the generated child `mod` task exercises `go mod verify`
+for the emitted manifest.
+
+## Implemented `.3.3.2` API runtime and OpenAPI assets
+
+API-selected Apply emits deterministic `main.go`, `internal/server/server.go`,
+`cmd/openapi/main.go`, `.env.example`, `openapi.yaml`, and `Taskfile.yml` in the API child
+repository alongside the `.3.3.1` manifests. No API selection emits no API
+child or API assets. The module is `example.com/smt/apis` on Go `1.26.5`;
+Huma v2.39.1 is used through the Gin adapter with Gin v1.12.0 and Prometheus
+`github.com/prometheus/client_golang v1.24.1`. API-only source remains free of pgx, migrate, and
+database code; API+Database retains pgx/migrate manifest dependencies only.
+
+The runtime uses JSON `slog` and defaults `HTTP_ADDR=:8080`,
+`APP_ENV=development`, `LOG_LEVEL=info`, `HTTP_READ_TIMEOUT=15s`,
+`HTTP_READ_HEADER_TIMEOUT=5s`, `HTTP_WRITE_TIMEOUT=15s`,
+`HTTP_IDLE_TIMEOUT=60s`, `HTTP_MAX_HEADER_BYTES=1048576`, and
+`HTTP_SHUTDOWN_TIMEOUT=10s`. Shared Huma metadata is OpenAPI 3.1, title
+`SMT API`, version `v0.1.0`, with `/docs`, `/openapi.json`, and `/openapi.yaml`
+routes. `cmd/openapi` constructs the shared Huma API and writes
+`api.OpenAPI().YAML()` offline without a listener. The committed
+`openapi.yaml` is byte-identical to regeneration across fresh Apply
+destinations.
+
+The generated server `Config` carries direct `github.com/caarlos0/env/v11
+v11.4.1` `env`/`envDefault` tags on its typed fields, including `slog.Level`
+for `LogLevel` and `time.Duration` for the timeout fields. `LoadConfig()` calls
+plain `env.Parse(&cfg)`; native caarlos/TextUnmarshaler parsing controls
+malformed-value errors; no separate semantic conversion or post-parse
+validation is added. `Run` logs a structured `configuration load failed`
+event and panics with the native parse error before constructing the
+application. Normal Gin/Huma runtime and graceful-shutdown behavior is
+unchanged. The exact pin and direct checksums are present in the API-only and
+API+Database manifests.
+API-selected Apply also emits a deterministic child `Taskfile.yml` with
+top-level `dotenv: ['.env']`; it does not copy or mutate `.env`. The tasks are
+`build` with trimpath output `bin/apis`, `run` of that built binary, `test`,
+`coverage`, `mod` (`go mod verify`), offline byte-comparing `openapi`, and
+`verify` depending on `build`, `test`, `mod`, and `openapi` before `go vet
+./...`. API+Database gets the same API Taskfile and no database
+migration/readiness tasks yet; those belong to `smt-4xf.6.1.2` and later. The
+Task v3.52.0 child harness verified dotenv-driven `/healthz` and bounded
+process cleanup.
+
+`/healthz` returns 200 `status: ok`; `/readyz` returns 503 `not_ready` before
+bootstrap or during shutdown and 200 `ready` after bootstrap. `/metrics` uses
+the same listener and exposes Go/process plus bounded request metrics. Safe
+`X-Request-ID` values are accepted or generated and returned. Custom Gin panic
+recovery logs panic/stack/route/method/request ID through JSON `slog` and
+returns generic 500. SIGINT/SIGTERM marks the service not ready and performs
+graceful shutdown with the configured timeout.
+
+Apply writes embedded deterministic assets only: no network, Go or
+package-manager command, tool installation, Podman, listener, or runtime
+execution. No credentials, domain CRUD, DB connectivity/readiness, migrations,
+root Taskfile changes, Containerfiles, non-root packaging, or `smt extend` are
+added; Apply never executes the generated child Taskfile. No implicit installs
+or network work are performed.
+Durable unit/race/fuzz/integration coverage is `.3.3.3`; non-root packaging and
+runtime verification are `.3.3.4`. Later human and Podman gates remain
+required. No `go mod tidy` or human E2E completion is claimed here; `go mod
+verify` evidence is limited to the generated child Task harness.
 
 ## Implemented static module catalog
 
@@ -222,10 +284,11 @@ implementation is deferred until the version-1 restructure is complete.
 The accepted `.2` scope is the starter component taxonomy and configuration
 gate; `.4` adds the selectable catalog and repository module annotations, `.5`
 adds the six non-selectable platform declarations plus catalog/config
-validation boundaries, and `.3.1` adds the root runtime contract artifacts.
-Remaining design scope is the Podman-first runnable runtime skeleton and
-platform runtime implementation. Out of scope for the current CLI are
-runnable component templates, Containerfiles, platform
+validation boundaries, `.3.1` adds the root runtime contract artifacts, and
+`.3.3.2` adds the generated API runtime/OpenAPI assets. Remaining design scope
+is the Web/Mobile/Database starter work, packaging, and Podman-first runtime
+implementation. Out of scope for the current CLI are Web/Mobile/Database
+Containerfiles, platform
 repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
 or ArgoCD deployment, OpenTofu execution, a remote module registry,
 implementing `smt extend`, provider/cloud creation, fake CRUD, and AWS runtime

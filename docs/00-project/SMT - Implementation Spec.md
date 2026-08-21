@@ -336,9 +336,10 @@ Web's contract probes `/healthz`. API health/readiness are `/healthz` and
 `/readyz`, and Database health uses `pg_isready`. When both services are
 selected, Web depends on API with `condition: service_healthy`; when API and
 Database are selected, API depends on Database with the same condition. The
-generated contract may reference the future component build contexts at
+generated `.3.1` contract may reference component build contexts at
 `./web-app`, `./apis`, and `./database`, but `.3.1` does not generate their
-Containerfiles or add application-domain behavior.
+Containerfiles or add application-domain behavior; later component work owns
+those build and runtime assets.
 
 The pure `runtime.Preflight` API validates override ranges and selected-port
 collisions, can report occupied ports through an injected port check, and can
@@ -346,9 +347,11 @@ report missing Podman or Podman Compose through injected prerequisite checks.
 Its errors identify the service/port or environment key and an actionable
 change/install/configuration step. It does not execute external commands by
 itself. `smt apply` invokes rendering only: it does not invoke Preflight,
-Podman, Compose, socket probing, or runtime health checks. Future component
-build contexts, Containerfiles, and lifecycle tasks belong to `smt-4xf.3.2`
-through `.3.6`.
+Podman, Compose, socket probing, or runtime health checks. Remaining
+Web/Mobile/Database build contexts, Containerfiles, and component lifecycle
+tasks remain later work; the generated API source and child Taskfile are
+`.3.3.2` assets. Root and Database task aggregation belongs to
+`smt-4xf.6.1.2` and later.
 
 ### Implemented `.3.3.1` API module manifests
 
@@ -373,11 +376,77 @@ Apply writes these static templates only. It performs no `go`, `go mod`,
 package-manager, network, or tool installation work; PATH-empty focused tests
 cover that boundary. `gofmt`, `go vet`, `go test`, race, coverage, fuzzing,
 Godex, and gopls are SDK/editor/agent tools, not module dependencies.
-`go mod tidy` and `go mod verify` are later checks against the eventual source
-closure,
-not already-proven results. API source imports, Huma/OpenAPI generation,
-tests, Containerfiles, and runtime verification remain deferred to
-`.3.3.2-.4`.
+`go mod tidy` remains a later check against the eventual source closure. The
+generated child `go mod verify` task is covered by the Task v3.52.0 harness;
+that evidence is scoped to the emitted manifest. API source imports, Huma/OpenAPI
+generation, tests, Containerfiles, and runtime verification are not claims of
+the manifest slice.
+
+### Implemented `.3.3.2` API runtime and OpenAPI assets
+
+When API is selected, `smt apply` emits deterministic embedded assets in the
+`apis` child repository: `main.go`, `internal/server/server.go`,
+`cmd/openapi/main.go`, `.env.example`, `openapi.yaml`, and `Taskfile.yml`, alongside the
+existing `.3.3.1` module manifests and bootstrap files. No API selection emits
+none of these API assets. The generated module remains
+`example.com/smt/apis` on Go `1.26.5`. Its runtime uses Huma v2.39.1 through
+the Gin adapter, Gin v1.12.0, Prometheus `github.com/prometheus/client_golang v1.24.1`, and the
+already-pinned Go tools. API-only generated source contains no pgx, migrate, or
+database code; API+Database retains pgx and golang-migrate as manifest-only
+dependencies and still emits the same API source without database behavior.
+
+The generated `.env.example` records the runtime defaults: `HTTP_ADDR=:8080`,
+`APP_ENV=development`, `LOG_LEVEL=info`, `HTTP_READ_TIMEOUT=15s`,
+`HTTP_READ_HEADER_TIMEOUT=5s`, `HTTP_WRITE_TIMEOUT=15s`,
+`HTTP_IDLE_TIMEOUT=60s`, `HTTP_MAX_HEADER_BYTES=1048576`, and
+`HTTP_SHUTDOWN_TIMEOUT=10s`. The shared Huma API declares OpenAPI 3.1 metadata
+title `SMT API` and version `v0.1.0`, with `/docs`, `/openapi.json`, and
+`/openapi.yaml` routes. `cmd/openapi` constructs that same API and writes
+`api.OpenAPI().YAML()` offline to stdout without starting a listener. The
+committed `openapi.yaml` is byte-identical to regeneration across fresh
+`Apply` destinations.
+
+The runtime returns HTTP 200 with `status: ok` from `/healthz`. `/readyz`
+returns `ready` after bootstrap and `not_ready` with HTTP 503 before bootstrap
+or during shutdown. `/metrics` uses the same listener and exposes Go/process
+metrics plus bounded request counters, duration, and in-flight metrics. Safe
+`X-Request-ID` values are accepted or generated and returned. Custom Gin panic
+recovery logs the panic, stack, route, method, and request ID through JSON
+`slog`, then returns a generic HTTP 500. SIGINT/SIGTERM marks the service not
+ready and performs graceful shutdown with the configured timeout.
+
+The generated server `Config` carries direct `github.com/caarlos0/env/v11
+v11.4.1` `env`/`envDefault` tags on its typed fields, including `slog.Level`
+for `LogLevel` and `time.Duration` for the timeout fields. `LoadConfig()` calls
+plain `env.Parse(&cfg)`; native caarlos/TextUnmarshaler parsing controls
+malformed-value errors; no separate semantic conversion or post-parse
+validation is added. `Run` logs a structured `configuration load failed`
+event and panics with the native parse error before constructing the
+application. Normal Gin/Huma runtime and graceful-shutdown behavior is
+unchanged. The exact pin and direct checksums are present in the static
+API-only and API+Database manifests.
+
+The API child also receives deterministic `Taskfile.yml` with top-level
+`dotenv: ['.env']`; Task does not copy or mutate `.env`. Its tasks are `build`
+(`mkdir -p bin && go build -trimpath -o bin/apis .`), `run` (depends on
+`build`, then runs `./bin/apis`), `test`, `coverage`, `mod` (`go mod verify`),
+`openapi` (offline `GOPROXY=off GOSUMDB=off` generation compared byte-for-byte
+with `openapi.yaml`), and `verify` (depends on `build`, `test`, `mod`, and
+`openapi`, then runs `go vet ./...`). The same child Taskfile is emitted for
+API+Database, with no database migration or readiness tasks yet; those belong
+to `smt-4xf.6.1.2` and later. The generated Task CLI harness was verified
+with Task v3.52.0, including dotenv-driven `/healthz` and bounded process
+cleanup.
+
+Apply writes embedded deterministic assets only: it performs no network, Go or
+package-manager command, tool installation, Task execution, Podman invocation,
+listener start, or runtime execution. This slice adds no credentials, domain
+CRUD, database connectivity/readiness, migrations, root Taskfile changes,
+Containerfiles, non-root packaging, or `smt extend`. Durable unit/race/fuzz/integration coverage is
+`.3.3.3`; non-root packaging and runtime verification are `.3.3.4`. Later
+human and Podman gates remain required. `go mod tidy` and human E2E remain
+unverified; `go mod verify` evidence is limited to the generated child Task
+harness and accepted focused implementation tests.
 
 Legacy DevOps-shaped configurations are rejected by `smt apply` before any
 destination mutation. The migration-oriented error directs the operator to
@@ -426,14 +495,15 @@ implemented by the CLI or this release:
 
 The broader runnable-starter and platform work is planned, not implemented:
 the five layers remain in this repository initially, and the six platform
-capabilities above are declarations only. This release provides no runnable
-component templates or Containerfiles, platform repositories or scaffolds,
-Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime, remote module
-registry, or `smt extend` command. The `.3.1` `compose.yaml` and `.env.example`
-are contract-only root artifacts; they do not imply a runnable stack. The
-static module catalog and repository annotations above are implemented metadata
-only: verification recipes are not executed, and no platform runtime artifact
-or E2E/module repository is generated. AWS + Apptainer + OpenTofu remains later
+capabilities above are declarations only. This release still provides no Web,
+Mobile, or Database runtime starters, component Containerfiles, platform
+repositories or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu
+runtime, remote module registry, or `smt extend` command. The `.3.1`
+`compose.yaml` and `.env.example` are contract-only root artifacts, while the
+`.3.3.2` API source/OpenAPI assets are deterministic offline starter assets
+without packaging or lifecycle tasks. The static module catalog and repository
+annotations above are implemented metadata; no platform runtime artifact or
+E2E/module repository is generated. AWS + Apptainer + OpenTofu remains later
 discovery.
 
 Git lifecycle operations preflight all configured repositories before a remote

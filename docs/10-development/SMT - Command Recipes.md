@@ -67,11 +67,12 @@ non-generated version-1 configuration without provenance remains usable for
 lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
-release does not provide runnable Web/API/Mobile templates, component
+release does not provide Web/Mobile/Database runtime starters, component
 Containerfiles, platform repositories/scaffolds/runtime artifacts, Podman or
-Compose execution, a remote module registry, or `smt extend`. The generated
-`compose.yaml` and `.env.example` are contract-only artifacts. Generated module
-annotations are persisted, but apply does not
+Compose execution, a remote module registry, or `smt extend`; `.3.3.2` adds
+only deterministic API source/OpenAPI assets. The generated `compose.yaml` and
+`.env.example` are contract-only root artifacts. Generated module annotations
+are persisted, but apply does not
 execute their verification recipes, install referenced tools/skills/MCP,
 mutate host configuration, or create module repositories.
 
@@ -127,10 +128,87 @@ Direct pinned sums are present in `go.sum`, but this slice does not prove the
 full transitive closure. Apply writes static templates only: it does not invoke
 `go`, `go mod`, a package manager, the network, or tool installation. `gofmt`,
 vet, test, race, coverage, fuzzing, Godex, and gopls remain SDK/editor/agent
-tools rather than module dependencies. `go mod tidy` and `go mod verify` are
-later checks against the eventual source closure. API imports, Huma/OpenAPI
-generation, tests, Containerfiles, and runtime verification are deferred to
-`.3.3.2-.4`.
+tools rather than module dependencies. `go mod tidy` remains a later check
+against the eventual source closure; the generated child `mod` task exercises
+`go mod verify` for the emitted manifest.
+
+### Inspect generated API runtime and OpenAPI assets
+
+`.3.3.2` emits these deterministic files only when API is selected:
+`main.go`, `internal/server/server.go`, `cmd/openapi/main.go`, `.env.example`,
+and `openapi.yaml`, alongside `go.mod` and `go.sum`. No API selection emits no
+API child or API assets. The generated module is `example.com/smt/apis` on Go
+`1.26.5`; its API-only source uses Huma v2.39.1 through Gin v1.12.0 and
+Prometheus `github.com/prometheus/client_golang v1.24.1`. API+Database keeps pgx/migrate in the
+manifest only and does not add database code to the generated source.
+
+Runtime defaults are `HTTP_ADDR=:8080`, `APP_ENV=development`,
+`LOG_LEVEL=info`, `HTTP_READ_TIMEOUT=15s`, `HTTP_READ_HEADER_TIMEOUT=5s`,
+`HTTP_WRITE_TIMEOUT=15s`, `HTTP_IDLE_TIMEOUT=60s`,
+`HTTP_MAX_HEADER_BYTES=1048576`, and `HTTP_SHUTDOWN_TIMEOUT=10s`. The
+generated server `Config` carries direct `github.com/caarlos0/env/v11
+v11.4.1` `env`/`envDefault` tags on its typed fields, including `slog.Level`
+for `LogLevel` and `time.Duration` for the timeout fields. `LoadConfig()` calls
+plain `env.Parse(&cfg)`; native caarlos/TextUnmarshaler parsing controls
+malformed-value errors; no separate semantic conversion or post-parse
+validation is added. `Run` logs a structured `configuration load failed`
+event and panics with the native parse error before constructing the
+application. Normal Gin/Huma runtime and graceful-shutdown behavior is
+unchanged; the exact pin and checksums are in `go.mod`/`go.sum`. Huma
+publishes OpenAPI 3.1 title `SMT API`, version `v0.1.0`, at `/docs`,
+`/openapi.json`, and `/openapi.yaml`. The offline command constructs the shared
+Huma API and writes `api.OpenAPI().YAML()` without a listener:
+
+```sh
+sed -n '1,220p' ../platform/apis/internal/server/server.go
+sed -n '1,120p' ../platform/apis/cmd/openapi/main.go
+cat ../platform/apis/.env.example
+cat ../platform/apis/openapi.yaml
+(cd ../platform/apis && GOPROXY=off GOSUMDB=off go run ./cmd/openapi > /tmp/smt-openapi.yaml && cmp -s /tmp/smt-openapi.yaml openapi.yaml)
+```
+
+The committed `openapi.yaml` is byte-identical to regeneration across fresh
+Apply destinations. `/healthz` returns 200 `ok`; `/readyz` returns 503
+`not_ready` before bootstrap or during shutdown and 200 `ready` after
+bootstrap; `/metrics` shares the listener and exposes Go/process plus bounded
+request metrics. Safe `X-Request-ID` values are accepted or generated and
+returned. Panic recovery logs panic/stack/route/method/request ID via JSON
+`slog` and returns generic 500; SIGINT/SIGTERM performs timed graceful
+shutdown.
+
+Apply only writes embedded assets. It performs no network, Go/package-manager
+command, tool installation, Task execution, Podman, listener, or runtime
+execution. It adds no credentials, domain CRUD, database connectivity/readiness,
+migrations, root Taskfile changes, Containerfiles, or non-root packaging.
+
+### Use the generated API child Taskfile
+
+API selection emits `Taskfile.yml` in `../platform/apis`; no API selection emits
+no API Taskfile. The file has top-level `dotenv: ['.env']` and does not copy or
+mutate `.env`. Its task surface is:
+
+| Task | Behavior |
+| --- | --- |
+| `build` | `mkdir -p bin && go build -trimpath -o bin/apis .` |
+| `run` | Depends on `build`, then runs `./bin/apis`; `.env` supplies the variables parsed by `LoadConfig()`. |
+| `test` | `go test ./...` |
+| `coverage` | `go test ./... -coverprofile=coverage.out` |
+| `mod` | `go mod verify` |
+| `openapi` | Offline `GOPROXY=off GOSUMDB=off go run ./cmd/openapi`, compared byte-for-byte with `openapi.yaml`. |
+| `verify` | Depends on `build`, `test`, `mod`, and `openapi`, then runs `go vet ./...`. |
+
+API+Database receives the same API Taskfile and no database migration or
+readiness tasks yet; those belong to `smt-4xf.6.1.2` and later. Task v3.52.0
+verified the generated-child harness, including dotenv-driven `/healthz` and
+bounded process cleanup. `smt apply` writes the child Taskfile but never runs
+Task; there are no implicit installs or network work, and the root Taskfile is
+unchanged. Durable unit/race/fuzz/integration coverage remains `.3.3.3`,
+non-root packaging/runtime verification remains `.3.3.4`, and human E2E is not
+claimed.
+
+The command above is a local regeneration recipe. It is not evidence of
+`go mod tidy` or human E2E completion; `go mod verify` evidence is limited to
+the generated child Task harness.
 
 ### Inspect module declarations
 
