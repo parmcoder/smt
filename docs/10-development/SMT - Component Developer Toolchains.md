@@ -17,7 +17,8 @@ updated: 2026-08-17
 ## Purpose and status
 
 This is a researched planned contract for generated component repositories; its
-component toolchain sections are not implemented behavior. It refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it. Current `smt apply` remains deterministic and offline: it must not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration, and it rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
+component toolchain sections remain planned unless marked implemented. It
+refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it; `.3.3.2` adds deterministic API source and OpenAPI assets without packaging or runtime execution. Current `smt apply` remains deterministic and offline: it must not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration, and it rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
 
 Each component has four layers: native CLI/toolchain; repeatable Taskfile
 gates; agent skills; and optional MCP/live-runtime integration. Taskfiles use
@@ -80,16 +81,17 @@ empty `DATABASE_PASSWORD=` and no generated credentials.
 it reports invalid or colliding/occupied ports and missing Podman or Podman
 Compose prerequisites with actionable guidance. It does not execute external
 commands itself. Apply renders the files but does not invoke Preflight, Podman,
-Compose, socket probing, or health checks. Component build contexts,
-Containerfiles, lifecycle tasks, and app-domain behavior remain deferred to
-`.3.2` through `.3.6`.
+Compose, socket probing, or health checks. Remaining Web/Mobile/Database build
+contexts, Containerfiles, lifecycle tasks, and app-domain behavior remain
+deferred except for the generated API source/Taskfile contract in `.3.3.2`.
 
 ## Deferred generated manifest ownership
 
 The Web, Mobile, Database, and future runtime manifests below are planned
 scaffold behavior, not `.5` or `.3.1` outputs. The API `go.mod`/`go.sum`
-exception is implemented in `.3.3.1`; future generator work may copy the
-remaining reviewed manifests and lockfiles deterministically and offline.
+exception is implemented in `.3.3.1`, and the API source/OpenAPI assets are
+implemented in `.3.3.2`; future generator work may copy the remaining reviewed
+manifests and lockfiles deterministically and offline.
 `smt apply` never runs a package manager.
 
 - **Web** owns `package.json` and `package-lock.json`: runtime Next.js 16.2.9
@@ -119,17 +121,79 @@ remaining reviewed manifests and lockfiles deterministically and offline.
 Skills, MCP, browser/live tools, Podman, Task, Gitleaks, and SDK installations
 never belong in application manifests.
 
+## Implemented `.3.3.2` API runtime and OpenAPI assets
+
+When API is selected, apply emits deterministic `main.go`,
+`internal/server/server.go`, `cmd/openapi/main.go`, `.env.example`, and
+`openapi.yaml`, and `Taskfile.yml` in the API child repository alongside its
+`.3.3.1` manifests.
+No API selection emits no API child or API assets. The module is
+`example.com/smt/apis` on Go `1.26.5`, with Huma v2.39.1 through the Gin
+adapter, Gin v1.12.0, and Prometheus `github.com/prometheus/client_golang v1.24.1`. API-only source
+has no pgx, migrate, or database code; API+Database retains those dependencies
+in the manifest only.
+
+The generated runtime uses JSON `slog` and defaults
+`HTTP_ADDR=:8080`, `APP_ENV=development`, `LOG_LEVEL=info`,
+`HTTP_READ_TIMEOUT=15s`, `HTTP_READ_HEADER_TIMEOUT=5s`,
+`HTTP_WRITE_TIMEOUT=15s`, `HTTP_IDLE_TIMEOUT=60s`,
+`HTTP_MAX_HEADER_BYTES=1048576`, and `HTTP_SHUTDOWN_TIMEOUT=10s`. Huma
+metadata is OpenAPI 3.1, title `SMT API`, version `v0.1.0`, with `/docs`,
+`/openapi.json`, `/openapi.yaml`, `/healthz`, `/readyz`, and `/metrics` routes.
+`cmd/openapi` constructs the
+shared Huma API and writes `api.OpenAPI().YAML()` offline without a listener;
+the committed YAML is byte-identical to regeneration across fresh Apply
+destinations. Health, readiness, `/metrics`, `X-Request-ID`, panic recovery,
+and `SIGINT`/`SIGTERM` graceful shutdown follow the canonical implementation
+contract.
+
+The generated server `Config` carries direct `github.com/caarlos0/env/v11
+v11.4.1` `env`/`envDefault` tags on its typed fields, including `slog.Level`
+for `LogLevel` and `time.Duration` for the timeout fields. `LoadConfig()` calls
+plain `env.Parse(&cfg)`; native caarlos/TextUnmarshaler parsing controls
+malformed-value errors; no separate semantic conversion or post-parse
+validation is added. `Run` logs a structured `configuration load failed`
+event and panics with the native parse error before constructing the
+application. Normal Gin/Huma runtime and graceful-shutdown behavior is
+unchanged. The exact pin and direct checksums are present in both static API
+manifest variants.
+
+The API child also receives deterministic `Taskfile.yml` with top-level
+`dotenv: ['.env']`; it never copies or mutates `.env`. Its tasks are `build`
+(`mkdir -p bin && go build -trimpath -o bin/apis .`), `run` (depends on
+`build`, then runs `./bin/apis`), `test`, `coverage`, `mod` (`go mod verify`),
+offline byte-comparing `openapi`, and `verify` (depends on `build`, `test`,
+`mod`, and `openapi`, then runs `go vet ./...`). API+Database receives the
+same API Taskfile but no database migration/readiness tasks yet; those belong
+to `smt-4xf.6.1.2` and later. Task v3.52.0 verified dotenv-driven `/healthz`
+and bounded process cleanup in the generated-child harness.
+
+Apply writes embedded assets only and performs no network, Go/package-manager
+command, tool installation, Task execution, Podman, listener, or runtime
+execution. It adds no credentials, domain CRUD, database connectivity/readiness,
+migrations, root Taskfile changes, Containerfiles, or non-root packaging. Durable unit/race/fuzz/
+integration coverage is `.3.3.3`; non-root packaging/runtime verification is
+`.3.3.4`. `go mod tidy` remains a later source-closure check; `go mod verify`
+evidence is limited to the generated child `mod` task, and human E2E remains a
+later evidence boundary.
+
 ## Go API
 
-Baseline: Go 1.26.5, Huma v2.39.1, pgx v5.10.0. The `.3.3.1` files are static
-templates; apply performs no Go, `go mod`, package-manager, network, or tool
-installation work. Planned gates are gofmt check, `go vet ./...`,
-`go test ./...`, race, coverage, focused fuzz, `govulncheck ./...`, and pinned
-golangci-lint v2 configuration/version. `go mod tidy` and `go mod verify` are
-later checks against the eventual source closure, not proven by this slice.
-Integration tests use disposable PostgreSQL; OpenAPI generation is checked
-for drift and migrations are explicit/API-owned. `golint` is deprecated and
-frozen; use go vet and Staticcheck-class checks through golangci-lint instead.
+Baseline: Go 1.26.5, Huma v2.39.1 through Gin v1.12.0, and Prometheus
+`github.com/prometheus/client_golang v1.24.1`. The `.3.3.1` manifests and `.3.3.2` source/OpenAPI
+assets are static templates; apply performs no Go, `go mod`, package-manager,
+network, or tool installation work. Planned gates are gofmt check,
+`go vet ./...`, `go test ./...`, race, coverage, focused fuzz,
+`govulncheck ./...`, and pinned
+golangci-lint v2 configuration/version. `go mod tidy` remains a later check
+against the eventual source closure; the generated child `mod` task exercises
+`go mod verify` for the emitted manifest.
+The `.3.3.2` focused harness checks generated source/build behavior, health,
+readiness, metrics, docs/OpenAPI routes, and offline OpenAPI regeneration;
+durable unit/race/fuzz/integration suites are `.3.3.3`. Integration tests use
+disposable PostgreSQL only when the later database behavior exists, and
+migrations remain explicit/API-owned. `golint` is deprecated and frozen; use
+go vet and Staticcheck-class checks through golangci-lint instead.
 Required skill: `$godex:godex-go-backend`. `gopls` is local navigation, not a
 required Go MCP for v0.1.0.
 
@@ -174,8 +238,10 @@ Reuse Godex database guidance; no DB MCP is required for v0.1.0.
 
 ## Container / root workspace
 
-The root runtime contract is implemented, but the future root Taskfile will
-orchestrate component gates and Beads-aware verification.
+The generated API child Taskfile is implemented above. The future root Taskfile
+will orchestrate component gates, Database migration/readiness tasks, and
+Beads-aware aggregate verification; root task aggregation is `.6.1.2` and
+later.
 Podman/Compose smoke tests cover build, start, health/readiness, shutdown, and
 non-root identity. Gitleaks/security tasks are required before a production
 candidate. SBOM, signing, and remote CI are deferred.
@@ -184,7 +250,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 
 | Component | Generated manifest/lockfile | Required local tools | Task gates | Required skills | Optional MCP/runtime |
 | --- | --- | --- | --- | --- | --- |
-| Go API | `go.mod`, `go.sum` | Go, Huma, pgx, golangci-lint, PostgreSQL | format, vet, test, race, coverage, fuzz, vuln, OpenAPI, migrations | `$godex:godex-go-backend` | gopls local; no Go MCP |
+| Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, Task | child `build`, `run`, `test`, `coverage`, `mod`, `openapi`, `verify`; later durable format, vet, race, fuzz, vuln, migrations | `$godex:godex-go-backend` | gopls local; no Go MCP |
 | Next.js Web | `package.json`, `package-lock.json` | Node, Next.js, npm lockfile | Prettier, ESLint, TypeScript, Vitest/RTL, build, Playwright | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml` | Flutter/Dart, Android/iOS debug toolchains | format, analyze, unit/widget, integration, debug builds | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |

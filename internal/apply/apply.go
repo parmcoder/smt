@@ -245,11 +245,7 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		return plumbing.ZeroHash, err
 	}
 	if c.id == "api" {
-		goMod, goSum := apiManifests(databaseSelected)
-		if err := writeFile(filepath.Join(bootstrap, "go.mod"), goMod); err != nil {
-			return plumbing.ZeroHash, err
-		}
-		if err := writeFile(filepath.Join(bootstrap, "go.sum"), goSum); err != nil {
+		if err := writeAPISourceFiles(bootstrap, databaseSelected); err != nil {
 			return plumbing.ZeroHash, err
 		}
 	}
@@ -508,7 +504,7 @@ func componentIgnore(kind string) string {
 	case "web":
 		return base + "\nnode_modules/\n.next/\n.env\n"
 	case "api":
-		return base + "\nbin/\ntmp/\n.env\n"
+		return base + "\nbin/\ntmp/\n.env\ncoverage.out\ncoverage.html\n"
 	case "database":
 		return base + "\npostgres-data/\n.env\n"
 	case "mobile":
