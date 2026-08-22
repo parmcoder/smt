@@ -267,6 +267,9 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		if err != nil {
 			return plumbing.ZeroHash, nextInitializationError(output, err)
 		}
+		if err := writeWebQualityFiles(stagedWeb); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("Web quality configuration failed: %w", err)
+		}
 		if err := removeNestedGitDirectories(stagedWeb); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("clean staged Web repository: %w", err)
 		}
@@ -670,13 +673,11 @@ func appendWebReadme(path string) error {
 		return err
 	}
 	text := string(contents)
-	if strings.Contains(text, "asdf exec npm install") && strings.Contains(text, "asdf exec npm run dev") {
-		return nil
-	}
-	if text != "" && !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
-	text += `
+	if !strings.Contains(text, "## SMT Web development") {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += `
 ## SMT Web development
 
 Install dependencies and start the development server after Apply:
@@ -686,6 +687,27 @@ asdf exec npm install
 asdf exec npm run dev
 ~~~
 `
+	}
+	if !strings.Contains(text, "## SMT Web quality") {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += `
+## SMT Web quality
+
+Run these explicit quality checks from this repository after installing
+dependencies. Apply does not run them or create a lockfile.
+
+~~~sh
+asdf exec npm run format:check
+asdf exec npm run lint
+asdf exec npm run typecheck
+asdf exec npm run test
+asdf exec npm run build
+asdf exec npm run test:e2e
+~~~
+`
+	}
 	return os.WriteFile(path, []byte(text), 0o644)
 }
 
