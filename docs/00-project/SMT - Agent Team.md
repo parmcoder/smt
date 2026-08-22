@@ -29,6 +29,7 @@ can copy or register them in its native agent directory if required.
 | --- | --- | --- | --- |
 | `work_manager` | `gpt-5.6-terra`, high | Serial delivery assignments, safety decisions, worker review loop, final acceptance | Go/Flutter/E2E implementation, delegation beyond the listed workers |
 | `backend_worker` | `gpt-5.6-luna`, Fast, xhigh | Go production code and focused tests assigned by `work_manager` under `internal/` and `cmd/smt/` | Architecture decisions, docs, further delegation, non-manager assignments |
+| `web_worker` | `gpt-5.6-luna`, Fast, xhigh | Next.js/TypeScript Web production code and focused tests assigned by `work_manager` | Architecture decisions, docs, further delegation, Go/Flutter assignments |
 | `mobile_worker` | `gpt-5.6-luna`, Fast, xhigh | Only assigned Flutter/Dart production code and focused tests; explicit SDK/device lane reporting | Architecture decisions, docs, further delegation, Go assignments |
 | `e2e_worker` | `gpt-5.6-luna`, Fast, xhigh | Root-attached `e2e/web` Playwright and `e2e/mobile` orchestration packages; contract smoke tests and explicit browser/device lane reporting | Domain CRUD/auth flows, component implementation, signing, cloud device farms, remote CI, further delegation |
 | `doc_writer` | `gpt-5.6-luna`, Fast, xhigh | `docs/`, `prompts/`, durable decisions, handoffs, Mermaid | Go implementation and behavior changes |
@@ -39,10 +40,10 @@ can copy or register them in its native agent directory if required.
 prepared workspaces. It owns only root gitlink and integration artifacts; it is
 not a downstream implementation delegate. The active implementation topologies
 are `work_manager -> backend_worker -> doc_writer` for Go,
+`work_manager -> web_worker -> doc_writer` for Web,
 `work_manager -> mobile_worker -> doc_writer` for Mobile, and
-`work_manager -> e2e_worker -> doc_writer` for local E2E. The backend and
-Mobile routes remain unchanged; `doc_writer` aligns docs only after accepted
-behavior.
+`work_manager -> e2e_worker -> doc_writer` for local E2E. The backend route
+remains unchanged; `doc_writer` aligns docs only after accepted behavior.
 The integration contract makes the root ownership boundary and feature-ID
 commit rule explicit for whichever host performs the integration step.
 
@@ -107,6 +108,38 @@ auth secrets, signing, cloud device farms, or implicit installs. Local tasks
 delegate startup and shutdown to existing component tasks, retain failure
 reports, and report missing browsers, SDKs, simulators, emulators, or devices
 explicitly.
+
+## Accepted Web Apply boundary
+
+The Web `.3.2.1` initializer is implemented through the staged Next.js CLI
+workflow. After the root `.tool-versions` pin `nodejs 24.18.0` is staged, Web
+Apply runs this exact argument-array command and preserves the CLI-owned files:
+
+```sh
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+```
+
+Apply merges the CLI `.gitignore`, publishes no `package-lock.json`, and does
+not run `npm install` or resolve dependencies. A failed initializer leaves the
+published destination absent and retains actionable recovery guidance:
+`asdf install nodejs 24.18.0`, `asdf current nodejs`, and
+`asdf exec npx --yes create-next-app@16.2.9 --help`. The CLI output is staged
+before publication, so the failure is atomic.
+
+The pinned `npx create-next-app` call is the sole Apply exception that may
+access the npm registry. Non-Web and static Apply paths remain offline; Web
+still performs no `npm install`, lockfile publication, or dependency
+resolution.
+
+When Web is selected, Apply also generates Web-specific `web_worker` routing
+and the worker manifest. `web_worker` owns only assigned Next.js/TypeScript
+production code and focused tests, uses the required
+`build-web-apps:react-best-practices` and
+`build-web-apps:frontend-testing-debugging` skills, does not delegate, and
+reports unavailable Node, npm, browser, or platform lanes explicitly. The
+later `.3.2.2/.3` work owns npm installation and lockfile creation, quality,
+browser, and runtime verification; no such real-lane evidence is claimed by
+`.3.2.1`.
 
 ## Beads ticket ownership
 

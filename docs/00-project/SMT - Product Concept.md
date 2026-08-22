@@ -149,8 +149,9 @@ and API depends conditionally on a healthy Database. `.env.example` contains
 examples only with an empty `DATABASE_PASSWORD=`; no credentials or `.env`
 file is generated. The pure preflight API reports invalid or occupied ports
 and missing Podman/Podman Compose prerequisites through injectable checks, but
-`smt apply` remains offline and does not invoke Preflight, Podman, Compose,
-socket probing, or health checks.
+the static root Apply path remains offline and does not invoke Preflight,
+Podman, Compose, socket probing, or health checks. Selected Web Apply is the
+documented pinned `npx` registry-access exception.
 
 Mobile-selected Apply stages the child and root `.tool-versions` with
 `flutter 3.44.9-stable`, then runs the exact Flutter-owned project creation
@@ -180,9 +181,36 @@ Mobile remains outside OCI Compose, and the current `.3.1`
 Compose file is a declarative contract without component Containerfiles, so
 Compose is not required to launch the starter locally.
 
-Future Web/Database build contexts, Containerfiles, lifecycle tasks, broader
-Mobile API integration, platform runtime work, a remote module registry, and
-`smt extend` remain deferred; `.3.1` adds no app-domain behavior.
+### Implemented Web CLI initializer
+
+Web `.3.2.1` is implemented as a CLI-owned Next.js baseline: the root pins
+`nodejs 24.18.0`, and selected Web Apply stages and invokes this exact
+argument-array command:
+
+```sh
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+```
+
+The CLI owns the generated `package.json`, App Router, Tailwind, `AGENTS.md`,
+and related baseline files. Apply preserves that output, merges the CLI
+`.gitignore`, publishes no `package-lock.json`, and performs no `npm install` or
+dependency resolution. Staging is atomic: a failed initializer leaves the
+destination unpublished and reports `asdf install nodejs 24.18.0`,
+`asdf current nodejs`, and the pinned CLI `--help` recovery path. Apply also
+generates Web-specific `web_worker` routing and skills metadata.
+
+The pinned `npx create-next-app` call is the sole Apply exception that may
+access the npm registry. Non-Web and static Apply paths remain offline; Web
+still performs no installation, lockfile publication, or dependency
+resolution.
+
+After Apply, the local Web workflow is `asdf exec npm install` followed by
+`asdf exec npm run dev` from `web-app/`. The later `.3.2.2/.3` Web worker lanes
+own npm lockfile creation, quality, browser, and runtime checks; `.3.2.1`
+does not claim real npm or runtime evidence. Future Web/Database build
+contexts, Containerfiles, lifecycle tasks, broader Mobile API integration,
+platform runtime work, a remote module registry, and `smt extend` remain
+deferred; `.3.1` adds no app-domain behavior.
 
 The implemented `.3.3.1` API manifest slice adds static `go.mod` and `go.sum`
 only to selected API child repositories. They use module
@@ -244,17 +272,20 @@ or during shutdown and 200 `ready` after bootstrap. `/metrics` shares the
 listener and exposes Go/process plus bounded request metrics. Safe
 `X-Request-ID` values are accepted or generated and returned. Gin panic recovery logs panic/stack,
 route, method, and request ID through JSON `slog` before returning generic 500;
-SIGINT/SIGTERM performs timed graceful shutdown. Apply writes embedded assets
-only and performs no network, Go/package-manager command, tool installation,
-Task execution, Podman, listener, or runtime execution. Credentials, domain CRUD, DB
+SIGINT/SIGTERM performs timed graceful shutdown. API-selected Apply writes
+embedded assets only and performs no network, Go/package-manager command, tool
+installation, Task execution, Podman, listener, or runtime execution. Credentials, domain CRUD, DB
 connectivity/readiness, migrations, root Taskfile changes, Containerfiles, non-root
 packaging, and `smt extend` remain out of scope. Durable unit/race/fuzz/
 integration tests are `.3.3.3`; non-root packaging/runtime verification is
 `.3.3.4`, with later human and Podman gates still required.
 
-Generation remains offline and byte-stable for identical selections in fresh
-destinations. `smt apply` rejects missing, unsupported, or unknown provenance
-before mutation and refuses an existing file or directory without overwrite,
+Blueprint and static generation remains byte-stable without network access for
+identical selections in fresh destinations. Selected Web `.3.2.1` Apply is the documented
+pinned `npx` initializer exception and may access the npm registry without
+installing or resolving dependencies. All other Apply paths remain offline.
+`smt apply` rejects missing, unsupported, or unknown provenance before mutation
+and refuses an existing file or directory without overwrite,
 merge, regeneration, upgrade, or `smt extend` execution. A general non-generated
 version-1 configuration may still serve lifecycle and diagnostic commands
 without provenance, but it is not applyable as a new generated blueprint. See

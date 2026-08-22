@@ -20,11 +20,15 @@ The taxonomy and configuration portion of the version-1 starter restructure is
 implemented: new blueprints select Web, optional Mobile, API, and Database,
 with DevOps-shaped configuration removed. Generated blueprints also carry the
 exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
-`smt apply` validates it before mutation. Remaining Web/Database runnable
-module assets remain planned work; the Mobile `.3.5.1/.3.5.2/.3.5.3`
-contracts are implemented below. `.3.5.2` uses the local Flutter CLI to create
-the staged Android/iOS project, and `.3.5.3` adds the stable app/test contract;
-it does not use static platform templates.
+`smt apply` validates it before mutation. The Web `.3.2.1` CLI baseline and
+the Mobile `.3.5.1/.3.5.2/.3.5.3` contracts are implemented below; remaining
+Web quality/runtime work, Database runnable assets, and packaging remain
+planned. `.3.2.1` uses the local Next.js CLI to create the staged Web project;
+it preserves CLI files, merges ignores, and does not install packages during
+Apply. `.3.5.2` uses the local Flutter CLI to create the staged Android/iOS
+project, and `.3.5.3` adds the stable app/test contract; it does not use
+static platform templates. Mobile integration/device/build lanes remain
+explicitly unverified where the host lacks the required SDK or target.
 `.3.3.2` now implements the generated API runtime and OpenAPI starter assets.
 The static schema-v1 module catalog and repository annotations are implemented
 metadata; `smt extend` is explicitly deferred.
@@ -66,9 +70,9 @@ sixth layer.
 The approved production baseline for the planned starter is Go 1.26.5, pgx
 v5.10.0, Next.js 16.2.9 on Node 24.18.0, Flutter 3.44.9 stable, PostgreSQL 18, and
 Podman 5.8.3 or newer with a Compose provider. These are reviewed target
-constraints for the milestone; the current CLI now generates the accepted Go
-API assets, while broader component generation and runtime verification remain
-deferred.
+constraints for the milestone; the current CLI now generates the accepted Web
+`.3.2.1` baseline and Go API assets, while broader component generation and
+runtime verification remain deferred.
 
 ## Implemented version-1 taxonomy change
 
@@ -80,9 +84,12 @@ after Web. They omit `workspace.stack.devops`, the DevOps prompt, the combined
 DevOps-shaped configurations are rejected before apply mutation with a
 migration-oriented removal/regeneration error.
 
-Generation is offline and byte-stable for identical selections in fresh
-destinations. Missing, unsupported, or unknown provenance fails before service
-or destination mutation; a general non-generated version-1 configuration may
+Blueprint and static generation remains byte-stable without network access for
+identical selections in fresh destinations. Selected Web `.3.2.1` Apply is the
+documented pinned `npx` initializer exception and may access the npm registry
+without installing or resolving dependencies. All other Apply paths remain
+offline. Missing, unsupported, or unknown provenance fails before service or
+destination mutation; a general non-generated version-1 configuration may
 remain usable for lifecycle and diagnostics without provenance but is not
 applyable as a new generated blueprint. Existing destination files and
 directories are refused without overwrite, merge, regeneration, upgrade, or
@@ -95,12 +102,16 @@ and API are runnable, PostgreSQL is orchestrated locally with Podman Compose,
 and Mobile is a runnable Android/iOS starter but not an OCI workload. It should
 include health/readiness, graceful shutdown, migrations owned by the API,
 non-root container images, lockfiles, and smoke commands without inventing
-CRUD or domain behavior. Workspace creation remains deterministic and offline;
-runtime tools are used only by later verification. `.3.1` emits the
-contract-only root `compose.yaml` and `.env.example`; `.3.3.2` emits the API
-source/OpenAPI starter assets, and `.3.5.2` emits the Mobile source/platform
-assets, but Web/Database templates, Containerfiles, packaging, and
-Podman/Compose execution remain outside this contract.
+CRUD or domain behavior. Workspace creation remains deterministic; blueprint,
+static, and non-Web paths are offline. Selected Web `.3.2.1` uses the pinned
+`npx create-next-app` exception and may access the npm registry, but it still
+performs no installation or dependency resolution. Runtime tools are used only
+by later verification. `.3.1` emits the
+contract-only root `compose.yaml` and `.env.example`; `.3.2.1` uses the local
+Next.js CLI for the Web baseline; `.3.3.2` emits the API source/OpenAPI starter
+assets; and `.3.5.2` emits the Mobile source/platform assets. Web dependency,
+quality, browser, and runtime work, Database templates, Containerfiles,
+packaging, and Podman/Compose execution remain outside this contract.
 
 Platform capabilities are decomposed into `container`, `cicd`,
 `observability`, `iac`, `k8s`, and `argocd`; the `.5` catalog implements these
@@ -109,11 +120,44 @@ repositories, scaffolds, runtime artifacts, and execution remain deferred.
 AWS + Apptainer + OpenTofu is a later discovery and compatibility milestone,
 not part of this restructure.
 
+## Accepted Web `.3.2.1` CLI initializer
+
+The Web baseline is Next.js `16.2.9` on root-pinned Node.js `24.18.0`. When
+Web is selected, Apply stages the child and invokes this exact argument-array
+command:
+
+```sh
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+```
+
+The Next.js CLI owns the generated `package.json`, App Router, Tailwind,
+`AGENTS.md`, and other baseline files. Apply preserves those files, merges the
+CLI `.gitignore`, publishes no `package-lock.json`, and performs no `npm
+install` or dependency resolution. The CLI output is staged before
+publication; a failure retains its output in the error, reports
+`asdf install nodejs 24.18.0`, `asdf current nodejs`, and the pinned CLI
+`--help` path, and leaves no published partial destination.
+
+This pinned `npx create-next-app` call is the sole Apply exception that may
+access the npm registry. Non-Web and static Apply paths remain offline; Web
+still performs no `npm install`, lockfile publication, or dependency
+resolution.
+
+Web selection also generates `web_worker` routing and skills metadata. The
+worker owns assigned Next.js/TypeScript production code and focused tests and
+uses `build-web-apps:react-best-practices` and
+`build-web-apps:frontend-testing-debugging`. After Apply, the local workflow is
+`asdf exec npm install` followed by `asdf exec npm run dev` from `web-app/`.
+The later `.3.2.2/.3` lanes own npm lockfile creation, quality, browser, and
+runtime verification; `.3.2.1` claims no real Web npm, browser, or runtime
+evidence.
+
 ## Approved mobile-first roadmap
 
 The next P0 starter lane is Mobile rollup `smt-4xf.3.5` and children
 `.3.5.1-.3`. Web rollup `smt-4xf.3.2` and children `.3.2.1-.3` remain P2 and
-deferred; existing dependency edges are unchanged. Mobile starts independently
+deferred as a rollup; `.3.2.1` is implemented and `.3.2.2/.3` remain deferred.
+Existing dependency edges are unchanged. Mobile starts independently
 from current `main`, does not wait for an API PR, and does not require Web, API,
 or Database. Keep Mobile backend-independent initially; typed API integration
 follows after generated API/Database runtime work.
@@ -263,7 +307,7 @@ recovery logs panic/stack/route/method/request ID through JSON `slog` and
 returns generic 500. SIGINT/SIGTERM marks the service not ready and performs
 graceful shutdown with the configured timeout.
 
-Apply writes embedded deterministic assets only: no network, Go or
+API-selected Apply writes embedded deterministic assets only: no network, Go or
 package-manager command, tool installation, Podman, listener, or runtime
 execution. No credentials, domain CRUD, DB connectivity/readiness, migrations,
 root Taskfile changes, Containerfiles, non-root packaging, or `smt extend` are
@@ -329,8 +373,9 @@ browser/device lanes explicitly. Apply still does not install dependencies,
 browsers, SDKs, devices, credentials, or remote CI. The `.5` slice retains its
 platform/runtime boundaries, and `smt extend` remains deferred.
 
-Remaining Web/Database component manifests and lockfiles are deferred
-runnable-starter assets; Mobile `.3.5.1` lockfile/lint production and
+Remaining Web dependency lockfile, quality, browser, and runtime assets and
+Database component manifests/lockfiles are deferred runnable-starter assets;
+Mobile `.3.5.1` lockfile/lint production and
 verification occur after `pub get`, while `.3.5.2` is the implemented Flutter
 CLI project/source/platform baseline.
 Skills and MCP integrations remain distinct metadata and prerequisite
@@ -347,11 +392,14 @@ implementation is deferred until the version-1 restructure is complete.
 The accepted `.2` scope is the starter component taxonomy and configuration
 gate; `.4` adds the selectable catalog and repository module annotations, `.5`
 adds the six non-selectable platform declarations plus catalog/config
-validation boundaries, `.3.1` adds the root runtime contract artifacts, and
-`.3.3.2` adds the generated API runtime/OpenAPI assets. Remaining design scope
-now records the completed P0 Mobile verification contract, followed by the
-P2/deferred Web and remaining Database starter work, packaging, and Podman-first
-runtime implementation. Out of scope for the current CLI are Web/Mobile/Database
+validation boundaries, `.3.1` adds the root runtime contract artifacts,
+`.3.2.1` adds the staged CLI-owned Web baseline, and `.3.3.2` adds the
+generated API runtime/OpenAPI assets. Remaining design scope records the
+completed P0 Mobile verification contract, followed by deferred Web
+`.3.2.2/.3`, remaining Database starter work, packaging, and Podman-first
+runtime implementation. Mobile integration/device/build lanes remain explicit
+unverified where the host lacks the required SDK or target. Out of scope for
+the current CLI are Web/Mobile/Database
 Containerfiles, platform
 repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
 or ArgoCD deployment, OpenTofu execution, a remote module registry,

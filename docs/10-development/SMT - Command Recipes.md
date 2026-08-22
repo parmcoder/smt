@@ -41,10 +41,11 @@ Mobile targets, while no-target E2E remains metadata-only. It writes `smt.yaml`
 only after confirmation and does not create a workspace. The generated file carries the
 exact provenance mapping documented in [[../00-project/SMT - Implementation Spec#Configuration contract|the implementation
 specification]], with no timestamp, user, machine/path, Git
-SHA, random value, or environment-derived field. Generation is offline and
-byte-stable for identical selections in fresh destinations. The destination
-file must not already exist. Inspect the generated `smt.yaml` before applying
-it.
+SHA, random value, or environment-derived field. Blueprint generation is
+byte-stable without network access for identical selections in fresh destinations; the
+selected Web Apply initializer is the documented pinned `npx` exception that
+may access the npm registry. The destination file must not already exist.
+Inspect the generated `smt.yaml` before applying it.
 
 ```sh
 $EDITOR ../platform-config/smt.yaml
@@ -79,8 +80,9 @@ non-generated version-1 configuration without provenance remains usable for
 lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
-release does not provide Web/Database runtime starters, Mobile `.3.5.3`
-verification, component Containerfiles, platform
+release does not provide Web runtime/quality execution or a Database runtime
+starter; `.3.2.1` provides the CLI-owned Web baseline while `.3.2.2/.3`
+remain deferred. Mobile `.3.5.3` verification, component Containerfiles, platform
 repositories/scaffolds/runtime artifacts, Podman or Compose execution, a
 remote module registry, or `smt extend`; `.3.3.2` adds only deterministic API
 source/OpenAPI assets. The generated `compose.yaml` and
@@ -89,11 +91,47 @@ are persisted, but apply does not
 execute their verification recipes, install referenced tools/skills/MCP,
 mutate host configuration, or create module repositories.
 
+### Accepted Web CLI initializer
+
+Web `.3.2.1` is implemented as a staged, CLI-owned Next.js baseline. The root
+`.tool-versions` pins `nodejs 24.18.0`. When Web is selected, Apply invokes
+this exact argument-array command before publishing the child:
+
+```sh
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+```
+
+Apply preserves the CLI files, merges its `.gitignore`, publishes no
+`package-lock.json`, and performs no `npm install` or dependency resolution.
+The staged operation is atomic; on failure the destination is not published
+and the error gives `asdf install nodejs 24.18.0`, `asdf current nodejs`, and
+`asdf exec npx --yes create-next-app@16.2.9 --help` guidance. A selected Web
+Apply also emits Web-specific `web_worker` routing and the required
+`build-web-apps:react-best-practices` and
+`build-web-apps:frontend-testing-debugging` skill references.
+
+The pinned `npx create-next-app` call is the sole Apply exception that may
+access the npm registry. Non-Web and static Apply paths remain offline; Web
+still performs no installation, lockfile publication, or dependency
+resolution.
+
+After Apply, work from `web-app/` with:
+
+```sh
+asdf exec npm install
+asdf exec npm run dev
+```
+
+The later Web worker lanes `.3.2.2/.3` own npm lockfile creation, quality,
+browser, and runtime verification. Do not treat this initializer as evidence
+that those real npm, browser, or runtime lanes have run.
+
 ### Plan the Mobile-first starter lane
 
 The next P0 lane is Mobile rollup `smt-4xf.3.5` with children `.3.5.1-.3`.
-Web rollup `smt-4xf.3.2` and children `.3.2.1-.3` remain P2/deferred, with
-existing dependency edges unchanged. Mobile starts independently from current
+Web rollup `smt-4xf.3.2` may remain P2, with `.3.2.1` implemented as the CLI
+baseline and `.3.2.2/.3` remaining P2/deferred; existing dependency edges are
+unchanged. Mobile starts independently from current
 `main`, does not wait for an API PR, and does not require Web, API, or Database.
 Keep it backend-independent initially; typed API integration follows generated
 API/Database runtime work. The delivery route is
@@ -253,9 +291,9 @@ returned. Panic recovery logs panic/stack/route/method/request ID via JSON
 `slog` and returns generic 500; SIGINT/SIGTERM performs timed graceful
 shutdown.
 
-Apply only writes embedded assets. It performs no network, Go/package-manager
-command, tool installation, Task execution, Podman, listener, or runtime
-execution. It adds no credentials, domain CRUD, database connectivity/readiness,
+API-selected Apply only writes embedded assets. It performs no network,
+Go/package-manager command, tool installation, Task execution, Podman, listener,
+or runtime execution. It adds no credentials, domain CRUD, database connectivity/readiness,
 migrations, root Taskfile changes, Containerfiles, or non-root packaging.
 
 ### Use the generated API child Taskfile

@@ -15,8 +15,10 @@ reviewable blueprints and visible lifecycle operations.
 
 > **Development status:** source builds are supported. APIs and generated
 > starters remain evolving. `apply` creates a deterministic, Git-ready
-> workspace; when Mobile is selected it runs the pinned local Flutter CLI with
-> `--no-pub` and never performs dependency resolution or package installation.
+> workspace; when Web is selected it runs the pinned local Next.js CLI with
+> `--skip-install`, and when Mobile is selected it runs the pinned local Flutter
+> CLI with `--no-pub`. Apply never performs dependency resolution or package
+> installation.
 
 ## Why SMT
 
@@ -35,6 +37,7 @@ operations, and no credential persistence.
 | Beads lifecycle | `prepare` and `switch` coordinate existing Beads-ID branches. |
 | Diagnostics | `status` and `doctor` report repository, executable, remote, hook, and profile readiness. |
 | Hooks | Guarded Lefthook installation and conventional commit validation. |
+| Web | `.3.2.1` creates a Git-ready Next.js CLI baseline; `.3.2.2/.3` quality and runtime lanes remain deferred. |
 | Mobile | Current Mobile output includes a Flutter CLI-generated Android/iOS starter plus stable app, unit, widget, and native integration-test hooks; device/build lanes are reported explicitly when unavailable. |
 | E2E | The root `e2e` declaration is being expanded into local Web and Mobile contract-smoke packages by `smt-4xf.14`; no E2E artifacts are generated until that milestone lands. |
 
@@ -60,9 +63,43 @@ smt doctor
 
 `smt new` writes a blueprint only after confirmation. Inspect it before
 `apply`; the destination must be new. `apply` initializes Beads metadata and
-does not run `flutter pub get`, resolve packages, call provider APIs, or create
-remote projects. A selected Mobile apply requires the pinned local Flutter
-toolchain; other components remain independent of that prerequisite.
+does not run `flutter pub get`, `npm install`, resolve packages, call provider
+APIs, or create remote projects. Selected Web and Mobile applies require their
+pinned local asdf toolchains; other components remain independent of those
+prerequisites.
+
+## Current Web in-development workflow
+
+The accepted Web path is build-from-source through the local Next.js CLI. After
+the root `.tool-versions` file is staged, `smt apply` runs this exact
+argument-array command in a temporary Web directory and preserves the CLI
+files:
+
+```sh
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+```
+
+The root pin is `nodejs 24.18.0`. Apply merges the CLI `.gitignore`, publishes
+no `package-lock.json`, runs no `npm install`, and performs no dependency
+resolution. If initialization fails, the staged workspace is discarded and
+the destination is not published; retry with:
+
+```sh
+asdf install nodejs 24.18.0
+asdf current nodejs
+asdf exec npx --yes create-next-app@16.2.9 --help
+```
+
+This pinned `npx create-next-app` invocation is the only Apply path that may
+access the npm registry. Non-Web and static Apply paths remain offline; the
+Web exception still performs no installation, lockfile publication, or
+dependency resolution.
+
+After Apply, work from `web-app/` with `asdf exec npm install` and
+`asdf exec npm run dev`. The later `web_worker` lane owns the lockfile,
+quality, browser, and runtime checks; this initializer does not claim that
+those checks or a real browser/device lane have run. A selected Web Apply also
+generates Web-specific `web_worker` routing and skills metadata.
 
 ## Current Mobile in-development workflow
 
