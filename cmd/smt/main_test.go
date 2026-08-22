@@ -1171,7 +1171,11 @@ func installFakeASDFForApply(t *testing.T) {
 	script := `#!/bin/sh
 set -eu
 destination=""
-for arg in "$@"; do destination="$arg"; done
+if [ "${2:-}" = "npx" ]; then
+  destination="$5"
+else
+  for arg in "$@"; do destination="$arg"; done
+fi
 mkdir -p "$destination"
 `
 	if err := os.WriteFile(filepath.Join(directory, "asdf"), []byte(script), 0o755); err != nil {

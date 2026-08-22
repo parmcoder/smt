@@ -43,6 +43,12 @@ var runFlutterCreate = func(ctx context.Context, cwd string, args []string) erro
 	return err
 }
 
+var runNextCreate = func(ctx context.Context, cwd string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "asdf", args...)
+	cmd.Dir = cwd
+	return cmd.CombinedOutput()
+}
+
 var writeStagedConfig = os.WriteFile
 
 // Service stages every effect beside its target. Initialize is retained as a
@@ -233,7 +239,44 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		return plumbing.ZeroHash, err
 	}
 	bootstrap := filepath.Join(root, ".smt", "bootstrap", c.id)
-	if c.id == "mobile" {
+	if c.id == "web" {
+		if err := os.MkdirAll(filepath.Dir(bootstrap), 0o755); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		stagedWeb := filepath.Join(root, c.path)
+		if err := os.MkdirAll(filepath.Dir(stagedWeb), 0o755); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		output, err := runNextCreate(ctx, root, []string{
+			"exec",
+			"npx",
+			"--yes",
+			"create-next-app@16.2.9",
+			stagedWeb,
+			"--typescript",
+			"--eslint",
+			"--app",
+			"--empty",
+			"--tailwind",
+			"--use-npm",
+			"--skip-install",
+			"--disable-git",
+			"--agents-md",
+			"--import-alias=@/*",
+		})
+		if err != nil {
+			return plumbing.ZeroHash, nextInitializationError(output, err)
+		}
+		if err := removeNestedGitDirectories(stagedWeb); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("clean staged Web repository: %w", err)
+		}
+		if err := os.RemoveAll(filepath.Join(stagedWeb, "package-lock.json")); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("remove staged Web lockfile: %w", err)
+		}
+		if err := os.Rename(stagedWeb, bootstrap); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("stage Next.js Web repository: %w", err)
+		}
+	} else if c.id == "mobile" {
 		if err := os.MkdirAll(filepath.Dir(bootstrap), 0o755); err != nil {
 			return plumbing.ZeroHash, err
 		}
@@ -269,14 +312,29 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}
-	if err := writeFile(filepath.Join(bootstrap, "README.md"), componentReadme(c)); err != nil {
-		return plumbing.ZeroHash, err
-	}
-	if err := writeFile(filepath.Join(bootstrap, ".gitignore"), componentIgnore(c.kind)); err != nil {
-		return plumbing.ZeroHash, err
-	}
-	if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root); err != nil {
-		return plumbing.ZeroHash, err
+	if c.id == "web" {
+		if err := mergeIgnoreFile(filepath.Join(bootstrap, ".gitignore"), componentIgnore(c.kind)); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		if err := writeFileIfAbsent(filepath.Join(bootstrap, "README.md"), componentReadme(c)); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		if err := appendWebReadme(filepath.Join(bootstrap, "README.md")); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		if err := writeLefthookConfigIfAbsent(bootstrap, filepath.Join(root, c.path), root); err != nil {
+			return plumbing.ZeroHash, err
+		}
+	} else {
+		if err := writeFile(filepath.Join(bootstrap, "README.md"), componentReadme(c)); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		if err := writeFile(filepath.Join(bootstrap, ".gitignore"), componentIgnore(c.kind)); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root); err != nil {
+			return plumbing.ZeroHash, err
+		}
 	}
 	if c.id == "api" {
 		if err := writeAPISourceFiles(bootstrap, databaseSelected); err != nil {
@@ -318,6 +376,32 @@ func initChildRepository(path string) (*ggit.Repository, error) {
 	}
 	return ggit.PlainInitWithOptions(path, &ggit.PlainInitOptions{
 		InitOptions: ggit.InitOptions{DefaultBranch: plumbing.Main},
+	})
+}
+
+func nextInitializationError(output []byte, err error) error {
+	message := fmt.Errorf("Next.js Web initialization failed; run `asdf install nodejs 24.18.0`, verify with `asdf current nodejs`, and inspect the pinned initializer with `asdf exec npx --yes create-next-app@16.2.9 --help`, then retry: %w", err)
+	if len(output) == 0 {
+		return message
+	}
+	return fmt.Errorf("%w; CLI output:\n%s", message, output)
+}
+
+func removeNestedGitDirectories(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root || entry.Name() != ".git" {
+			return nil
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
 	})
 }
 
@@ -484,7 +568,7 @@ func writeArtifacts(root, publishedRoot string, cs []component) error {
 		"README.md":                      "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n\nBeads configuration is tracked with the workspace; its embedded Dolt database and local runtime files stay on this machine and are ignored by Git.\n",
 		".tool-versions":                 toolVersions(cs),
 		"AGENTS.md":                      "# Project Agent Operating Agreement\n\nGo work uses `$godex:godex-go-backend`. Beads (`bd`) is the canonical task and issue state. Agents create tickets directly with `bd create`; the `work_manager` owns delivery decisions.\n\nWorkflow: `bd create -> worker -> tests -> manager review -> durable handoff/docs -> validation`. SMT does not wrap ticket creation, review queues, ready-work listing, or release readiness.\n\nOn the default branch, use ordinary `type(scope): summary` commits. On a Beads-ID branch, commits must use `type(scope): [BEAD-ID] summary`, with the ID exactly matching the branch.\n",
-		"agents/work_manager.toml":       "name = \"work_manager\"\nmodel_reasoning_effort = \"high\"\n\n# Prepared workspace contract\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",
+		"agents/work_manager.toml":       "name = \"work_manager\"\nmodel_reasoning_effort = \"high\"\n\n# Prepared workspace contract\n# Web delivery route: work_manager -> web_worker -> doc_writer.\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",
 		"agents/integration_worker.toml": "name = \"integration_worker\"\nmodel = \"gpt-5.6-luna\"\nservice_tier = \"priority\"\nmodel_reasoning_effort = \"xhigh\"\n\n# Root-only integration contract; this is not a third delivery delegate.\nownership = \"root integration and gitlink updates only\"\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",
 		"agents/doc_writer.toml":         "name = \"doc_writer\"\nmodel = \"gpt-5.6-luna\"\nservice_tier = \"priority\"\nmodel_reasoning_effort = \"xhigh\"\n",
 		"prompts/build.md":               "# Build workflow\n\nCreate and manage tickets directly with Beads before editing code:\n\n`bd prime`\n`bd create --title=\"Short task title\" --description=\"Why this exists and what needs to be done\" --type=task --priority=2`\n`bd show <id>`\n`bd update <id> --claim`\n`bd ready`\n`bd blocked`\n`bd close <id> --reason=\"Completed\"`\n\nSMT does not wrap ticket creation, review queues, ready-work listing, or release readiness.\n\nOn the default branch use `type(scope): summary`; on a Beads-ID branch use `type(scope): [BEAD-ID] summary` with the ID exactly matching the branch.\n",
@@ -492,6 +576,10 @@ func writeArtifacts(root, publishedRoot string, cs []component) error {
 		"docs/00-project/Agentic Development Workflow.md": "---\ntitle: Agentic Development Workflow\n---\n# Agentic Development Workflow\n\nBeads is canonical state. Agents create tickets directly with `bd create`, inspect and claim them with `bd show` and `bd update --claim`, and close them with `bd close`. Use `bd ready` and `bd blocked` to inspect work. SMT does not wrap ticket creation or review queues.\n",
 	}
 	for _, c := range cs {
+		if c.id == "web" {
+			files["agents/web_worker.toml"] = webWorkerManifest()
+			continue
+		}
 		files["agents/"+c.id+"_worker.toml"] = "name = \"" + c.id + "_worker\"\nmodel = \"gpt-5.6-luna\"\nservice_tier = \"priority\"\nmodel_reasoning_effort = \"xhigh\"\n\ncommit_format = \"type(scope): [BEAD-ID] summary on a matching Beads-ID branch\"\nprepared_workspace = \"Use the active branch Beads ID.\"\n"
 	}
 	for _, d := range []string{"docs/10-decisions", "docs/20-features", "docs/30-reviews", "docs/templates"} {
@@ -528,6 +616,110 @@ func writeFile(path, value string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(value), 0o644)
+}
+
+func writeFileIfAbsent(path, value string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if os.IsExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.WriteString(value)
+	return err
+}
+
+func appendWebReadme(path string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	text := string(contents)
+	if strings.Contains(text, "asdf exec npm install") && strings.Contains(text, "asdf exec npm run dev") {
+		return nil
+	}
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	text += `
+## SMT Web development
+
+Install dependencies and start the development server after Apply:
+
+~~~sh
+asdf exec npm install
+asdf exec npm run dev
+~~~
+`
+	return os.WriteFile(path, []byte(text), 0o644)
+}
+
+func writeLefthookConfigIfAbsent(destination, repositoryRoot, workspaceRoot string) error {
+	contents, err := lefthookConfig(repositoryRoot, workspaceRoot)
+	if err != nil {
+		return err
+	}
+	return writeFileIfAbsent(filepath.Join(destination, "lefthook.yml"), contents)
+}
+
+func mergeIgnoreFile(path, required string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if os.IsNotExist(err) {
+		contents = nil
+	}
+	merged := string(contents)
+	for _, entry := range strings.Split(required, "\n") {
+		if entry == "" || ignoreContains(merged, entry) {
+			continue
+		}
+		if merged != "" && !strings.HasSuffix(merged, "\n") {
+			merged += "\n"
+		}
+		merged += entry + "\n"
+	}
+	return writeFile(path, merged)
+}
+
+func ignoreContains(contents, want string) bool {
+	for _, line := range strings.Split(contents, "\n") {
+		got := strings.TrimSpace(line)
+		if got == want || strings.TrimSuffix(got, "/") == strings.TrimSuffix(want, "/") {
+			return true
+		}
+	}
+	return false
+}
+
+func webWorkerManifest() string {
+	return `name = "web_worker"
+description = "GPT-5.6 Luna Next.js/TypeScript implementation worker for SMT Web starter generation and focused tests."
+nickname_candidates = ["Web", "Canvas", "Browser"]
+model = "gpt-5.6-luna"
+service_tier = "priority"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Own only the assigned Next.js/TypeScript Web starter paths and focused tests
+for the active Beads task. Use Next.js 16.2.9 on Node 24.18.0 with the
+repository Web contract. Work test-first and keep generated Web output
+provider-neutral. Required skills are
+build-web-apps:react-best-practices and
+build-web-apps:frontend-testing-debugging. Do not add package installation,
+dependency resolution, secrets, MCP configuration, or domain CRUD to smt
+apply. Do not delegate further. Return changed paths, checks and results,
+assumptions, unresolved risks, and unverified behavior.
+"""
+commit_format = "type(scope): [BEAD-ID] summary on a matching Beads-ID branch"
+prepared_workspace = "Use the active branch Beads ID."
+`
 }
 func toolVersions(cs []component) string {
 	v := []string{"task 3.52.0", "lefthook 2.1.10"}

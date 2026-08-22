@@ -37,8 +37,10 @@ Beads lifecycle commands. Implemented commands are:
   it does not create an E2E repository or scaffold. Component repositories
   receive their exact catalog module IDs. It writes a validated `smt.yaml`
   blueprint only after confirmation and does not create a repository or
-  workspace. Generation is offline and byte-stable for identical selections in
-  fresh destinations.
+  workspace. Blueprint generation remains byte-stable without network access
+  for identical selections in fresh destinations; selected Web Apply is the documented
+  pinned `npx` initializer exception and may access the npm registry without
+  installing or resolving dependencies.
   Existing destination files are refused; `smt new` never overwrites, merges,
   regenerates, or upgrades a blueprint.
 - `smt apply [--config FILE] PATH` — validate the supplied workspace
@@ -53,6 +55,11 @@ Beads lifecycle commands. Implemented commands are:
   annotations from the static catalog; apply persists those annotations but
   does not execute their verification recipes, install their tools, skills, or
   MCP integrations, mutate host configuration, or create module repositories.
+- When Web is selected, apply stages the root `nodejs 24.18.0` pin and runs the
+  accepted local Next.js initializer described below. It publishes the
+  CLI-owned baseline without `package-lock.json`, `npm install`, or dependency
+  resolution; a failed staged initializer is atomic and leaves no published
+  destination.
 - `smt push [--dry-run]` — preflight every configured repository, then push
   each child repository's current branch before the root. Remote URLs come from
   `repositories[].remote.url`; dry-run validates and prints the order without
@@ -110,6 +117,38 @@ bd close <id> --reason="Completed"
 Create the implementation ticket before editing code. `smt prepare` may still
 create its special internal `Prepared workspace` task for repository lifecycle
 coordination.
+
+## Next.js Web component
+
+The Web stack value is `nextjs`, with Next.js `16.2.9` on root-pinned Node.js
+`24.18.0`. When Web is selected, `smt apply` stages the child outside the
+published destination and invokes this exact argument-array command:
+
+```sh
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+```
+
+Apply preserves the CLI-owned `package.json`, App Router, Tailwind, `AGENTS.md`,
+and other generated files, merges the CLI `.gitignore` with SMT-required
+entries, and publishes no `package-lock.json`. `--skip-install` means Apply
+does not run `npm install` or resolve dependencies. The staged CLI output is
+published only after initialization succeeds; failures preserve CLI output in
+the error, report `asdf install nodejs 24.18.0`, `asdf current nodejs`, and
+`asdf exec npx --yes create-next-app@16.2.9 --help`, and leave the destination
+unpublished.
+
+The pinned `npx create-next-app` invocation is the sole Apply exception that
+may access the npm registry. Non-Web and static Apply paths remain offline;
+Web still performs no `npm install`, lockfile publication, or dependency
+resolution.
+
+Selecting Web also generates Web-specific `web_worker` routing and a worker
+manifest requiring `build-web-apps:react-best-practices` and
+`build-web-apps:frontend-testing-debugging`. After Apply, the local workflow
+is `asdf exec npm install` followed by `asdf exec npm run dev` from
+`web-app/`; the later `.3.2.2/.3` Web worker lanes own dependency lockfile,
+quality, browser, and runtime verification. `.3.2.1` claims no real npm,
+browser, or runtime evidence.
 
 ## Flutter Mobile component
 
@@ -364,12 +403,15 @@ collisions, can report occupied ports through an injected port check, and can
 report missing Podman or Podman Compose through injected prerequisite checks.
  Its errors identify the service/port or environment key and an actionable
  change/install/configuration step. It does not execute external commands by
- itself. `smt apply` renders the contract and, for selected Mobile, invokes
- only the staged local Flutter `create --empty --no-pub` command above; it does
- not invoke Preflight, Podman, Compose, socket probing, runtime health checks,
- `flutter pub get`, or package resolution. Remaining Web/Database build
- contexts, Containerfiles, Mobile platform SDK/device verification, and
- component lifecycle tasks remain later work. Root and Database task
+ itself. `smt apply` renders the contract and, for selected Web, invokes only
+ the staged pinned `npx create-next-app` initializer, which is the one allowed
+ registry-access exception; for selected Mobile, it invokes only the staged
+ local Flutter `create --empty --no-pub` command above. It does not invoke
+ Preflight, Podman, Compose, socket probing, runtime health checks, `npm
+ install`, `flutter pub get`, or package resolution. Remaining Web dependency,
+ quality, browser, and runtime lanes, Database build contexts, Containerfiles,
+ Mobile platform SDK/device verification, and component lifecycle tasks remain
+ later work. Root and Database task
  aggregation belongs to `smt-4xf.6.1.2` and later.
 
 ### Implemented `.3.3.1` API module manifests
@@ -457,8 +499,8 @@ to `smt-4xf.6.1.2` and later. The generated Task CLI harness was verified
 with Task v3.52.0, including dotenv-driven `/healthz` and bounded process
 cleanup.
 
-Apply writes embedded deterministic assets only: it performs no network, Go or
-package-manager command, tool installation, Task execution, Podman invocation,
+API-selected Apply writes embedded deterministic assets only: it performs no
+network, Go or package-manager command, tool installation, Task execution, Podman invocation,
 listener start, or runtime execution. This slice adds no credentials, domain
 CRUD, database connectivity/readiness, migrations, root Taskfile changes,
 Containerfiles, non-root packaging, or `smt extend`. Durable unit/race/fuzz/integration coverage is
@@ -515,12 +557,14 @@ implemented by the CLI or this release:
 The broader runnable-starter and platform work is planned, not implemented:
 the five layers remain in this repository initially, and the six platform
 capabilities above are declarations only. This release still provides no Web
-or Database runtime starters, component Containerfiles, platform repositories
-or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime,
-remote module registry, or `smt extend` command. Mobile `.3.5.2` is a Flutter
-CLI-generated Android/iOS starter, but platform SDK/device execution, signing,
-API integration, and store publication remain outside Apply; `.3.5.3`
-runtime and verification remain deferred. The
+runtime/quality lane or Database runtime starter, component Containerfiles,
+platform repositories or scaffolds, Podman/Compose execution,
+Kubernetes/ArgoCD/OpenTofu runtime, remote module registry, or `smt extend`
+command. Web `.3.2.1` is the implemented CLI-owned Next.js baseline; its
+dependency lockfile, quality, browser, and runtime lanes remain `.3.2.2/.3`
+work. Mobile `.3.5.2` is a Flutter CLI-generated Android/iOS starter, but
+platform SDK/device execution, signing, API integration, and store publication
+remain outside Apply; `.3.5.3` runtime and verification remain deferred. The
 `.3.1` `compose.yaml` and `.env.example` are contract-only root artifacts,
 while the `.3.3.2` API source/OpenAPI assets are deterministic offline starter
 assets without packaging or lifecycle tasks. The static module catalog and
