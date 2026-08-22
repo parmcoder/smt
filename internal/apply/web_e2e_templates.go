@@ -50,8 +50,7 @@ browser binaries are recorded as unavailable and return a non-zero status;
 test output is never discarded.
 
 Reports, logs, and status files are written to e2e/web/reports/. The Web
-runtime starts through web-app's existing production start script. This
-package does not install or manage a Compose service.
+runtime starts through web-app's existing production start script.
 `
 
 const webE2EEnvExample = `# Optional default browser; run.sh --browser overrides this value.
@@ -68,9 +67,9 @@ const webE2EPackageJSON = `{
   "private": true,
   "scripts": {
     "test": "playwright test",
-    "test:chromium": "playwright test --project=chromium",
-    "test:firefox": "playwright test --project=firefox",
-    "test:webkit": "playwright test --project=webkit"
+    "test:chromium": "SMT_E2E_BROWSER=chromium playwright test --project=chromium",
+    "test:firefox": "SMT_E2E_BROWSER=firefox playwright test --project=firefox",
+    "test:webkit": "SMT_E2E_BROWSER=webkit playwright test --project=webkit"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"

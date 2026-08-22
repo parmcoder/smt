@@ -121,6 +121,15 @@ func TestWebE2EGeneratedPackageIsCredentialFreeAndContractOnly(t *testing.T) {
 	if packageJSON.Scripts["test"] != "playwright test" {
 		t.Fatalf("test script=%q, want playwright test", packageJSON.Scripts["test"])
 	}
+	for name, want := range map[string]string{
+		"test:chromium": "SMT_E2E_BROWSER=chromium playwright test --project=chromium",
+		"test:firefox":  "SMT_E2E_BROWSER=firefox playwright test --project=firefox",
+		"test:webkit":   "SMT_E2E_BROWSER=webkit playwright test --project=webkit",
+	} {
+		if packageJSON.Scripts[name] != want {
+			t.Fatalf("%s script=%q, want %q", name, packageJSON.Scripts[name], want)
+		}
+	}
 	if packageJSON.DevDependencies["@playwright/test"] != "1.62.1" {
 		t.Fatalf("Playwright pin=%q, want 1.62.1", packageJSON.DevDependencies["@playwright/test"])
 	}
