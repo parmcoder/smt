@@ -372,7 +372,7 @@ HTTP_MAX_HEADER_BYTES=1048576
 HTTP_SHUTDOWN_TIMEOUT=10s
 `
 
-const apiTaskfileYAML = `version: '3'
+const apiTaskfileBaseYAML = `version: '3'
 
 dotenv: ['.env']
 
@@ -390,6 +390,12 @@ tasks:
   coverage:
     cmds:
       - go test ./... -coverprofile=coverage.out
+  test:race:
+    cmds:
+      - go test -race ./...
+  test:fuzz:
+    cmds:
+      - go test -run=^$ -fuzz=FuzzValidRequestID -fuzztime=30s ./internal/server
   mod:
     cmds:
       - go mod verify
@@ -531,16 +537,23 @@ paths:
 
 func apiSourceFiles(databaseSelected bool) map[string]string {
 	goMod, goSum := apiManifests(databaseSelected)
-	return map[string]string{
-		"main.go":                   apiMainGo,
-		"internal/server/server.go": apiServerGo,
-		"cmd/openapi/main.go":       apiOpenAPICommandGo,
-		".env.example":              apiEnvExample,
-		"Taskfile.yml":              apiTaskfileYAML,
-		"openapi.yaml":              apiOpenAPIYAML,
-		"go.mod":                    goMod,
-		"go.sum":                    goSum,
+	files := map[string]string{
+		"main.go":                             apiMainGo,
+		"internal/server/server.go":           apiServerGo,
+		"internal/server/server_test.go":      apiServerTestGo,
+		"internal/server/config_test.go":      apiConfigTestGo,
+		"internal/server/server_fuzz_test.go": apiServerFuzzTestGo,
+		"cmd/openapi/main.go":                 apiOpenAPICommandGo,
+		".env.example":                        apiEnvExample,
+		"Taskfile.yml":                        apiTaskfileYAML(databaseSelected),
+		"openapi.yaml":                        apiOpenAPIYAML,
+		"go.mod":                              goMod,
+		"go.sum":                              goSum,
 	}
+	if databaseSelected {
+		files["internal/server/database_integration_test.go"] = apiDatabaseIntegrationTestGo
+	}
+	return files
 }
 
 func writeAPISourceFiles(bootstrap string, databaseSelected bool) error {
