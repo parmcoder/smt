@@ -53,12 +53,22 @@ bin/smt apply --config ../platform-config/smt.yaml ../platform
 root repository plus one local submodule per selected component, and writes the
 workspace files, local workflow metadata, deterministic `compose.yaml`, and
 `.env.example` at a destination that does not already exist. Root `.gitignore`
-ignores `.env`. With Mobile selected, it creates a Git-ready `mobile-app` shell,
-`mobile_worker` manifest, Flutter README and ignore rules, and a
-`.tool-versions` Flutter `3.44.9` pin—not application source. It does not
-invoke or require Flutter or its SDK, install dependencies, access the network,
-invoke Podman or Compose, sign an app, or publish an app. It does not create
-remote repositories.
+ignores `.env`. With Mobile selected, output includes the Git-ready
+`mobile-app` shell, `mobile_worker` manifest, Flutter README and ignore rules,
+the root `.tool-versions` Flutter `3.44.9-stable` pin, and the `.3.5.1`
+base-manifest policy. Apply then stages Mobile and runs the exact
+Flutter CLI command below for `.3.5.2`, preserving its output:
+
+```sh
+asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
+```
+
+There are no static Android/iOS templates and no Go post-create app/source/
+test/analysis writes. Apply invokes no `flutter pub get`, package resolution,
+network access, Podman, Compose, signing, or publication. If the pinned asdf
+toolchain is unavailable, it reports `asdf install flutter 3.44.9-stable` and
+`asdf current flutter` guidance and fails atomically before destination
+publication. It does not create remote repositories.
 Legacy DevOps-shaped configurations are rejected before destination mutation;
 remove the legacy entries and regenerate the blueprint. Generated blueprints
 must carry the exact supported provenance; missing, unsupported, or unknown
@@ -67,14 +77,77 @@ non-generated version-1 configuration without provenance remains usable for
 lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
-release does not provide Web/Mobile/Database runtime starters, component
-Containerfiles, platform repositories/scaffolds/runtime artifacts, Podman or
-Compose execution, a remote module registry, or `smt extend`; `.3.3.2` adds
-only deterministic API source/OpenAPI assets. The generated `compose.yaml` and
+release does not provide Web/Database runtime starters, Mobile `.3.5.3`
+verification, component Containerfiles, platform
+repositories/scaffolds/runtime artifacts, Podman or Compose execution, a
+remote module registry, or `smt extend`; `.3.3.2` adds only deterministic API
+source/OpenAPI assets. The generated `compose.yaml` and
 `.env.example` are contract-only root artifacts. Generated module annotations
 are persisted, but apply does not
 execute their verification recipes, install referenced tools/skills/MCP,
 mutate host configuration, or create module repositories.
+
+### Plan the Mobile-first starter lane
+
+The next P0 lane is Mobile rollup `smt-4xf.3.5` with children `.3.5.1-.3`.
+Web rollup `smt-4xf.3.2` and children `.3.2.1-.3` remain P2/deferred, with
+existing dependency edges unchanged. Mobile starts independently from current
+`main`, does not wait for an API PR, and does not require Web, API, or Database.
+Keep it backend-independent initially; typed API integration follows generated
+API/Database runtime work. The delivery route is
+`work_manager -> mobile_worker -> doc_writer`; `mobile_worker` owns only
+assigned Flutter/Dart production code and focused tests and does not delegate.
+
+The planned milestones are:
+
+- `.3.5.1` (implemented): Flutter owns the Mobile base `pubspec.yaml`,
+  `analysis_options.yaml`, and project baseline for Flutter `>=3.44.9` with
+  Dart `>=3.12.0 <4.0.0`. The `pubspec.lock` and pinned `flutter_lints 6.0.0`
+  policy are produced and verified later by `mobile_worker` after
+  `asdf exec flutter pub get`; Apply's `--no-pub` emits no lockfile and never
+  performs package resolution. The README gives the pinned
+  `asdf install flutter 3.44.9-stable` and `asdf current flutter` recovery path.
+- `.3.5.2` (implemented): after staging root `.tool-versions`, Mobile Apply
+  runs the exact `asdf exec flutter --suppress-analytics create --empty
+  --no-pub --platforms=android,ios --org=com.example.smt
+  --project-name=smt_mobile --description="A provider-neutral SMT Flutter
+  mobile starter." <staged-mobile-directory>` command. Flutter owns the
+  generated app/source/test/platform output; Apply preserves it, uses no static
+  Android/iOS templates, and performs no Go post-create app/source/test/analysis
+  writes. The app remains backend-independent with optional non-secret
+  `SMT_API_BASE_URL` configuration and provider-neutral `com.example.smt.mobile`;
+  signing, store metadata, domain CRUD, OCI services, and API-required behavior
+  remain excluded.
+- `.3.5.3` (deferred/planned): `dart format`, `flutter analyze`, unit/widget tests,
+  `integration_test`, Android debug build, and iOS debug build with
+  `--no-codesign` where supported. Unavailable SDK/device/Android/iOS lanes are
+  explicit unverified results, never silently skipped.
+- `.6.1.3`: after the Mobile rollup closes, activate the Mobile Taskfile with
+  dependency, format, analyze, test, integration, Android debug, iOS debug,
+  and aggregate `verify` tasks.
+
+Apply runs only the staged Flutter create command; it does not run these
+post-create verification commands. Current evidence is asdf Flutter create,
+`flutter pub get`, and `flutter analyze` passing, with the lockfile and lint
+policy verified in that later Mobile-worker step. Android SDK absence,
+incomplete Xcode, and missing CocoaPods leave Android/iOS device and build
+lanes unverified; `.3.5.3` remains deferred/planned.
+
+Planned `.3.5.3` local verification checks:
+
+```sh
+cd ../platform/mobile-app
+dart format --set-exit-if-changed .
+flutter analyze
+flutter test
+flutter test integration_test
+flutter build apk --debug
+flutter build ios --debug --no-codesign
+```
+
+An optional non-secret API base can be supplied through the app's supported
+compile/runtime configuration, for example `SMT_API_BASE_URL`; the app must
+still run without an API. Record unavailable SDK or device lanes explicitly.
 
 ### Inspect the generated runtime contract
 
@@ -292,11 +365,14 @@ new destinations. Verify the default YAML order and Mobile artifacts listed
 above, including the exact provenance mapping from the implementation spec;
 verify the opt-out contains no Mobile stack or repository. Repeat identical
 selections in fresh destinations and compare bytes to confirm deterministic
-offline generation. This review
-does not require Flutter installation and must not expect generated app source,
-dependency installation, network access, signing, or store publication. At one
-additional fresh destination, exercise one safe prerequisite, staging, Beads,
-or publish failure and verify that no partial destination remains.
+offline generation. For the selected Mobile destination, confirm the preserved
+staged Flutter CLI command, then run `asdf install flutter 3.44.9-stable`,
+`asdf current flutter`, `asdf exec flutter pub get`, and `asdf exec flutter
+analyze`; then run the Android or iOS device lane when its SDK and device are
+available. Do not claim signing or store publication. At one additional fresh
+destination, exercise
+one safe prerequisite, staging, Beads, or publish failure and verify that no
+partial destination remains.
 
 Add credential-free remote URLs after applying the blueprint:
 

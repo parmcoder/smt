@@ -81,14 +81,19 @@ empty `DATABASE_PASSWORD=` and no generated credentials.
 it reports invalid or colliding/occupied ports and missing Podman or Podman
 Compose prerequisites with actionable guidance. It does not execute external
 commands itself. Apply renders the files but does not invoke Preflight, Podman,
-Compose, socket probing, or health checks. Remaining Web/Mobile/Database build
-contexts, Containerfiles, lifecycle tasks, and app-domain behavior remain
-deferred except for the generated API source/Taskfile contract in `.3.3.2`.
+Compose, socket probing, or health checks. Remaining Web/Database build
+contexts, Containerfiles, Mobile platform SDK/device verification, lifecycle
+tasks, and app-domain behavior remain deferred except for the generated Mobile
+source/platform assets and API source/Taskfile contract.
 
-## Deferred generated manifest ownership
+## Planned generated manifest ownership
 
-The Web, Mobile, Database, and future runtime manifests below are planned
-scaffold behavior, not `.5` or `.3.1` outputs. The API `go.mod`/`go.sum`
+The Web, Database, and future runtime manifests below are planned starter
+behavior, not `.5` or `.3.1` outputs. Mobile `.3.5.1` owns the reviewed
+Flutter base-manifest policy: the CLI creates `pubspec.yaml`,
+`analysis_options.yaml`, and the project baseline during Apply; `pubspec.lock`
+and the pinned lint policy are produced and verified later after `pub get`. The
+API `go.mod`/`go.sum`
 exception is implemented in `.3.3.1`, and the API source/OpenAPI assets are
 implemented in `.3.3.2`; future generator work may copy the remaining reviewed
 manifests and lockfiles deterministically and offline.
@@ -110,11 +115,17 @@ manifests and lockfiles deterministically and offline.
   no API emits no API manifests. Direct pinned sums are present, but the full
   transitive closure is deferred. gofmt/vet/test, race, coverage, and fuzz are
   SDK commands, not dependencies; Godex and gopls are not module dependencies.
-- **Mobile** owns `pubspec.yaml`, `pubspec.lock`, and
-  `analysis_options.yaml`: `flutter_test` and `integration_test` SDK
-  dependencies plus `flutter_lints` in `dev_dependencies`. dart format,
-  flutter analyze/build, and DevTools are SDK tools; Flutter skills and Dart
-  MCP are external opt-ins.
+- **Mobile** is the next P0 starter lane, `smt-4xf.3.5` with children
+  `.3.5.1-.3`; Web `.3.2` and `.3.2.1-.3` remain P2/deferred. The lane starts
+  independently from current `main`, does not wait for an API PR, and does not
+  require Web, API, or Database. Mobile stays backend-independent initially;
+  typed API integration follows generated API/Database runtime work. Current
+  `smt apply` stages the Flutter CLI `.3.5.2` project; `.3.5.1` lockfile/lint
+  production and verification occur later after `pub get`; `.3.5.3`
+  verification remains deferred and unverified. The delivery
+route is `work_manager -> mobile_worker -> doc_writer`; the Mobile worker owns
+only assigned Flutter/Dart production code and focused tests and does not
+delegate.
 - **Database and root** do not invent language package manifests. Host/runtime
   tools remain prerequisite and Taskfile declarations.
 
@@ -208,12 +219,36 @@ checks. Required skills: `build-web-apps:react-best-practices` and
 `build-web-apps:frontend-testing-debugging`. Browser tooling is conditional for
 rendered/E2E verification.
 
-## Flutter Mobile
+## Flutter Mobile manifest and planned runnable lane
 
-Baseline: Flutter 3.44.9. Planned gates are dart format check, `flutter
-analyze`, unit/widget tests, `flutter test integration_test`, Android/iOS
-debug builds, and DevTools when runtime diagnosis is needed. The required
-official source is `flutter/agent-plugins`; a minimal core is
+Baseline: Flutter `>=3.44.9`, pinned in the generated root as
+`flutter 3.44.9-stable`. Implemented `.3.5.1` owns the Flutter base-manifest
+policy: the CLI creates `pubspec.yaml`, `analysis_options.yaml`, and the
+project baseline with Dart `>=3.12.0 <4.0.0`; `pubspec.lock` and pinned
+`flutter_lints 6.0.0` policy are produced and verified later by `mobile_worker`
+after `asdf exec flutter pub get`. SDK tools, skills, MCP,
+signing, and host prerequisites are not app dependencies.
+
+`.3.5.2` (implemented) — after staging the root `.tool-versions`, Mobile Apply
+runs this exact command in the staged child and preserves its CLI output:
+
+```sh
+asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
+```
+
+Flutter owns the generated app/source/test/platform baseline. Apply uses no
+static Android/iOS templates and performs no Go post-create app/source/test/
+analysis writes. `--no-pub` keeps Apply offline and prevents pub-get or package
+resolution. If the pinned toolchain is unavailable, the failure guidance is
+`asdf install flutter 3.44.9-stable` followed by `asdf current flutter`, and
+the Apply remains atomic. Current evidence is asdf Flutter create, pub get, and
+analyze passing. Android SDK absence, incomplete Xcode, and missing CocoaPods
+leave device/build lanes unverified. `.3.5.3` (deferred/planned) covers runtime
+execution and verification; `.6.1.3` activates only after the Mobile rollup
+closes and adds dependency, format, analyze, test, integration, Android debug,
+iOS debug, and aggregate `verify` tasks.
+
+The required official source is `flutter/agent-plugins`; a minimal core is
 `flutter-apply-architecture-best-practices`,
 `flutter-build-responsive-layout`, `flutter-add-widget-test`, and
 `flutter-add-integration-test`, with other skills conditional.
@@ -252,7 +287,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 | --- | --- | --- | --- | --- | --- |
 | Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, Task | child `build`, `run`, `test`, `coverage`, `mod`, `openapi`, `verify`; later durable format, vet, race, fuzz, vuln, migrations | `$godex:godex-go-backend` | gopls local; no Go MCP |
 | Next.js Web | `package.json`, `package-lock.json` | Node, Next.js, npm lockfile | Prettier, ESLint, TypeScript, Vitest/RTL, build, Playwright | React best practices; frontend testing/debugging | Browser for rendered/E2E |
-| Flutter Mobile | `pubspec.yaml`, `pubspec.lock`, `analysis_options.yaml` | Flutter/Dart, Android/iOS debug toolchains | format, analyze, unit/widget, integration, debug builds | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
+| Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` implemented: CLI-generated project | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` deferred/unverified: format, analyze, unit/widget, integration, debug builds; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
 | Root/container | `compose.yaml`, `.env.example` | none for apply; Podman/Compose for deferred runtime | contract inspection; future smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | no runtime execution in `.3.1` |
 
