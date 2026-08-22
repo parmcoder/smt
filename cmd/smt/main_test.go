@@ -1119,6 +1119,7 @@ func TestRunWorktreeDryRunPrintsRootPlan(t *testing.T) {
 }
 
 func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {
+	installFakeASDFForApply(t)
 	root := filepath.Join(t.TempDir(), "platform")
 	blueprintPath := filepath.Join(t.TempDir(), "smt.yaml")
 	if _, err := blueprint.Create(strings.NewReader("y\ny\ny\nn\nn\ny\n"), new(strings.Builder), blueprintPath); err != nil {
@@ -1162,6 +1163,21 @@ func TestRunPushUsesRemoteURLsConfiguredByNewAndApply(t *testing.T) {
 	if positions[0] < 0 || positions[1] < positions[0] || positions[2] < positions[1] {
 		t.Fatalf("stdout = %q, want web then api then repo", out.String())
 	}
+}
+
+func installFakeASDFForApply(t *testing.T) {
+	t.Helper()
+	directory := t.TempDir()
+	script := `#!/bin/sh
+set -eu
+destination=""
+for arg in "$@"; do destination="$arg"; done
+mkdir -p "$destination"
+`
+	if err := os.WriteFile(filepath.Join(directory, "asdf"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestRunVerboseWritesDiagnosticsOnlyToStderr(t *testing.T) {

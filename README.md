@@ -14,9 +14,9 @@ reviewable blueprints and visible lifecycle operations.
 </div>
 
 > **Development status:** source builds are supported. APIs and generated
-> starters remain evolving. SMT does not promise package-manager installation;
-> `apply` creates a deterministic, Git-ready scaffold and does not install
-> dependencies.
+> starters remain evolving. `apply` creates a deterministic, Git-ready
+> workspace; when Mobile is selected it runs the pinned local Flutter CLI with
+> `--no-pub` and never performs dependency resolution or package installation.
 
 ## Why SMT
 
@@ -35,7 +35,7 @@ operations, and no credential persistence.
 | Beads lifecycle | `prepare` and `switch` coordinate existing Beads-ID branches. |
 | Diagnostics | `status` and `doctor` report repository, executable, remote, hook, and profile readiness. |
 | Hooks | Guarded Lefthook installation and conventional commit validation. |
-| Mobile | Current Mobile output is a Git-ready scaffold-only shell, not generated Flutter application source. |
+| Mobile | Current Mobile output is a Git-ready Flutter CLI-generated Android/iOS starter; `.3.5.3` runtime and verification remain deferred. |
 
 ## Getting started from a fresh clone
 
@@ -59,7 +59,37 @@ smt doctor
 
 `smt new` writes a blueprint only after confirmation. Inspect it before
 `apply`; the destination must be new. `apply` initializes Beads metadata and
-does not install dependencies, call provider APIs, or create remote projects.
+does not run `flutter pub get`, resolve packages, call provider APIs, or create
+remote projects. A selected Mobile apply requires the pinned local Flutter
+toolchain; other components remain independent of that prerequisite.
+
+## Current Mobile in-development workflow
+
+The current Mobile path is build-from-source. After the root `.tool-versions`
+file is staged, `smt apply` runs this exact command in its staged Mobile
+directory and preserves the Flutter CLI output:
+
+```sh
+asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
+```
+
+The root pin is `flutter 3.44.9-stable`. If the pinned toolchain is missing,
+Apply fails atomically before the destination is published and reports:
+
+```sh
+asdf install flutter 3.44.9-stable
+asdf current flutter
+```
+
+After a successful Apply, work from `mobile-app/` with `asdf exec flutter pub
+get` and `asdf exec flutter analyze`; this later Mobile-worker step produces
+and verifies `pubspec.lock` and the pinned `flutter_lints 6.0.0` policy. In the
+current checkout, the asdf Flutter create, pub get, and analyze checks pass.
+Android device/build checks
+are unverified because the Android SDK is absent; iOS checks are unverified
+because Xcode is incomplete and CocoaPods is missing. Device execution and
+`.3.5.3` runtime verification remain deferred. Mobile does not require local
+Compose to launch, while Compose/runtime Containerfiles remain later work.
 
 ```mermaid
 flowchart LR

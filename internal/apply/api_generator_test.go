@@ -793,6 +793,9 @@ func stopGeneratedAPI(t *testing.T, cmd *exec.Cmd) error {
 
 func applyAPIWorkspace(t *testing.T, raw []byte) string {
 	t.Helper()
+	if bytes.Contains(raw, []byte("mobile: flutter")) {
+		installFakeASDF(t, false)
+	}
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
 	cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))

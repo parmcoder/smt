@@ -36,6 +36,13 @@ var runBeads = func(ctx context.Context, dir, name string, args []string) ([]byt
 	return cmd.CombinedOutput()
 }
 
+var runFlutterCreate = func(ctx context.Context, cwd string, args []string) error {
+	cmd := exec.CommandContext(ctx, "asdf", args...)
+	cmd.Dir = cwd
+	_, err := cmd.CombinedOutput()
+	return err
+}
+
 var writeStagedConfig = os.WriteFile
 
 // Service stages every effect beside its target. Initialize is retained as a
@@ -226,12 +233,39 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		return plumbing.ZeroHash, err
 	}
 	bootstrap := filepath.Join(root, ".smt", "bootstrap", c.id)
-	if err := os.MkdirAll(bootstrap, 0o755); err != nil {
+	if c.id == "mobile" {
+		if err := os.MkdirAll(filepath.Dir(bootstrap), 0o755); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		stagedMobile := filepath.Join(root, c.path)
+		if err := os.MkdirAll(filepath.Dir(stagedMobile), 0o755); err != nil {
+			return plumbing.ZeroHash, err
+		}
+		if err := runFlutterCreate(ctx, root, []string{
+			"exec",
+			"flutter",
+			"--suppress-analytics",
+			"create",
+			"--empty",
+			"--no-pub",
+			"--platforms=android,ios",
+			"--org=com.example.smt",
+			"--project-name=smt_mobile",
+			"--description=A provider-neutral SMT Flutter mobile starter.",
+			stagedMobile,
+		}); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("Flutter mobile initialization failed; run `asdf install flutter 3.44.9-stable` and verify with `asdf current flutter`, then retry: %w", err)
+		}
+		if err := os.RemoveAll(filepath.Join(stagedMobile, ".idea")); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("remove staged Flutter IDE state: %w", err)
+		}
+		if err := os.Rename(stagedMobile, bootstrap); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("stage Flutter mobile repository: %w", err)
+		}
+	} else if err := os.MkdirAll(bootstrap, 0o755); err != nil {
 		return plumbing.ZeroHash, err
 	}
-	repo, err := ggit.PlainInitWithOptions(bootstrap, &ggit.PlainInitOptions{
-		InitOptions: ggit.InitOptions{DefaultBranch: plumbing.Main},
-	})
+	repo, err := initChildRepository(bootstrap)
 	if err != nil {
 		return plumbing.ZeroHash, err
 	}
@@ -274,6 +308,17 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		return plumbing.ZeroHash, err
 	}
 	return head.Hash(), nil
+}
+
+func initChildRepository(path string) (*ggit.Repository, error) {
+	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+		return ggit.PlainOpen(path)
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	return ggit.PlainInitWithOptions(path, &ggit.PlainInitOptions{
+		InitOptions: ggit.InitOptions{DefaultBranch: plumbing.Main},
+	})
 }
 
 func commitRoot(root string, cfg config.Config) error {
@@ -493,7 +538,7 @@ func toolVersions(cs []component) string {
 		case "web":
 			v = append(v, "nodejs 24.18.0")
 		case "mobile":
-			v = append(v, "flutter 3.44.9")
+			v = append(v, "flutter 3.44.9-stable")
 		}
 	}
 	return strings.Join(v, "\n") + "\n"
@@ -508,7 +553,7 @@ func componentIgnore(kind string) string {
 	case "database":
 		return base + "\npostgres-data/\n.env\n"
 	case "mobile":
-		return base + "\n.dart_tool/\nbuild/\n.flutter-plugins\n.flutter-plugins-dependencies\n.packages\n"
+		return base + "\n.dart_tool/\nbuild/\n.idea/\n.flutter-plugins\n.flutter-plugins-dependencies\n.packages\nandroid/local.properties\nios/Flutter/Generated.xcconfig\nios/Flutter/flutter_export_environment.sh\n"
 	default:
 		return base + "\n.env\n"
 	}
@@ -516,7 +561,72 @@ func componentIgnore(kind string) string {
 
 func componentReadme(c component) string {
 	if c.kind == "mobile" {
-		return "# Flutter mobile application\n\nThis repository is a local SMT Flutter scaffold for Android and iOS.\n"
+		return `# Flutter mobile application
+
+This is a deterministic SMT Flutter starter for Android and iOS. It runs
+without an API; the optional SMT_API_BASE_URL value is reserved for
+the later typed API integration.
+
+## First run
+
+Run these commands from this repository:
+
+~~~sh
+asdf install flutter 3.44.9-stable
+asdf exec flutter pub get
+asdf exec flutter doctor
+asdf exec flutter devices
+~~~
+
+asdf install flutter 3.44.9-stable installs the version recorded by the
+workspace .tool-versions file. If Flutter reports that the selected version
+is not installed, run that command before continuing.
+
+## Android emulator setup
+
+Install Android Studio and its Android SDK, create an Android emulator, and
+start it from Android Studio or the command below. A physical Android device
+needs USB debugging enabled.
+
+~~~sh
+asdf exec flutter doctor --android-licenses
+asdf exec flutter emulators
+asdf exec flutter emulators --launch <emulator-id>
+asdf exec flutter devices
+asdf exec flutter run -d <device-id>
+~~~
+
+## iOS Simulator setup
+
+Install the full Xcode application, accept its setup prompts, install
+CocoaPods, and open the iOS Simulator before selecting a device.
+
+~~~sh
+brew install cocoapods
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -runFirstLaunch
+asdf exec flutter pub get
+open -a Simulator
+asdf exec flutter devices
+asdf exec flutter run -d <device-id>
+~~~
+
+Use asdf exec flutter build ios --debug --no-codesign for a local build check.
+A real iPhone additionally requires Apple Developer signing configured in Xcode.
+
+## Optional local API endpoint
+
+The starter does not require Compose or an API. When a reachable API exists,
+pass its base URL explicitly:
+
+~~~sh
+asdf exec flutter run -d <device-id> --dart-define=SMT_API_BASE_URL=http://127.0.0.1:8080
+~~~
+
+For an Android emulator, the host machine is usually 10.0.2.2; for a
+physical phone, use the Mac's LAN address. The current starter only records
+that the endpoint is configured; domain/API requests are a later milestone.
+`
 	}
 	return "# " + c.title + "\n\nThis repository is a local SMT scaffold.\n"
 }

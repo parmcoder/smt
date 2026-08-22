@@ -20,8 +20,11 @@ The taxonomy and configuration portion of the version-1 starter restructure is
 implemented: new blueprints select Web, optional Mobile, API, and Database,
 with DevOps-shaped configuration removed. Generated blueprints also carry the
 exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
-`smt apply` validates it before mutation. The platform runtimes/artifacts and
-remaining Web/Mobile/Database runnable module assets remain planned work.
+`smt apply` validates it before mutation. Remaining Web/Database runnable
+module assets and Mobile runtime/verification remain planned work; the Mobile
+`.3.5.1/.3.5.2` contracts are implemented below. `.3.5.2` uses the local
+Flutter CLI to create the staged Android/iOS project; it does not use static
+platform templates or Go post-create app, source, test, or analysis writes.
 `.3.3.2` now implements the generated API runtime and OpenAPI starter assets.
 The static schema-v1 module catalog and repository annotations are implemented
 metadata; `smt extend` is explicitly deferred.
@@ -61,7 +64,7 @@ sixth layer.
 ## Reviewed baseline
 
 The approved production baseline for the planned starter is Go 1.26.5, pgx
-v5.10.0, Next.js 16.2.9 on Node 24.18.0, Flutter 3.44.9, PostgreSQL 18, and
+v5.10.0, Next.js 16.2.9 on Node 24.18.0, Flutter 3.44.9 stable, PostgreSQL 18, and
 Podman 5.8.3 or newer with a Compose provider. These are reviewed target
 constraints for the milestone; the current CLI now generates the accepted Go
 API assets, while broader component generation and runtime verification remain
@@ -87,16 +90,17 @@ directories are refused without overwrite, merge, regeneration, upgrade, or
 
 ## Deferred runnable starter and platform runtime work
 
-The planned starter is operational rather than a fake product: Web and API
-are runnable, PostgreSQL is orchestrated locally with Podman Compose, and
-Mobile is a runnable Android/iOS starter but not an OCI workload. It should
+The end-state planned starter is operational rather than a fake product: Web
+and API are runnable, PostgreSQL is orchestrated locally with Podman Compose,
+and Mobile is a runnable Android/iOS starter but not an OCI workload. It should
 include health/readiness, graceful shutdown, migrations owned by the API,
 non-root container images, lockfiles, and smoke commands without inventing
 CRUD or domain behavior. Workspace creation remains deterministic and offline;
 runtime tools are used only by later verification. `.3.1` emits the
 contract-only root `compose.yaml` and `.env.example`; `.3.3.2` emits the API
-source/OpenAPI starter assets, but Web/Mobile/Database templates, Containerfiles,
-packaging, and Podman/Compose execution remain outside this contract.
+source/OpenAPI starter assets, and `.3.5.2` emits the Mobile source/platform
+assets, but Web/Database templates, Containerfiles, packaging, and
+Podman/Compose execution remain outside this contract.
 
 Platform capabilities are decomposed into `container`, `cicd`,
 `observability`, `iac`, `k8s`, and `argocd`; the `.5` catalog implements these
@@ -104,6 +108,56 @@ as non-selectable declarations, and `argocd` depends on `k8s`. Their platform
 repositories, scaffolds, runtime artifacts, and execution remain deferred.
 AWS + Apptainer + OpenTofu is a later discovery and compatibility milestone,
 not part of this restructure.
+
+## Approved mobile-first roadmap
+
+The next P0 starter lane is Mobile rollup `smt-4xf.3.5` and children
+`.3.5.1-.3`. Web rollup `smt-4xf.3.2` and children `.3.2.1-.3` remain P2 and
+deferred; existing dependency edges are unchanged. Mobile starts independently
+from current `main`, does not wait for an API PR, and does not require Web, API,
+or Database. Keep Mobile backend-independent initially; typed API integration
+follows after generated API/Database runtime work.
+
+The delivery route is `work_manager -> mobile_worker -> doc_writer` for Mobile;
+the existing `work_manager -> backend_worker -> doc_writer` route is unchanged.
+`mobile_worker` owns only assigned Flutter/Dart production code and focused
+tests, does not delegate, and must report unavailable SDK, device, Android, or
+iOS lanes explicitly.
+
+- **`.3.5.1` manifest/analysis (implemented)** — Flutter owns the Mobile
+  `pubspec.yaml`, `analysis_options.yaml`, and project baseline for Flutter
+  `>=3.44.9` and Dart `>=3.12.0 <4.0.0`. The `pubspec.lock` and pinned
+  `flutter_lints 6.0.0` policy are produced and verified later by
+  `mobile_worker` after `asdf exec flutter pub get`; Apply's `--no-pub` emits
+  no lockfile and performs no package resolution. The generated root pins
+  `flutter 3.44.9-stable`, and the README gives the pinned asdf install/current
+  path.
+- **`.3.5.2` runnable MVP (implemented)** — after staging root
+  `.tool-versions`, Mobile Apply runs and preserves this exact command:
+
+  ```sh
+  asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
+  ```
+
+  Flutter owns the staged app/source/test/platform output. There are no static
+  Android/iOS templates and no Go post-create app/source/test/analysis writes.
+  If the pinned toolchain is unavailable, Apply reports
+  `asdf install flutter 3.44.9-stable` and `asdf current flutter` guidance and
+  fails atomically. Current evidence is asdf Flutter create, pub get, and
+  analyze passing; Android SDK absence, incomplete Xcode, and missing CocoaPods
+  leave device/build lanes unverified. Mobile remains backend-independent and
+  outside OCI Compose.
+- **`.3.5.3` verification (deferred/planned)** — `dart format`,
+  `flutter analyze`, unit/widget tests, `integration_test`, Android debug
+  builds, and iOS debug builds with `--no-codesign` where supported remain
+  unverified. Unavailable Flutter/Dart/Android/iOS SDK or device lanes are
+  explicit results, never silently skipped.
+- **`.6.1.3` Mobile Taskfile** — activates only after the Mobile rollup closes,
+  with dependency, format, analyze, test, integration, Android debug, iOS
+  debug, and aggregate `verify` tasks.
+
+`.3.5.1` and `.3.5.2` are implemented. Remaining Mobile work is `.3.5.3`
+verification; Mobile remains outside OCI Compose.
 
 ## Implemented `.3.1` root runtime contract
 
@@ -129,9 +183,10 @@ selected-port collision, occupied-port, missing-Podman, and missing Podman
 Compose errors through injectable checks for later Taskfile/CLI use. It does
 not execute external commands itself. `smt apply` renders the contract files
 offline and does not invoke Preflight, Podman, Compose, socket probing, or
-health checks. Remaining Web/Mobile/Database build contexts, Containerfiles,
-lifecycle tasks, and application-domain behavior remain deferred; `.3.3.2`
-owns the generated API source/Taskfile contract.
+health checks. Remaining Web/Database build contexts, Containerfiles, Mobile
+platform SDK/device verification, lifecycle tasks, and application-domain
+behavior remain deferred; `.3.3.2` owns the generated API source/Taskfile
+contract and `.3.5.2` owns the generated Mobile source/platform assets.
 
 ## Implemented `.3.3.1` API manifest contract
 
@@ -269,8 +324,11 @@ not install tools, skills, or MCP integrations; does not mutate host
 configuration; and does not run Compose, Podman, Kubernetes, ArgoCD, or
 OpenTofu. Runnable starters and `smt extend` remain deferred.
 
-Generated component manifests and lockfiles remain deferred runnable-starter
-assets. Skills and MCP integrations remain distinct metadata and prerequisite
+Remaining Web/Database component manifests and lockfiles are deferred
+runnable-starter assets; Mobile `.3.5.1` lockfile/lint production and
+verification occur after `pub get`, while `.3.5.2` is the implemented Flutter
+CLI project/source/platform baseline.
+Skills and MCP integrations remain distinct metadata and prerequisite
 declarations; they are never application dependencies or silently installed by
 SMT.
 
@@ -286,7 +344,8 @@ gate; `.4` adds the selectable catalog and repository module annotations, `.5`
 adds the six non-selectable platform declarations plus catalog/config
 validation boundaries, `.3.1` adds the root runtime contract artifacts, and
 `.3.3.2` adds the generated API runtime/OpenAPI assets. Remaining design scope
-is the Web/Mobile/Database starter work, packaging, and Podman-first runtime
+is the remaining P0 Mobile verification lane followed by the P2/deferred Web
+and remaining Database starter work, packaging, and Podman-first runtime
 implementation. Out of scope for the current CLI are Web/Mobile/Database
 Containerfiles, platform
 repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes

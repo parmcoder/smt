@@ -284,6 +284,7 @@ func TestValidateBlueprintAcceptsSelectedMobileDatabaseWithoutDevOps(t *testing.
 }
 
 func TestServiceBuildsAllBasicComponentsWithoutInfrastructureArtifacts(t *testing.T) {
+	installFakeASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
 	raw := fullMobileBlueprintBytes()
@@ -596,6 +597,7 @@ func TestServiceRegistersSubmodulesAsInitialized(t *testing.T) {
 }
 
 func TestServiceBuildsFlutterMobileSubmoduleAndArtifacts(t *testing.T) {
+	installFakeASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
 	cfg, err := config.LoadBytes(mobileBlueprintBytes(), filepath.Join(parent, "blueprint.yaml"))
@@ -641,11 +643,32 @@ func TestServiceBuildsFlutterMobileSubmoduleAndArtifacts(t *testing.T) {
 		t.Fatalf("published child origin=%v err=%v", remote, err)
 	}
 	readme, err := os.ReadFile(filepath.Join(destination, "mobile-app", "README.md"))
-	if err != nil || !strings.Contains(string(readme), "Flutter") {
+	if err != nil {
 		t.Fatalf("mobile README=%q err=%v", readme, err)
 	}
+	readmeText := string(readme)
+	for _, marker := range []string{
+		"asdf install flutter 3.44.9-stable",
+		"asdf exec flutter pub get",
+		"asdf exec flutter doctor",
+		"asdf exec flutter doctor --android-licenses",
+		"asdf exec flutter emulators --launch <emulator-id>",
+		"asdf exec flutter devices",
+		"asdf exec flutter run -d <device-id>",
+		"asdf exec flutter build ios --debug --no-codesign",
+		"asdf exec flutter run -d <device-id> --dart-define=SMT_API_BASE_URL=http://127.0.0.1:8080",
+		"Android emulator setup",
+		"iOS Simulator setup",
+	} {
+		if !strings.Contains(readmeText, marker) {
+			t.Fatalf("mobile README missing %q:\n%s", marker, readmeText)
+		}
+	}
+	if strings.Contains(readmeText, "\nflutter ") {
+		t.Fatalf("mobile README contains a bare Flutter command:\n%s", readmeText)
+	}
 	ignore, err := os.ReadFile(filepath.Join(destination, "mobile-app", ".gitignore"))
-	if err != nil || !strings.Contains(string(ignore), ".dart_tool/") || !strings.Contains(string(ignore), "build/") {
+	if err != nil || !strings.Contains(string(ignore), ".dart_tool/") || !strings.Contains(string(ignore), "build/") || !strings.Contains(string(ignore), ".idea/") || !strings.Contains(string(ignore), "android/local.properties") || !strings.Contains(string(ignore), "ios/Flutter/Generated.xcconfig") {
 		t.Fatalf("mobile ignore=%q err=%v", ignore, err)
 	}
 	manifest, err := os.ReadFile(filepath.Join(destination, "agents", "mobile_worker.toml"))
@@ -653,7 +676,7 @@ func TestServiceBuildsFlutterMobileSubmoduleAndArtifacts(t *testing.T) {
 		t.Fatalf("mobile manifest=%q err=%v", manifest, err)
 	}
 	versions, err := os.ReadFile(filepath.Join(destination, ".tool-versions"))
-	if err != nil || !strings.Contains(string(versions), "flutter 3.44.9\n") {
+	if err != nil || !strings.Contains(string(versions), "flutter 3.44.9-stable\n") {
 		t.Fatalf("tool versions=%q err=%v", versions, err)
 	}
 	raw, err := os.ReadFile(filepath.Join(destination, "smt.yaml"))
@@ -695,13 +718,18 @@ func TestServiceGeneratesSelectionCorrectAPIModuleManifests(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
+			if strings.Contains(string(tt.raw), "mobile: flutter") {
+				installFakeASDF(t, false)
+			}
 			parent := t.TempDir()
 			destination := filepath.Join(parent, "workspace")
 			cfg, err := config.LoadBytes(tt.raw, filepath.Join(parent, "blueprint.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("PATH", "")
+			if !strings.Contains(string(tt.raw), "mobile: flutter") {
+				t.Setenv("PATH", "")
+			}
 			service := Service{
 				Config:        *cfg,
 				Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
@@ -776,6 +804,7 @@ func TestServiceGeneratesSelectionCorrectAPIModuleManifests(t *testing.T) {
 }
 
 func TestServiceAPIModuleManifestsAreDeterministicAcrossDestinations(t *testing.T) {
+	installFakeASDF(t, false)
 	raw := fullMobileBlueprintBytes()
 	var manifests [2]map[string][]byte
 	for i := range manifests {

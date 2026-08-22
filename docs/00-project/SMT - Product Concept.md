@@ -144,8 +144,33 @@ and missing Podman/Podman Compose prerequisites through injectable checks, but
 `smt apply` remains offline and does not invoke Preflight, Podman, Compose,
 socket probing, or health checks.
 
-Future Web/Mobile/Database build contexts, Containerfiles, lifecycle tasks,
-broader runnable starters, platform runtime work, a remote module registry, and
+Mobile-selected Apply stages the child and root `.tool-versions` with
+`flutter 3.44.9-stable`, then runs the exact Flutter-owned project creation
+command for `.3.5.2`:
+
+```sh
+asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
+```
+
+The `.3.5.1` base-manifest policy remains Flutter-owned: Apply creates the
+Flutter CLI `pubspec.yaml`, `analysis_options.yaml`, and project baseline; the
+`pubspec.lock` and pinned `flutter_lints 6.0.0` policy are produced and
+verified later by `mobile_worker` after `asdf exec flutter pub get`. Apply uses
+`--no-pub`, so it emits no lockfile and performs no package resolution. Apply
+preserves the CLI output; it does not use static Android/iOS templates or
+perform Go post-create app/source/test/analysis writes. `--no-pub` keeps Apply
+offline and package-resolution-free. If the pinned toolchain is unavailable,
+Apply fails atomically with `asdf install flutter 3.44.9-stable` and `asdf
+current flutter` guidance. The generated README then guides `asdf exec
+flutter pub get`, analysis, and Android Studio/emulator or full Xcode/iPhone
+setup. Current evidence is asdf Flutter create, pub get, and analyze passing;
+Android SDK absence, incomplete Xcode, and missing CocoaPods leave device/build
+lanes unverified. Mobile remains outside OCI Compose, and the current `.3.1`
+Compose file is a declarative contract without component Containerfiles, so
+Compose is not required to launch the starter locally.
+
+Future Web/Database build contexts, Containerfiles, lifecycle tasks, broader
+Mobile API integration, platform runtime work, a remote module registry, and
 `smt extend` remain deferred; `.3.1` adds no app-domain behavior.
 
 The implemented `.3.3.1` API manifest slice adds static `go.mod` and `go.sum`

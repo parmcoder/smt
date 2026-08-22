@@ -144,11 +144,29 @@ metadata, submission, and publication are outside this workspace-setup scope.
 Applying a selected Mobile blueprint creates the same Git-ready component
 basics as the existing stacks: an independent initialized local bootstrap
 submodule, a `mobile_worker` manifest, Flutter-oriented README and ignore
-rules, and `.tool-versions` containing the literal pin `flutter 3.44.9`.
-The Mobile component is strictly scaffold-only: SMT does not invoke `flutter
-create`, `flutter --version`, or any other Flutter SDK CLI. It does not require
-a Flutter executable or SDK, install dependencies, access the network, produce
-Flutter application source, sign an app, or publish an app.
+rules, and a root `.tool-versions` entry containing `flutter 3.44.9-stable`.
+The `.3.5.1` contract owns the Flutter base-manifest policy: Flutter owns the
+`pubspec.yaml`, `analysis_options.yaml`, and project baseline created during
+Apply. The `pubspec.lock` and pinned `flutter_lints 6.0.0` policy are produced
+and verified later by `mobile_worker` after `asdf exec flutter pub get`.
+Because Apply uses `--no-pub`, it emits no lockfile and performs no package
+resolution.
+
+For `.3.5.2`, Apply stages the Mobile child, stages the root
+`.tool-versions`, then runs this exact local command in the staged directory:
+
+```sh
+asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
+```
+
+Apply preserves the CLI output. It does not use static Android/iOS templates
+and Go does not write app source, tests, or analysis files after the CLI
+returns. `--no-pub` keeps Apply offline: it does not run `flutter pub get`,
+resolve packages, access the network, sign an app, or publish an app. If the
+pinned asdf/Flutter toolchain is unavailable, Apply reports:
+`asdf install flutter 3.44.9-stable` and `asdf current flutter`, then fails
+atomically before destination publication. The child README guides the
+subsequent `asdf exec flutter pub get`, analysis, and device setup.
 
 `smt apply` validates first and remains atomic/all-or-nothing. Any
 prerequisite, staging, Beads, or publish failure leaves no partial destination.
@@ -344,14 +362,15 @@ those build and runtime assets.
 The pure `runtime.Preflight` API validates override ranges and selected-port
 collisions, can report occupied ports through an injected port check, and can
 report missing Podman or Podman Compose through injected prerequisite checks.
-Its errors identify the service/port or environment key and an actionable
-change/install/configuration step. It does not execute external commands by
-itself. `smt apply` invokes rendering only: it does not invoke Preflight,
-Podman, Compose, socket probing, or runtime health checks. Remaining
-Web/Mobile/Database build contexts, Containerfiles, and component lifecycle
-tasks remain later work; the generated API source and child Taskfile are
-`.3.3.2` assets. Root and Database task aggregation belongs to
-`smt-4xf.6.1.2` and later.
+ Its errors identify the service/port or environment key and an actionable
+ change/install/configuration step. It does not execute external commands by
+ itself. `smt apply` renders the contract and, for selected Mobile, invokes
+ only the staged local Flutter `create --empty --no-pub` command above; it does
+ not invoke Preflight, Podman, Compose, socket probing, runtime health checks,
+ `flutter pub get`, or package resolution. Remaining Web/Database build
+ contexts, Containerfiles, Mobile platform SDK/device verification, and
+ component lifecycle tasks remain later work. Root and Database task
+ aggregation belongs to `smt-4xf.6.1.2` and later.
 
 ### Implemented `.3.3.1` API module manifests
 
@@ -495,16 +514,19 @@ implemented by the CLI or this release:
 
 The broader runnable-starter and platform work is planned, not implemented:
 the five layers remain in this repository initially, and the six platform
-capabilities above are declarations only. This release still provides no Web,
-Mobile, or Database runtime starters, component Containerfiles, platform
-repositories or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu
-runtime, remote module registry, or `smt extend` command. The `.3.1`
-`compose.yaml` and `.env.example` are contract-only root artifacts, while the
-`.3.3.2` API source/OpenAPI assets are deterministic offline starter assets
-without packaging or lifecycle tasks. The static module catalog and repository
-annotations above are implemented metadata; no platform runtime artifact or
-E2E/module repository is generated. AWS + Apptainer + OpenTofu remains later
-discovery.
+capabilities above are declarations only. This release still provides no Web
+or Database runtime starters, component Containerfiles, platform repositories
+or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime,
+remote module registry, or `smt extend` command. Mobile `.3.5.2` is a Flutter
+CLI-generated Android/iOS starter, but platform SDK/device execution, signing,
+API integration, and store publication remain outside Apply; `.3.5.3`
+runtime and verification remain deferred. The
+`.3.1` `compose.yaml` and `.env.example` are contract-only root artifacts,
+while the `.3.3.2` API source/OpenAPI assets are deterministic offline starter
+assets without packaging or lifecycle tasks. The static module catalog and
+repository annotations above are implemented metadata; no platform runtime
+artifact or E2E/module repository is generated. AWS + Apptainer + OpenTofu
+remains later discovery.
 
 Git lifecycle operations preflight all configured repositories before a remote
 push or worktree creation. Pushes are child-first and stop after a failure with
@@ -688,9 +710,9 @@ The Mobile focused-test contract covers default inclusion, explicit
 opt-out, invalid-answer retry, EOF/decline no-write, exact YAML/repository
 mapping/scopes/order, invalid stack or metadata rejection before mutation,
 existing-version-1 compatibility, atomic cleanup for preflight and
-stage/publish failures, generated artifacts, and focused tests without Flutter.
-Human end-to-end confirmation is later human-owned work (`smt-3r2.5`), not
-completed runtime proof in this delivery.
+stage/publish failures, staged Flutter CLI invocation/output preservation, and
+the pinned-toolchain failure guidance. Human end-to-end confirmation is later
+human-owned work (`smt-3r2.5`), not completed runtime proof in this delivery.
 
 ## Flutter Mobile delivery order
 
@@ -707,10 +729,16 @@ repository entry, and the Mobile-selected `repo`, `web`, `mobile`, `api`,
 configuration. Apply
 each reviewed blueprint to a new destination. For the default case, inspect
 the Git-ready `mobile-app` submodule, `agents/mobile_worker.toml`, Mobile
-README and ignore rules, and `.tool-versions` Flutter `3.44.9` pin. Do not
-expect or attempt Flutter source generation, SDK/CLI use, dependency install,
-network access, signing, or store publication; record the observed commands
-and artifacts as human-review evidence. At one additional fresh destination,
+README and ignore rules, root `.tool-versions` Flutter `3.44.9-stable` pin, and
+the staged Flutter CLI output. Confirm the exact `asdf exec flutter
+--suppress-analytics create --empty --no-pub --platforms=android,ios
+--org=com.example.smt --project-name=smt_mobile
+--description="A provider-neutral SMT Flutter mobile starter."
+<staged-mobile-directory>` invocation is preserved. Run
+`asdf install flutter 3.44.9-stable`, `asdf current flutter`, `asdf exec flutter pub get`, and
+`asdf exec flutter analyze`; if Android or iOS SDK/device lanes are unavailable,
+record them explicitly rather than silently skipping them. Do not claim signing
+or store publication. At one additional fresh destination,
 exercise one safe prerequisite, staging, Beads, or publish failure and verify
 that no partial destination remains.
 
