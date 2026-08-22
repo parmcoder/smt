@@ -409,6 +409,7 @@ func TestInitBeadsDoesNotExposeToolOutput(t *testing.T) {
 }
 
 func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
+	installFakeNextASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
 	cfg, err := config.LoadBytes(blueprintBytes(), filepath.Join(parent, "blueprint.yaml"))
@@ -484,7 +485,7 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 	if err != nil || !strings.Contains(string(readme), "embedded Dolt database") || !strings.Contains(string(readme), "ignored by Git") {
 		t.Fatalf("workspace README=%q err=%v", readme, err)
 	}
-	for _, path := range []string{"AGENTS.md", "agents/work_manager.toml", "agents/web_worker.toml", "agents/integration_worker.toml", "prompts/build.md"} {
+	for _, path := range []string{"AGENTS.md", "agents/work_manager.toml", "agents/integration_worker.toml", "prompts/build.md"} {
 		contents, err := os.ReadFile(filepath.Join(destination, path))
 		if err != nil {
 			t.Fatal(err)
@@ -505,7 +506,7 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 	if err != nil || !strings.Contains(string(integration), "root integration and gitlink updates only") || !strings.Contains(string(integration), "not a third delivery delegate") {
 		t.Fatalf("integration contract=%q err=%v", integration, err)
 	}
-	for _, path := range []string{"agents/web_worker.toml", "agents/integration_worker.toml", "agents/doc_writer.toml"} {
+	for _, path := range []string{"agents/integration_worker.toml", "agents/doc_writer.toml"} {
 		contents, err := os.ReadFile(filepath.Join(destination, path))
 		if err != nil {
 			t.Fatal(err)
@@ -516,9 +517,19 @@ func TestServiceBuildsCommittedSubmoduleTopology(t *testing.T) {
 			}
 		}
 	}
+	webWorker, err := os.ReadFile(filepath.Join(destination, "agents", "web_worker.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"Next.js", "TypeScript", "build-web-apps:react-best-practices", "build-web-apps:frontend-testing-debugging", "web_worker"} {
+		if !strings.Contains(string(webWorker), marker) {
+			t.Fatalf("Web worker contract missing %q: %q", marker, webWorker)
+		}
+	}
 }
 
 func TestServiceDoesNotCommitIgnoredBeadsRuntimeFiles(t *testing.T) {
+	installFakeNextASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
 	cfg, err := config.LoadBytes(blueprintBytes(), filepath.Join(parent, "blueprint.yaml"))
@@ -577,6 +588,7 @@ func TestServiceDoesNotCommitIgnoredBeadsRuntimeFiles(t *testing.T) {
 }
 
 func TestServiceRegistersSubmodulesAsInitialized(t *testing.T) {
+	installFakeNextASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
 	cfg, err := config.LoadBytes(blueprintBytes(), filepath.Join(parent, "blueprint.yaml"))
@@ -686,6 +698,7 @@ func TestServiceBuildsFlutterMobileSubmoduleAndArtifacts(t *testing.T) {
 }
 
 func TestMobileAbsentLeavesExistingArtifactOutputUnchanged(t *testing.T) {
+	installFakeNextASDF(t, false)
 	cfg, err := config.LoadBytes(blueprintBytes(), "/tmp/smt.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -720,6 +733,8 @@ func TestServiceGeneratesSelectionCorrectAPIModuleManifests(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if strings.Contains(string(tt.raw), "mobile: flutter") {
 				installFakeASDF(t, false)
+			} else if strings.Contains(string(tt.raw), "web: nextjs") {
+				installFakeNextASDF(t, false)
 			}
 			parent := t.TempDir()
 			destination := filepath.Join(parent, "workspace")
@@ -727,7 +742,7 @@ func TestServiceGeneratesSelectionCorrectAPIModuleManifests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(tt.raw), "mobile: flutter") {
+			if !strings.Contains(string(tt.raw), "mobile: flutter") && !strings.Contains(string(tt.raw), "web: nextjs") {
 				t.Setenv("PATH", "")
 			}
 			service := Service{
@@ -839,6 +854,7 @@ func TestServiceAPIModuleManifestsAreDeterministicAcrossDestinations(t *testing.
 }
 
 func TestServiceWritesDeterministicRuntimeArtifactsForSelectedOCIComponents(t *testing.T) {
+	installFakeNextASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "Runtime Workspace")
 	raw := blueprintBytes()
@@ -875,6 +891,7 @@ func TestServiceWritesDeterministicRuntimeArtifactsForSelectedOCIComponents(t *t
 }
 
 func TestServiceWritesPortableLefthookConfigurationWithoutLefthookOnPath(t *testing.T) {
+	logPath := installFakeNextASDF(t, false)
 	parent := t.TempDir()
 	raw := []byte(`version: 1
 commit: {types: [feat], scopes: [repo, web]}
@@ -886,7 +903,7 @@ repositories:
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", "")
+	t.Setenv("PATH", filepath.Dir(logPath)+string(os.PathListSeparator)+"/usr/bin:/bin")
 	destination := filepath.Join(parent, "workspace")
 	s := Service{Config: *cfg, Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }), Beads: initializerFunc(func(context.Context, string) error { return nil })}
 	if err := s.Apply(context.Background(), destination, raw); err != nil {
@@ -1100,6 +1117,7 @@ func TestServiceMobileBeadsAndPublishFailuresCleanStaging(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			installFakeASDF(t, false)
 			parent := t.TempDir()
 			destination := filepath.Join(parent, "workspace")
 			cfg, err := config.LoadBytes(mobileBlueprintBytes(), filepath.Join(parent, "blueprint.yaml"))

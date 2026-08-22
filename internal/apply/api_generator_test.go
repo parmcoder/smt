@@ -264,10 +264,7 @@ func TestApplyGeneratedAPIIgnoresCoverageArtifacts(t *testing.T) {
 }
 
 func TestGeneratedAPITaskfileCommandsAndDotenvRuntime(t *testing.T) {
-	taskPath, err := exec.LookPath("task")
-	if err != nil {
-		t.Fatalf("task executable is required for generated Taskfile harness: %v", err)
-	}
+	taskPath := generatedTaskBinary(t)
 	destination := applyAPIWorkspace(t, apiBlueprintBytes())
 	apiRoot := filepath.Join(destination, "apis")
 	taskEnv := generatedTaskEnvironment()
@@ -323,6 +320,23 @@ func TestGeneratedAPITaskfileCommandsAndDotenvRuntime(t *testing.T) {
 	if err := stopGeneratedTask(t, cmd); err != nil {
 		t.Fatalf("task run did not stop cleanly: %v\n%s", err, output.String())
 	}
+}
+
+func generatedTaskBinary(t *testing.T) string {
+	t.Helper()
+	if asdfPath, err := exec.LookPath("asdf"); err == nil {
+		cmd := exec.Command(asdfPath, "which", "task")
+		if output, err := cmd.Output(); err == nil {
+			if path := strings.TrimSpace(string(output)); path != "" {
+				return path
+			}
+		}
+	}
+	path, err := exec.LookPath("task")
+	if err != nil {
+		t.Fatalf("task executable is required for generated Taskfile harness: %v", err)
+	}
+	return path
 }
 
 func generatedTaskEnvironment() []string {
@@ -795,6 +809,8 @@ func applyAPIWorkspace(t *testing.T, raw []byte) string {
 	t.Helper()
 	if bytes.Contains(raw, []byte("mobile: flutter")) {
 		installFakeASDF(t, false)
+	} else if bytes.Contains(raw, []byte("web: nextjs")) {
+		installFakeNextASDF(t, false)
 	}
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
