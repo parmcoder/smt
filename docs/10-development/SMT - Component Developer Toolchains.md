@@ -10,7 +10,7 @@ tags:
   - skills
   - mcp
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT — Component Developer Toolchains
 
@@ -264,6 +264,25 @@ It may provide analysis/fixes, symbols, formatting, tests, runtime errors,
 hot reload, and live-app inspection. Runtime UI driving is additionally opt-in
 and must not leak into production configuration.
 
+## Local Web and Mobile E2E packages
+
+The root-attached `e2e` declaration is being expanded by `smt-4xf.14`. Apply
+will generate separate `e2e/web` and `e2e/mobile` packages only when the
+matching Web or Mobile component is selected; E2E without either target stays
+metadata-only. Web uses Playwright with isolated tests, web-first assertions,
+Chromium by default, optional Firefox/WebKit projects, and traces on retry.
+Mobile keeps `integration_test` files in the Mobile app for native device
+execution while `e2e/mobile` owns the runner, environment, fixtures, and
+reports. The first lane asserts stable navigation hooks, Web `/healthz`,
+optional API reachability, Mobile launch, and `mobile-home`/`api-status`.
+
+The E2E worker uses `$build-web-apps:frontend-testing-debugging` and
+`$flutter-add-integration-test`. It delegates startup/shutdown to existing
+component Taskfiles, never installs packages or browsers during Apply, and
+reports missing browsers, SDKs, simulators, emulators, or devices explicitly.
+Auth, domain fixtures, signing, cloud device farms, remote CI, and production
+regression suites remain application-owned follow-up work.
+
 ## PostgreSQL / Database
 
 Baseline: PostgreSQL 18. Planned gates use `pg_isready`, fail-fast `psql`,
@@ -288,6 +307,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, Task | child `build`, `run`, `test`, `coverage`, `mod`, `openapi`, `verify`; later durable format, vet, race, fuzz, vuln, migrations | `$godex:godex-go-backend` | gopls local; no Go MCP |
 | Next.js Web | `package.json`, `package-lock.json` | Node, Next.js, npm lockfile | Prettier, ESLint, TypeScript, Vitest/RTL, build, Playwright | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` implemented: CLI-generated project | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` deferred/unverified: format, analyze, unit/widget, integration, debug builds; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
+| Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
 | PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
 | Root/container | `compose.yaml`, `.env.example` | none for apply; Podman/Compose for deferred runtime | contract inspection; future smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | no runtime execution in `.3.1` |
 

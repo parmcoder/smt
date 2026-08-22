@@ -8,7 +8,7 @@ tags:
   - git
   - developer-experience
 created: 2026-07-16
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT — Product Concept
 
@@ -120,10 +120,18 @@ Repositories may carry optional `modules: [id...]` metadata, and configurations
 without that field remain valid. Component repositories receive exact catalog
 IDs. After the existing Web/Mobile/API/Database questions, `smt new` offers a
 default-no quality-root declaration; opting in records only `modules: [e2e]` on
-the root, with no E2E repository, scaffold, or generated artifact. The catalog
-and its verification/scaffold fields are declarations only. The `.5` slice
-does not create platform repositories or platform scaffolds, install tools,
-skills, or MCP, mutate host configuration, or run platform runtimes.
+the root blueprint. Current Apply remains metadata-only for E2E. The P0
+`smt-4xf.14` rollup will generate separate attached `e2e/web` and `e2e/mobile`
+packages when Web or Mobile is selected; without either target, the
+declaration remains valid and emits no runnable package. The Web package uses
+Playwright and the Mobile package uses Flutter's native `integration_test`.
+The first lane is contract smoke only (stable navigation hooks, Web
+`/healthz`, optional API reachability, and Mobile `mobile-home`/`api-status`),
+with local orchestration through existing component tasks. Apply will not
+install packages, browsers, SDKs, devices, credentials, or remote CI. The
+catalog and its verification/scaffold fields remain declarations until this
+rollup is implemented; the `.5` platform/runtime boundaries and deferred
+`smt extend` remain unchanged.
 
 The implemented `.3.1` slice adds a deterministic root runtime contract:
 `smt apply` writes `compose.yaml` and `.env.example`, and root `.gitignore`

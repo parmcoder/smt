@@ -620,6 +620,18 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 	if strings.Join(argocd.Requires, ",") != "k8s" {
 		t.Fatalf("argocd requires = %v, want k8s", argocd.Requires)
 	}
+	for _, module := range catalog.Modules {
+		if module.ID != "e2e" {
+			continue
+		}
+		if strings.Join(module.Agents, ",") != "e2e_worker" {
+			t.Fatalf("e2e agents = %v, want [e2e_worker]", module.Agents)
+		}
+		wantSkills := []string{"build-web-apps:frontend-testing-debugging", "flutter-add-integration-test"}
+		if !reflect.DeepEqual(module.Skills, wantSkills) {
+			t.Fatalf("e2e skills = %v, want %v", module.Skills, wantSkills)
+		}
+	}
 }
 
 func TestModuleCatalogRejectsArgocdWithoutK8sProvider(t *testing.T) {

@@ -9,7 +9,7 @@ tags:
   - blueprint
   - roadmap
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT Extensible Modules Design
 
@@ -317,12 +317,16 @@ metadata before topology checks, staging, or destination mutation.
 default-no quality-root question derived from the catalog role and placement.
 The current built-in prompt is `Include E2E quality declaration? [y/N]`.
 Component repositories receive exact selectable IDs. Opting in records only
-`modules: [e2e]` on the root; it creates no E2E repository, scaffold, or
-artifact. The `.5` slice adds declarations and validation only: it creates no
-platform repositories, platform scaffolds, or platform runtime artifacts; does
-not install tools, skills, or MCP integrations; does not mutate host
-configuration; and does not run Compose, Podman, Kubernetes, ArgoCD, or
-OpenTofu. Runnable starters and `smt extend` remain deferred.
+`modules: [e2e]` on the root; current Apply remains metadata-only. The P0
+`smt-4xf.14` rollup will generate separate attached `e2e/web` and `e2e/mobile`
+packages only for selected Web or Mobile targets; no-target E2E remains valid
+metadata-only. Web uses Playwright and Mobile uses Flutter's native
+`integration_test`, with contract smoke for stable hooks, Web `/healthz`,
+optional API reachability, and Mobile `mobile-home`/`api-status`. Local tasks
+delegate startup/shutdown to existing component tasks and report unavailable
+browser/device lanes explicitly. Apply still does not install dependencies,
+browsers, SDKs, devices, credentials, or remote CI. The `.5` slice retains its
+platform/runtime boundaries, and `smt extend` remains deferred.
 
 Remaining Web/Database component manifests and lockfiles are deferred
 runnable-starter assets; Mobile `.3.5.1` lockfile/lint production and

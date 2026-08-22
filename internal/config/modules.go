@@ -467,7 +467,7 @@ var builtInModuleCatalog = ModuleCatalog{
 			ID: "e2e", Selectable: true, Category: "quality", Layer: "quality-verification", Provides: []string{"e2e"},
 			Optional: []string{"web", "api", "mobile"}, Repository: ModuleRepositoryPlacement{Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo"}},
 			CompletionCriteria: []string{"e2e.declaration"},
-			Agents:             []string{"e2e_worker"}, Skills: []string{"build-web-apps:frontend-testing-debugging"},
+			Agents:             []string{"e2e_worker"}, Skills: []string{"build-web-apps:frontend-testing-debugging", "flutter-add-integration-test"},
 			Verification:   []VerificationRequirement{{ID: "e2e-verify", Argv: []string{"task", "verify"}, MutatesWorktree: false}},
 			ScaffoldAssets: []ScaffoldAsset{{ID: "e2e-declaration", Path: "e2e", Revision: "v1", Version: "v1"}},
 		},

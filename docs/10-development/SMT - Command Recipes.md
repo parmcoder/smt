@@ -8,7 +8,7 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT — Command Recipes
 
@@ -34,9 +34,11 @@ omits the Mobile entry. New blueprints have no DevOps prompt,
 `workspace.stack.devops`, `infra` repository, or Docker/OpenTofu metadata or
 artifacts. After Database, it offers the optional default-no
 `Include E2E quality declaration? [y/N]` question. Opting in records only
-`modules: [e2e]` on the root; component repositories receive exact module IDs,
-and no E2E repository or scaffold is created. It writes `smt.yaml` only after
-confirmation and does not create a workspace. The generated file carries the
+`modules: [e2e]` on the root; component repositories receive exact module IDs.
+Current Apply remains metadata-only for E2E; the P0 `smt-4xf.14` rollup will
+generate attached `e2e/web` and `e2e/mobile` packages only for selected Web or
+Mobile targets, while no-target E2E remains metadata-only. It writes `smt.yaml`
+only after confirmation and does not create a workspace. The generated file carries the
 exact provenance mapping documented in [[../00-project/SMT - Implementation Spec#Configuration contract|the implementation
 specification]], with no timestamp, user, machine/path, Git
 SHA, random value, or environment-derived field. Generation is offline and
@@ -312,8 +314,11 @@ references and dependencies are valid, so `[argocd, k8s]` is loadable while
 `[argocd]` is rejected for its missing capability. `Apply` and
 `ValidateBlueprint` reject non-selectable platform metadata before topology
 checks or staging/destination mutation. The root-only `modules: [e2e]`
-declaration remains metadata; it does not create an E2E repository, scaffold,
-or artifact.
+declaration is currently metadata; package generation is tracked by
+`smt-4xf.14`. Its Web lane uses Playwright for contract smoke and `/healthz`;
+its Mobile lane uses Flutter's native `integration_test` with
+`mobile-home`/`api-status` keys. Local tasks delegate startup to selected
+component tasks and report missing browsers, SDKs, or devices explicitly.
 
 This `.5` slice adds declarations and validation only. Apply does not execute
 verification commands, install tools/skills/MCP, mutate host configuration,
