@@ -302,6 +302,9 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		if err := os.RemoveAll(filepath.Join(stagedMobile, ".idea")); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("remove staged Flutter IDE state: %w", err)
 		}
+		if err := writeMobileVerificationFiles(stagedMobile); err != nil {
+			return plumbing.ZeroHash, err
+		}
 		if err := os.Rename(stagedMobile, bootstrap); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("stage Flutter mobile repository: %w", err)
 		}

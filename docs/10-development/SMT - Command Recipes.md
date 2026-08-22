@@ -8,7 +8,7 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT — Command Recipes
 
@@ -34,9 +34,11 @@ omits the Mobile entry. New blueprints have no DevOps prompt,
 `workspace.stack.devops`, `infra` repository, or Docker/OpenTofu metadata or
 artifacts. After Database, it offers the optional default-no
 `Include E2E quality declaration? [y/N]` question. Opting in records only
-`modules: [e2e]` on the root; component repositories receive exact module IDs,
-and no E2E repository or scaffold is created. It writes `smt.yaml` only after
-confirmation and does not create a workspace. The generated file carries the
+`modules: [e2e]` on the root; component repositories receive exact module IDs.
+Current Apply remains metadata-only for E2E; the P0 `smt-4xf.14` rollup will
+generate attached `e2e/web` and `e2e/mobile` packages only for selected Web or
+Mobile targets, while no-target E2E remains metadata-only. It writes `smt.yaml`
+only after confirmation and does not create a workspace. The generated file carries the
 exact provenance mapping documented in [[../00-project/SMT - Implementation Spec#Configuration contract|the implementation
 specification]], with no timestamp, user, machine/path, Git
 SHA, random value, or environment-derived field. Blueprint generation is
@@ -150,28 +152,30 @@ The planned milestones are:
   --no-pub --platforms=android,ios --org=com.example.smt
   --project-name=smt_mobile --description="A provider-neutral SMT Flutter
   mobile starter." <staged-mobile-directory>` command. Flutter owns the
-  generated app/source/test/platform output; Apply preserves it, uses no static
-  Android/iOS templates, and performs no Go post-create app/source/test/analysis
-  writes. The app remains backend-independent with optional non-secret
+  generated platform output; the Mobile verification worker adds the stable
+  app, optional API config, unit/widget tests, native integration test, and SDK
+  dependency declaration. Apply uses no static Android/iOS templates. The app
+  remains backend-independent with optional non-secret
   `SMT_API_BASE_URL` configuration and provider-neutral `com.example.smt.mobile`;
   signing, store metadata, domain CRUD, OCI services, and API-required behavior
   remain excluded.
-- `.3.5.3` (deferred/planned): `dart format`, `flutter analyze`, unit/widget tests,
-  `integration_test`, Android debug build, and iOS debug build with
-  `--no-codesign` where supported. Unavailable SDK/device/Android/iOS lanes are
-  explicit unverified results, never silently skipped.
+- `.3.5.3` (implemented): the generated verification contract includes `dart
+  format`, `flutter analyze`, unit/widget tests, native `integration_test`,
+  Android debug build, and iOS debug build with `--no-codesign` where supported.
+  The opted-in lane passes format, analyze, and unit/widget tests; this host
+  has no Android SDK or supported Android/iOS target, so integration and debug
+  builds are explicit unverified results, never silently skipped.
 - `.6.1.3`: after the Mobile rollup closes, activate the Mobile Taskfile with
   dependency, format, analyze, test, integration, Android debug, iOS debug,
   and aggregate `verify` tasks.
 
-Apply runs only the staged Flutter create command; it does not run these
-post-create verification commands. Current evidence is asdf Flutter create,
-`flutter pub get`, and `flutter analyze` passing, with the lockfile and lint
-policy verified in that later Mobile-worker step. Android SDK absence,
-incomplete Xcode, and missing CocoaPods leave Android/iOS device and build
-lanes unverified; `.3.5.3` remains deferred/planned.
+Apply runs only the staged Flutter create plus static Mobile verification-file
+writes; it does not run `pub get` or these verification commands. Current
+evidence is asdf Flutter create, `pub get`, Dart format, `flutter analyze`, and
+unit/widget tests passing. Android SDK absence and the lack of a supported
+Android/iOS target leave integration and debug-build lanes unverified.
 
-Planned `.3.5.3` local verification checks:
+`.3.5.3` local verification checks:
 
 ```sh
 cd ../platform/mobile-app
@@ -350,8 +354,11 @@ references and dependencies are valid, so `[argocd, k8s]` is loadable while
 `[argocd]` is rejected for its missing capability. `Apply` and
 `ValidateBlueprint` reject non-selectable platform metadata before topology
 checks or staging/destination mutation. The root-only `modules: [e2e]`
-declaration remains metadata; it does not create an E2E repository, scaffold,
-or artifact.
+declaration is currently metadata; package generation is tracked by
+`smt-4xf.14`. Its Web lane uses Playwright for contract smoke and `/healthz`;
+its Mobile lane uses Flutter's native `integration_test` with
+`mobile-home`/`api-status` keys. Local tasks delegate startup to selected
+component tasks and report missing browsers, SDKs, or devices explicitly.
 
 This `.5` slice adds declarations and validation only. Apply does not execute
 verification commands, install tools/skills/MCP, mutate host configuration,

@@ -8,7 +8,7 @@ tags:
   - documentation
   - smt
 created: 2026-07-15
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT — Agent Team
 
@@ -27,10 +27,11 @@ can copy or register them in its native agent directory if required.
 
 | Agent | Model | Owns | Must not own |
 | --- | --- | --- | --- |
-| `work_manager` | `gpt-5.6-terra`, high | Serial delivery assignments, safety decisions, worker review loop, final acceptance | Go/Flutter implementation, delegation beyond the three listed workers |
+| `work_manager` | `gpt-5.6-terra`, high | Serial delivery assignments, safety decisions, worker review loop, final acceptance | Go/Flutter/E2E implementation, delegation beyond the listed workers |
 | `backend_worker` | `gpt-5.6-luna`, Fast, xhigh | Go production code and focused tests assigned by `work_manager` under `internal/` and `cmd/smt/` | Architecture decisions, docs, further delegation, non-manager assignments |
 | `web_worker` | `gpt-5.6-luna`, Fast, xhigh | Next.js/TypeScript Web production code and focused tests assigned by `work_manager` | Architecture decisions, docs, further delegation, Go/Flutter assignments |
 | `mobile_worker` | `gpt-5.6-luna`, Fast, xhigh | Only assigned Flutter/Dart production code and focused tests; explicit SDK/device lane reporting | Architecture decisions, docs, further delegation, Go assignments |
+| `e2e_worker` | `gpt-5.6-luna`, Fast, xhigh | Root-attached `e2e/web` Playwright and `e2e/mobile` orchestration packages; contract smoke tests and explicit browser/device lane reporting | Domain CRUD/auth flows, component implementation, signing, cloud device farms, remote CI, further delegation |
 | `doc_writer` | `gpt-5.6-luna`, Fast, xhigh | `docs/`, `prompts/`, durable decisions, handoffs, Mermaid | Go implementation and behavior changes |
 | `integration_worker` | `gpt-5.6-luna`, Fast, xhigh | Root gitlinks and integration artifacts in prepared workspaces | Child implementation, Beads claims, agent launch, provider remotes |
 | `backend_agent` | `gpt-5.6-terra`, high | Direct, explicitly requested architecture review outside a work-manager delivery | A concurrent work-manager delivery or `backend_worker` assignment |
@@ -39,8 +40,9 @@ can copy or register them in its native agent directory if required.
 prepared workspaces. It owns only root gitlink and integration artifacts; it is
 not a downstream implementation delegate. The active implementation topologies
 are `work_manager -> backend_worker -> doc_writer` for Go,
-`work_manager -> web_worker -> doc_writer` for Web, and
-`work_manager -> mobile_worker -> doc_writer` for Mobile. The backend route
+`work_manager -> web_worker -> doc_writer` for Web,
+`work_manager -> mobile_worker -> doc_writer` for Mobile, and
+`work_manager -> e2e_worker -> doc_writer` for local E2E. The backend route
 remains unchanged; `doc_writer` aligns docs only after accepted behavior.
 The integration contract makes the root ownership boundary and feature-ID
 commit rule explicit for whichever host performs the integration step.
@@ -49,6 +51,12 @@ commit rule explicit for whichever host performs the integration step.
 architecture and review. `backend_worker` uses it for its assigned
 implementation. The documentation worker uses `$codex-obsidian-writer` and
 `$codex-obsidian-markdown`.
+
+The E2E worker uses `$build-web-apps:frontend-testing-debugging` for
+Playwright/browser work and `$flutter-add-integration-test` for Flutter's
+native `integration_test` lane. It keeps Flutter integration-test files in the
+Mobile app project so device execution remains native; the root-attached
+`e2e/mobile` package owns commands, environment, fixtures, and reports.
 
 ## Execution flow
 
@@ -82,10 +90,24 @@ source, tests, or analysis. Apply does not run pub-get or package resolution;
 missing Flutter is an atomic failure with `asdf install flutter 3.44.9-stable`
 and `asdf current flutter` guidance. `mobile_worker` owns only assigned
 Flutter/Dart code and focused tests, reports Android/iOS SDK or device
-availability explicitly, and does not claim `.3.5.3` runtime verification.
-Current evidence is asdf Flutter create, pub get, and analyze passing; Android
-SDK absence, incomplete Xcode, and missing CocoaPods leave device/build lanes
-unverified.
+availability explicitly. The `.3.5.3` lane owns the generated app's Dart format,
+Flutter analyze, unit/widget tests, and native integration-test contract; current
+evidence passes format, analyze, and unit/widget tests. The host has no Android
+SDK or supported Android/iOS target, so integration execution and debug builds
+remain explicitly unverified.
+
+## Local E2E worker boundary
+
+The selected root `e2e` declaration is being expanded by `smt-4xf.14` into
+separate `e2e/web` and `e2e/mobile` packages. Apply emits only the package
+matching a selected Web or Mobile component; selecting E2E without either
+target remains valid metadata-only. The first suite is contract smoke only:
+stable Web navigation hooks and `/healthz`, optional API reachability, Mobile
+launch, and the `mobile-home`/`api-status` keys. It contains no domain CRUD,
+auth secrets, signing, cloud device farms, or implicit installs. Local tasks
+delegate startup and shutdown to existing component tasks, retain failure
+reports, and report missing browsers, SDKs, simulators, emulators, or devices
+explicitly.
 
 ## Accepted Web Apply boundary
 

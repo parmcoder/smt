@@ -8,7 +8,7 @@ tags:
   - git
   - developer-experience
 created: 2026-07-16
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT — Product Concept
 
@@ -120,10 +120,18 @@ Repositories may carry optional `modules: [id...]` metadata, and configurations
 without that field remain valid. Component repositories receive exact catalog
 IDs. After the existing Web/Mobile/API/Database questions, `smt new` offers a
 default-no quality-root declaration; opting in records only `modules: [e2e]` on
-the root, with no E2E repository, scaffold, or generated artifact. The catalog
-and its verification/scaffold fields are declarations only. The `.5` slice
-does not create platform repositories or platform scaffolds, install tools,
-skills, or MCP, mutate host configuration, or run platform runtimes.
+the root blueprint. Current Apply remains metadata-only for E2E. The P0
+`smt-4xf.14` rollup will generate separate attached `e2e/web` and `e2e/mobile`
+packages when Web or Mobile is selected; without either target, the
+declaration remains valid and emits no runnable package. The Web package uses
+Playwright and the Mobile package uses Flutter's native `integration_test`.
+The first lane is contract smoke only (stable navigation hooks, Web
+`/healthz`, optional API reachability, and Mobile `mobile-home`/`api-status`),
+with local orchestration through existing component tasks. Apply will not
+install packages, browsers, SDKs, devices, credentials, or remote CI. The
+catalog and its verification/scaffold fields remain declarations until this
+rollup is implemented; the `.5` platform/runtime boundaries and deferred
+`smt extend` remain unchanged.
 
 The implemented `.3.1` slice adds a deterministic root runtime contract:
 `smt apply` writes `compose.yaml` and `.env.example`, and root `.gitignore`
@@ -158,15 +166,18 @@ Flutter CLI `pubspec.yaml`, `analysis_options.yaml`, and project baseline; the
 `pubspec.lock` and pinned `flutter_lints 6.0.0` policy are produced and
 verified later by `mobile_worker` after `asdf exec flutter pub get`. Apply uses
 `--no-pub`, so it emits no lockfile and performs no package resolution. Apply
-preserves the CLI output; it does not use static Android/iOS templates or
-perform Go post-create app/source/test/analysis writes. `--no-pub` keeps Apply
-offline and package-resolution-free. If the pinned toolchain is unavailable,
+preserves the CLI platform output; the Mobile verification worker then adds
+the stable app, optional API config, unit/widget tests, native integration
+test, and SDK dependency declaration. It does not use static Android/iOS
+templates. `--no-pub` keeps Apply offline and package-resolution-free. If the
+pinned toolchain is unavailable,
 Apply fails atomically with `asdf install flutter 3.44.9-stable` and `asdf
 current flutter` guidance. The generated README then guides `asdf exec
 flutter pub get`, analysis, and Android Studio/emulator or full Xcode/iPhone
-setup. Current evidence is asdf Flutter create, pub get, and analyze passing;
-Android SDK absence, incomplete Xcode, and missing CocoaPods leave device/build
-lanes unverified. Mobile remains outside OCI Compose, and the current `.3.1`
+setup. Current `.3.5.3` evidence passes Dart format, pub get, Flutter analyze,
+and unit/widget tests; the host has no Android SDK or supported Android/iOS
+target, so integration execution and debug builds are explicitly unverified.
+Mobile remains outside OCI Compose, and the current `.3.1`
 Compose file is a declarative contract without component Containerfiles, so
 Compose is not required to launch the starter locally.
 

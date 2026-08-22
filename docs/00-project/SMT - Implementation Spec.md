@@ -10,7 +10,7 @@ tags:
   - monorepo
   - developer-experience
 created: 2026-07-15
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT — Sanovy Mono Tool
 
@@ -359,14 +359,18 @@ before topology checks, staging, or destination mutation.
 `smt new` derives the quality prompt and emitted module ID from the catalog's
 role and placement. Component repositories receive exact selectable IDs
 (`web`, `mobile`, `api`, and `database`). Opting into the quality declaration
-adds only `modules: [e2e]` to the root; it creates no E2E repository, scaffold,
-or other artifact. `smt apply` persists accepted selectable annotations, but
-the `.5` slice adds declarations and validation only. The implemented `.3.1`
-slice adds the root runtime contract files below; it does not create platform
-repositories, platform scaffolds, or platform runtime artifacts; install tools,
-skills, or MCP integrations; mutate host configuration; or run Compose,
-Podman, Kubernetes, ArgoCD, or OpenTofu. Runnable starters and `smt extend`
-remain deferred.
+adds only `modules: [e2e]` to the root blueprint. Current Apply remains
+metadata-only for E2E; the P0 `smt-4xf.14` rollup will add separate attached
+`e2e/web` and `e2e/mobile` packages when their matching components are
+selected. With no Web or Mobile target, the declaration remains valid and
+emits no runnable package. The planned packages use Playwright for Web and
+Flutter's native `integration_test` for Mobile, with contract smoke only:
+stable navigation hooks, Web `/healthz`, optional API reachability, and Mobile
+launch plus `mobile-home`/`api-status` keys. Apply will not install packages,
+browsers, SDKs, devices, credentials, or remote CI; local tasks delegate to
+existing component startup commands. The `.5` slice still creates no
+platform repositories or platform runtime artifacts, and `smt extend` remains
+deferred.
 
 ### Implemented `.3.1` local OCI runtime contract
 
@@ -557,14 +561,16 @@ implemented by the CLI or this release:
 The broader runnable-starter and platform work is planned, not implemented:
 the five layers remain in this repository initially, and the six platform
 capabilities above are declarations only. This release still provides no Web
-runtime/quality lane or Database runtime starter, component Containerfiles,
-platform repositories or scaffolds, Podman/Compose execution,
-Kubernetes/ArgoCD/OpenTofu runtime, remote module registry, or `smt extend`
-command. Web `.3.2.1` is the implemented CLI-owned Next.js baseline; its
-dependency lockfile, quality, browser, and runtime lanes remain `.3.2.2/.3`
-work. Mobile `.3.5.2` is a Flutter CLI-generated Android/iOS starter, but
-platform SDK/device execution, signing, API integration, and store publication
-remain outside Apply; `.3.5.3` runtime and verification remain deferred. The
+or Database runtime starters, component Containerfiles, platform repositories
+or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime,
+remote module registry, or `smt extend` command. Web `.3.2.1` is the implemented
+CLI-owned Next.js baseline; its dependency lockfile, quality, browser, and
+runtime lanes remain `.3.2.2/.3` work. Mobile `.3.5.2` is a Flutter
+CLI-generated Android/iOS starter, and `.3.5.3` adds the stable app/test
+contract plus the local verification lane. Platform SDK/device execution,
+signing, API integration, and store publication remain outside Apply; the
+host's unavailable Android/iOS targets and debug-build prerequisites are
+reported as explicit unverified lanes. The
 `.3.1` `compose.yaml` and `.env.example` are contract-only root artifacts,
 while the `.3.3.2` API source/OpenAPI assets are deterministic offline starter
 assets without packaging or lifecycle tasks. The static module catalog and

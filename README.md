@@ -38,7 +38,8 @@ operations, and no credential persistence.
 | Diagnostics | `status` and `doctor` report repository, executable, remote, hook, and profile readiness. |
 | Hooks | Guarded Lefthook installation and conventional commit validation. |
 | Web | `.3.2.1` creates a Git-ready Next.js CLI baseline; `.3.2.2/.3` quality and runtime lanes remain deferred. |
-| Mobile | Current Mobile output is a Git-ready Flutter CLI-generated Android/iOS starter; `.3.5.3` runtime and verification remain deferred. |
+| Mobile | Current Mobile output includes a Flutter CLI-generated Android/iOS starter plus stable app, unit, widget, and native integration-test hooks; device/build lanes are reported explicitly when unavailable. |
+| E2E | The root `e2e` declaration is being expanded into local Web and Mobile contract-smoke packages by `smt-4xf.14`; no E2E artifacts are generated until that milestone lands. |
 
 ## Getting started from a fresh clone
 
@@ -122,11 +123,27 @@ After a successful Apply, work from `mobile-app/` with `asdf exec flutter pub
 get` and `asdf exec flutter analyze`; this later Mobile-worker step produces
 and verifies `pubspec.lock` and the pinned `flutter_lints 6.0.0` policy. In the
 current checkout, the asdf Flutter create, pub get, and analyze checks pass.
-Android device/build checks
-are unverified because the Android SDK is absent; iOS checks are unverified
-because Xcode is incomplete and CocoaPods is missing. Device execution and
-`.3.5.3` runtime verification remain deferred. Mobile does not require local
-Compose to launch, while Compose/runtime Containerfiles remain later work.
+The generated verification lane runs Dart format, Flutter analyze, and unit/widget
+tests after `pub get`. The current host has no Android SDK or supported Android/iOS
+target, so integration execution and Android/iOS debug builds are explicitly
+unverified. Mobile does not require local Compose to launch, while
+Compose/runtime Containerfiles remain later work.
+
+## Planned local E2E workflow
+
+Opt into E2E during `smt new` with the default-no quality declaration. The
+current blueprint records `modules: [e2e]` on the root only; the active
+`smt-4xf.14` milestone will generate separate `e2e/web` and `e2e/mobile`
+packages when Web or Mobile is selected. A declaration without either target
+remains valid metadata-only.
+
+The planned first lane is contract smoke, not domain CRUD: Playwright checks
+stable Web navigation and `/healthz`; Flutter `integration_test` checks launch
+and the `mobile-home`/`api-status` keys. Local E2E tasks will delegate to the
+existing component startup commands, preserve failure reports, and report
+missing browsers, SDKs, simulators, emulators, or devices explicitly. Apply
+will not install npm packages, Playwright browsers, Flutter packages, or host
+tooling; those are explicit local setup steps.
 
 ```mermaid
 flowchart LR

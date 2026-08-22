@@ -10,15 +10,17 @@ docs/00-project/SMT - Implementation Spec.md, and the active execution plan
 before assigning work. The implementation specification is the behavioral
 source of truth.
 
-Coordinate `backend_worker`, `mobile_worker`, and `doc_writer`. Do not
-delegate beyond those workers, and require each worker not to delegate further.
+Coordinate `backend_worker`, `mobile_worker`, `e2e_worker`, and `doc_writer`.
+Do not delegate beyond those workers, and require each worker not to delegate
+further.
 Serialize implementation tasks: issue one decision-complete assignment to the
 worker owning the active component, wait for its handoff, inspect the integrated
 diff, and send blocking findings only back to that same worker. Never implement
-Go or Flutter behavior yourself. `backend_worker` owns assigned Go source and
-focused Go tests; `mobile_worker` owns assigned Flutter/Dart source and focused
-tests; `doc_writer` owns high-level documentation, prompts, handoffs, and
-diagrams and must not implement runtime behavior.
+Go, Flutter, or E2E behavior yourself. `backend_worker` owns assigned Go source
+and focused Go tests; `mobile_worker` owns assigned Flutter/Dart source and
+focused tests; `e2e_worker` owns only root-attached Playwright/Flutter E2E
+packages and focused smoke tests; `doc_writer` owns high-level documentation,
+prompts, handoffs, and diagrams and must not implement runtime behavior.
 
 Every implementation assignment must name exact owned and non-owned paths, interfaces
 already decided by the manager, acceptance criteria, narrow test commands,

@@ -35,8 +35,9 @@ Their manifests live under `agents/` because the host-managed `.codex/` and
 `.agents/` directories are not writable in this checkout.
 
 - `work_manager`: Terra/high delivery controller. It coordinates exactly
-  `backend_worker` and `doc_writer`, serializes backend assignments, performs
-  the final review loop, and never implements Go code. Use
+  `backend_worker`, `mobile_worker`, `e2e_worker`, and `doc_writer`, serializes
+  component assignments, performs the final review loop, and never implements
+  Go, Flutter, or E2E code. Use
   `$godex:godex-go-backend` for Go architecture and review only.
 - `backend_worker`: GPT-5.6 Luna worker with Fast priority and extra-high
   reasoning for assigned Go implementation and
@@ -48,6 +49,12 @@ Their manifests live under `agents/` because the host-managed `.codex/` and
   Use `$codex-obsidian-writer` and
   `$codex-obsidian-markdown`. It remains a high-level documentation worker and
   does not implement Go behavior.
+- `e2e_worker`: GPT-5.6 Luna worker with Fast priority and extra-high reasoning
+  for assigned Playwright and Flutter integration-test package work. It owns
+  root-attached `e2e/web` and `e2e/mobile` contract-smoke packages, uses
+  `$build-web-apps:frontend-testing-debugging` and
+  `$flutter-add-integration-test`, delegates lifecycle to existing component
+  tasks, and reports unavailable browser/device lanes explicitly.
 - `integration_worker`: generated root-integration worker using GPT-5.6 Luna
   with Fast priority and extra-high reasoning. It owns only root gitlinks and
   integration artifacts and is not a third downstream delegate.
@@ -55,14 +62,17 @@ Their manifests live under `agents/` because the host-managed `.codex/` and
   non-work-manager requests. It does not issue `backend_worker` implementation
   assignments. Use `$godex:godex-go-backend`.
 
-For work managed by `work_manager`, the required loop is
-`work_manager -> backend_worker -> work_manager`: the manager issues one
-decision-complete Go assignment at a time, the worker implements and runs its
+For work managed by `work_manager`, the required loops are
+`work_manager -> backend_worker -> work_manager`,
+`work_manager -> mobile_worker -> work_manager`, and
+`work_manager -> e2e_worker -> work_manager`: the manager issues one
+decision-complete assignment at a time, the worker implements and runs its
 task-level tests, and the manager reviews the integrated diff. Blocking
-findings return only to the same worker. The manager never writes Go; it
-serializes integration and owns final acceptance. `doc_writer` is coordinated
-after accepted behavior to keep durable documentation and prompts aligned, but
-does not alter Go behavior. No agent in this loop delegates further.
+findings return only to the same worker. The manager never writes component or
+E2E code; it serializes integration and owns final acceptance. `doc_writer` is
+coordinated after accepted behavior to keep durable documentation and prompts
+aligned, but does not alter implementation behavior. No agent in these loops
+delegates further.
 
 Every worker handoff and manager review must list changed paths, checks and
 results, assumptions, unresolved risks, and unverified behavior. A worker may

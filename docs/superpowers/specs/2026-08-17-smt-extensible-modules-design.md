@@ -9,7 +9,7 @@ tags:
   - blueprint
   - roadmap
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-22
 ---
 # SMT Extensible Modules Design
 
@@ -21,11 +21,14 @@ implemented: new blueprints select Web, optional Mobile, API, and Database,
 with DevOps-shaped configuration removed. Generated blueprints also carry the
 exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
 `smt apply` validates it before mutation. The Web `.3.2.1` CLI baseline and
-Mobile `.3.5.1/.3.5.2` contracts are implemented below; remaining Web quality/
-runtime work, Database runnable assets, and Mobile runtime/verification remain
+the Mobile `.3.5.1/.3.5.2/.3.5.3` contracts are implemented below; remaining
+Web quality/runtime work, Database runnable assets, and packaging remain
 planned. `.3.2.1` uses the local Next.js CLI to create the staged Web project;
 it preserves CLI files, merges ignores, and does not install packages during
-Apply.
+Apply. `.3.5.2` uses the local Flutter CLI to create the staged Android/iOS
+project, and `.3.5.3` adds the stable app/test contract; it does not use
+static platform templates. Mobile integration/device/build lanes remain
+explicitly unverified where the host lacks the required SDK or target.
 `.3.3.2` now implements the generated API runtime and OpenAPI starter assets.
 The static schema-v1 module catalog and repository annotations are implemented
 metadata; `smt extend` is explicitly deferred.
@@ -180,25 +183,26 @@ iOS lanes explicitly.
   asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
   ```
 
-  Flutter owns the staged app/source/test/platform output. There are no static
-  Android/iOS templates and no Go post-create app/source/test/analysis writes.
+  Flutter owns the staged platform output. There are no static Android/iOS
+  templates; the Mobile worker owns the post-create app/source/test/config
+  contract.
   If the pinned toolchain is unavailable, Apply reports
   `asdf install flutter 3.44.9-stable` and `asdf current flutter` guidance and
   fails atomically. Current evidence is asdf Flutter create, pub get, and
   analyze passing; Android SDK absence, incomplete Xcode, and missing CocoaPods
   leave device/build lanes unverified. Mobile remains backend-independent and
   outside OCI Compose.
-- **`.3.5.3` verification (deferred/planned)** — `dart format`,
-  `flutter analyze`, unit/widget tests, `integration_test`, Android debug
-  builds, and iOS debug builds with `--no-codesign` where supported remain
-  unverified. Unavailable Flutter/Dart/Android/iOS SDK or device lanes are
-  explicit results, never silently skipped.
+- **`.3.5.3` verification (implemented)** — the Mobile worker adds the stable
+  app/config/unit/widget/native-integration contract and verifies Dart format,
+  `flutter analyze`, and unit/widget tests. The host has no Android SDK or
+  supported Android/iOS target, so integration and debug-build lanes are
+  explicit unverified results, never silently skipped.
 - **`.6.1.3` Mobile Taskfile** — activates only after the Mobile rollup closes,
   with dependency, format, analyze, test, integration, Android debug, iOS
   debug, and aggregate `verify` tasks.
 
-`.3.5.1` and `.3.5.2` are implemented. Remaining Mobile work is `.3.5.3`
-verification; Mobile remains outside OCI Compose.
+`.3.5.1`, `.3.5.2`, and `.3.5.3` are implemented; unavailable Mobile device
+and debug-build lanes remain explicit gaps. Mobile remains outside OCI Compose.
 
 ## Implemented `.3.1` root runtime contract
 
@@ -358,12 +362,16 @@ metadata before topology checks, staging, or destination mutation.
 default-no quality-root question derived from the catalog role and placement.
 The current built-in prompt is `Include E2E quality declaration? [y/N]`.
 Component repositories receive exact selectable IDs. Opting in records only
-`modules: [e2e]` on the root; it creates no E2E repository, scaffold, or
-artifact. The `.5` slice adds declarations and validation only: it creates no
-platform repositories, platform scaffolds, or platform runtime artifacts; does
-not install tools, skills, or MCP integrations; does not mutate host
-configuration; and does not run Compose, Podman, Kubernetes, ArgoCD, or
-OpenTofu. Runnable starters and `smt extend` remain deferred.
+`modules: [e2e]` on the root; current Apply remains metadata-only. The P0
+`smt-4xf.14` rollup will generate separate attached `e2e/web` and `e2e/mobile`
+packages only for selected Web or Mobile targets; no-target E2E remains valid
+metadata-only. Web uses Playwright and Mobile uses Flutter's native
+`integration_test`, with contract smoke for stable hooks, Web `/healthz`,
+optional API reachability, and Mobile `mobile-home`/`api-status`. Local tasks
+delegate startup/shutdown to existing component tasks and report unavailable
+browser/device lanes explicitly. Apply still does not install dependencies,
+browsers, SDKs, devices, credentials, or remote CI. The `.5` slice retains its
+platform/runtime boundaries, and `smt extend` remains deferred.
 
 Remaining Web dependency lockfile, quality, browser, and runtime assets and
 Database component manifests/lockfiles are deferred runnable-starter assets;
@@ -386,10 +394,12 @@ gate; `.4` adds the selectable catalog and repository module annotations, `.5`
 adds the six non-selectable platform declarations plus catalog/config
 validation boundaries, `.3.1` adds the root runtime contract artifacts,
 `.3.2.1` adds the staged CLI-owned Web baseline, and `.3.3.2` adds the
-generated API runtime/OpenAPI assets. Remaining design scope is the remaining
-P0 Mobile verification lane followed by the deferred Web `.3.2.2/.3` and
-remaining Database starter work, packaging, and Podman-first runtime
-implementation. Out of scope for the current CLI are Web/Mobile/Database
+generated API runtime/OpenAPI assets. Remaining design scope records the
+completed P0 Mobile verification contract, followed by deferred Web
+`.3.2.2/.3`, remaining Database starter work, packaging, and Podman-first
+runtime implementation. Mobile integration/device/build lanes remain explicit
+unverified where the host lacks the required SDK or target. Out of scope for
+the current CLI are Web/Mobile/Database
 Containerfiles, platform
 repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
 or ArgoCD deployment, OpenTofu execution, a remote module registry,
