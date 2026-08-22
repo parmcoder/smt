@@ -270,11 +270,11 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		if err := writeWebQualityFiles(stagedWeb); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("Web quality configuration failed: %w", err)
 		}
+		if err := writeWebRuntimeFiles(stagedWeb); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("Web runtime configuration failed: %w", err)
+		}
 		if err := removeNestedGitDirectories(stagedWeb); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("clean staged Web repository: %w", err)
-		}
-		if err := os.RemoveAll(filepath.Join(stagedWeb, "package-lock.json")); err != nil {
-			return plumbing.ZeroHash, fmt.Errorf("remove staged Web lockfile: %w", err)
 		}
 		if err := os.Rename(stagedWeb, bootstrap); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("stage Next.js Web repository: %w", err)
@@ -683,7 +683,7 @@ func appendWebReadme(path string) error {
 Install dependencies and start the development server after Apply:
 
 ~~~sh
-asdf exec npm install
+asdf exec npm ci
 asdf exec npm run dev
 ~~~
 `
@@ -696,9 +696,11 @@ asdf exec npm run dev
 ## SMT Web quality
 
 Run these explicit quality checks from this repository after installing
-dependencies. Apply does not run them or create a lockfile.
+dependencies. Apply does not run a package manager; the committed lockfile is
+the source of truth for installation.
 
 ~~~sh
+asdf exec npm ci
 asdf exec npm run format:check
 asdf exec npm run lint
 asdf exec npm run typecheck
@@ -706,6 +708,34 @@ asdf exec npm run test
 asdf exec npm run build
 asdf exec npm run test:e2e
 ~~~
+`
+	}
+	if !strings.Contains(text, "## SMT Web runtime") {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += `
+## SMT Web runtime
+
+The generated Web runtime uses the pinned Node.js 24.18.0 toolchain and can
+run directly or through the checked-in non-root Containerfile. The committed
+package-lock.json is used for repeatable dependency installation:
+
+~~~sh
+asdf exec npm ci
+asdf exec npm run build
+asdf exec npm start
+~~~
+
+The production process uses the Next.js production server, listens on port
+3000, and receives SIGTERM through the container's exec-form command so it
+can shut down cleanly. The health contract is GET /healthz, which returns
+HTTP 200 with status: ok. Set the optional server-only API_BASE_URL value
+before npm start; it is validated without exposing its value to the browser.
+The stable contract marker is data-smt-web-smoke="home".
+
+Mobile is an Android/iOS workload and remains outside Compose; this Web child
+does not install browsers, SDKs, credentials, or cloud integrations.
 `
 	}
 	return os.WriteFile(path, []byte(text), 0o644)

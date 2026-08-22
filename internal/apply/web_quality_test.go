@@ -86,7 +86,7 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"asdf exec npm install",
+		"asdf exec npm ci",
 		"asdf exec npm run format:check",
 		"asdf exec npm run lint",
 		"asdf exec npm run typecheck",
@@ -98,8 +98,8 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		}
 	}
 
-	if _, err := os.Lstat(filepath.Join(destination, "web-app", "package-lock.json")); !os.IsNotExist(err) {
-		t.Fatalf("Apply emitted package-lock.json: %v", err)
+	if _, err := os.Stat(filepath.Join(destination, "web-app", "package-lock.json")); err != nil {
+		t.Fatalf("Apply did not emit package-lock.json: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(destination, "web-app", "e2e")); !os.IsNotExist(err) {
 		t.Fatalf("Apply emitted Web-local E2E specs: %v", err)
