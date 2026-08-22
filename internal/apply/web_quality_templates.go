@@ -43,6 +43,8 @@ playwright-report/
 test-results/
 coverage/
 next-env.d.ts
+AGENTS.md
+CLAUDE.md
 `
 
 const webQualityVitestConfig = `import react from "@vitejs/plugin-react";

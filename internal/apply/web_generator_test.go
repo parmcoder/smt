@@ -57,7 +57,7 @@ func TestWebApplyInvokesNextInitializerInStagedOrder(t *testing.T) {
 	}
 }
 
-func TestWebApplyPreservesCLIOutputMergesIgnoreAndDoesNotCreateLockfile(t *testing.T) {
+func TestWebApplyPreservesCLIOutputMergesIgnoreAndPublishesRuntimeLockfile(t *testing.T) {
 	logPath := installFakeNextASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
@@ -80,7 +80,7 @@ func TestWebApplyPreservesCLIOutputMergesIgnoreAndDoesNotCreateLockfile(t *testi
 	if err != nil || !strings.Contains(string(readme), "CLI Web output") {
 		t.Fatalf("CLI README was not preserved: %q, err=%v", readme, err)
 	}
-	for _, want := range []string{"asdf exec npm install", "asdf exec npm run dev"} {
+	for _, want := range []string{"asdf exec npm ci", "asdf exec npm run dev"} {
 		if !strings.Contains(string(readme), want) {
 			t.Fatalf("preserved CLI README missing SMT guidance %q: %q", want, readme)
 		}
@@ -98,16 +98,17 @@ func TestWebApplyPreservesCLIOutputMergesIgnoreAndDoesNotCreateLockfile(t *testi
 			t.Fatalf("Web .gitignore missing %q: %q", want, ignore)
 		}
 	}
-	if _, err := os.Lstat(filepath.Join(web, "package-lock.json")); !os.IsNotExist(err) {
-		t.Fatalf("Apply emitted package-lock.json: %v", err)
+	lockfile, err := os.ReadFile(filepath.Join(web, "package-lock.json"))
+	if err != nil || !strings.Contains(string(lockfile), `"lockfileVersion": 3`) {
+		t.Fatalf("Apply did not publish the committed package-lock.json: %q, err=%v", lockfile, err)
 	}
 	if _, err := os.Lstat(filepath.Join(web, ".git", "nested")); !os.IsNotExist(err) {
 		t.Fatalf("nested CLI .git repository survived: %v", err)
 	}
 	for relative, want := range map[string]string{
-		"app/page.tsx":       "CLI App Router output",
-		"tailwind.config.ts": "CLI Tailwind output",
-		"AGENTS.md":          "CLI Web agent instructions",
+		"tailwind.config.ts":      "CLI Tailwind output",
+		"AGENTS.md":               "CLI Web agent instructions",
+		"generated/cli-owned.txt": "created by Next.js CLI",
 	} {
 		contents, err := os.ReadFile(filepath.Join(web, relative))
 		if err != nil || !strings.Contains(string(contents), want) {
