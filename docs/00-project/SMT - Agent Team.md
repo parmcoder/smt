@@ -89,10 +89,11 @@ source, tests, or analysis. Apply does not run pub-get or package resolution;
 missing Flutter is an atomic failure with `asdf install flutter 3.44.9-stable`
 and `asdf current flutter` guidance. `mobile_worker` owns only assigned
 Flutter/Dart code and focused tests, reports Android/iOS SDK or device
-availability explicitly, and does not claim `.3.5.3` runtime verification.
-Current evidence is asdf Flutter create, pub get, and analyze passing; Android
-SDK absence, incomplete Xcode, and missing CocoaPods leave device/build lanes
-unverified.
+availability explicitly. The `.3.5.3` lane owns the generated app's Dart format,
+Flutter analyze, unit/widget tests, and native integration-test contract; current
+evidence passes format, analyze, and unit/widget tests. The host has no Android
+SDK or supported Android/iOS target, so integration execution and debug builds
+remain explicitly unverified.
 
 ## Local E2E worker boundary
 

@@ -82,9 +82,9 @@ it reports invalid or colliding/occupied ports and missing Podman or Podman
 Compose prerequisites with actionable guidance. It does not execute external
 commands itself. Apply renders the files but does not invoke Preflight, Podman,
 Compose, socket probing, or health checks. Remaining Web/Database build
-contexts, Containerfiles, Mobile platform SDK/device verification, lifecycle
-tasks, and app-domain behavior remain deferred except for the generated Mobile
-source/platform assets and API source/Taskfile contract.
+contexts, Containerfiles, Mobile device/build execution, lifecycle tasks, and
+app-domain behavior remain deferred or host-unverified except for the generated
+Mobile source/test contract and API source/Taskfile contract.
 
 ## Planned generated manifest ownership
 
@@ -119,10 +119,12 @@ manifests and lockfiles deterministically and offline.
   `.3.5.1-.3`; Web `.3.2` and `.3.2.1-.3` remain P2/deferred. The lane starts
   independently from current `main`, does not wait for an API PR, and does not
   require Web, API, or Database. Mobile stays backend-independent initially;
-  typed API integration follows generated API/Database runtime work. Current
-  `smt apply` stages the Flutter CLI `.3.5.2` project; `.3.5.1` lockfile/lint
-  production and verification occur later after `pub get`; `.3.5.3`
-  verification remains deferred and unverified. The delivery
+typed API integration follows generated API/Database runtime work. Current
+`smt apply` stages the Flutter CLI `.3.5.2` project, then adds the `.3.5.3`
+stable app/config/unit/widget/native-integration contract. The `.3.5.1`
+lockfile/lint policy is produced after `pub get`; the opted-in `.3.5.3` lane
+passes Dart format, analyze, and unit/widget tests, while unavailable device
+and debug-build lanes remain explicitly unverified. The delivery
 route is `work_manager -> mobile_worker -> doc_writer`; the Mobile worker owns
 only assigned Flutter/Dart production code and focused tests and does not
 delegate.
@@ -236,15 +238,15 @@ runs this exact command in the staged child and preserves its CLI output:
 asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
 ```
 
-Flutter owns the generated app/source/test/platform baseline. Apply uses no
-static Android/iOS templates and performs no Go post-create app/source/test/
-analysis writes. `--no-pub` keeps Apply offline and prevents pub-get or package
-resolution. If the pinned toolchain is unavailable, the failure guidance is
+Flutter owns the generated platform baseline; the Mobile worker owns the
+stable app/config/unit/widget/native-integration contract. Apply uses no static
+Android/iOS templates. `--no-pub` keeps Apply offline and prevents pub-get or
+package resolution. If the pinned toolchain is unavailable, the failure guidance is
 `asdf install flutter 3.44.9-stable` followed by `asdf current flutter`, and
-the Apply remains atomic. Current evidence is asdf Flutter create, pub get, and
-analyze passing. Android SDK absence, incomplete Xcode, and missing CocoaPods
-leave device/build lanes unverified. `.3.5.3` (deferred/planned) covers runtime
-execution and verification; `.6.1.3` activates only after the Mobile rollup
+the Apply remains atomic. Current `.3.5.3` evidence is asdf Flutter create,
+pub get, Dart format, analyze, and unit/widget tests passing. Android SDK
+absence and the lack of a supported Android/iOS target leave integration and
+debug-build lanes unverified. `.6.1.3` activates only after the Mobile rollup
 closes and adds dependency, format, analyze, test, integration, Android debug,
 iOS debug, and aggregate `verify` tasks.
 
@@ -306,7 +308,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 | --- | --- | --- | --- | --- | --- |
 | Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, Task | child `build`, `run`, `test`, `coverage`, `mod`, `openapi`, `verify`; later durable format, vet, race, fuzz, vuln, migrations | `$godex:godex-go-backend` | gopls local; no Go MCP |
 | Next.js Web | `package.json`, `package-lock.json` | Node, Next.js, npm lockfile | Prettier, ESLint, TypeScript, Vitest/RTL, build, Playwright | React best practices; frontend testing/debugging | Browser for rendered/E2E |
-| Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` implemented: CLI-generated project | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` deferred/unverified: format, analyze, unit/widget, integration, debug builds; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
+| Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` implemented: format, analyze, unit/widget; integration/debug builds explicit unverified when targets/SDKs are unavailable; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
 | PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
 | Root/container | `compose.yaml`, `.env.example` | none for apply; Podman/Compose for deferred runtime | contract inspection; future smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | no runtime execution in `.3.1` |

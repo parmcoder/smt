@@ -522,9 +522,11 @@ capabilities above are declarations only. This release still provides no Web
 or Database runtime starters, component Containerfiles, platform repositories
 or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime,
 remote module registry, or `smt extend` command. Mobile `.3.5.2` is a Flutter
-CLI-generated Android/iOS starter, but platform SDK/device execution, signing,
-API integration, and store publication remain outside Apply; `.3.5.3`
-runtime and verification remain deferred. The
+CLI-generated Android/iOS starter, and `.3.5.3` adds the stable app/test
+contract plus the local verification lane. Platform SDK/device execution,
+signing, API integration, and store publication remain outside Apply; the
+host's unavailable Android/iOS targets and debug-build prerequisites are
+reported as explicit unverified lanes. The
 `.3.1` `compose.yaml` and `.env.example` are contract-only root artifacts,
 while the `.3.3.2` API source/OpenAPI assets are deterministic offline starter
 assets without packaging or lifecycle tasks. The static module catalog and

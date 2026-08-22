@@ -165,15 +165,18 @@ Flutter CLI `pubspec.yaml`, `analysis_options.yaml`, and project baseline; the
 `pubspec.lock` and pinned `flutter_lints 6.0.0` policy are produced and
 verified later by `mobile_worker` after `asdf exec flutter pub get`. Apply uses
 `--no-pub`, so it emits no lockfile and performs no package resolution. Apply
-preserves the CLI output; it does not use static Android/iOS templates or
-perform Go post-create app/source/test/analysis writes. `--no-pub` keeps Apply
-offline and package-resolution-free. If the pinned toolchain is unavailable,
+preserves the CLI platform output; the Mobile verification worker then adds
+the stable app, optional API config, unit/widget tests, native integration
+test, and SDK dependency declaration. It does not use static Android/iOS
+templates. `--no-pub` keeps Apply offline and package-resolution-free. If the
+pinned toolchain is unavailable,
 Apply fails atomically with `asdf install flutter 3.44.9-stable` and `asdf
 current flutter` guidance. The generated README then guides `asdf exec
 flutter pub get`, analysis, and Android Studio/emulator or full Xcode/iPhone
-setup. Current evidence is asdf Flutter create, pub get, and analyze passing;
-Android SDK absence, incomplete Xcode, and missing CocoaPods leave device/build
-lanes unverified. Mobile remains outside OCI Compose, and the current `.3.1`
+setup. Current `.3.5.3` evidence passes Dart format, pub get, Flutter analyze,
+and unit/widget tests; the host has no Android SDK or supported Android/iOS
+target, so integration execution and debug builds are explicitly unverified.
+Mobile remains outside OCI Compose, and the current `.3.1`
 Compose file is a declarative contract without component Containerfiles, so
 Compose is not required to launch the starter locally.
 

@@ -21,10 +21,10 @@ implemented: new blueprints select Web, optional Mobile, API, and Database,
 with DevOps-shaped configuration removed. Generated blueprints also carry the
 exact deterministic provenance contract in [[../../00-project/SMT - Implementation Spec#Configuration contract|the implementation specification]];
 `smt apply` validates it before mutation. Remaining Web/Database runnable
-module assets and Mobile runtime/verification remain planned work; the Mobile
-`.3.5.1/.3.5.2` contracts are implemented below. `.3.5.2` uses the local
-Flutter CLI to create the staged Android/iOS project; it does not use static
-platform templates or Go post-create app, source, test, or analysis writes.
+module assets remain planned work; the Mobile `.3.5.1/.3.5.2/.3.5.3`
+contracts are implemented below. `.3.5.2` uses the local Flutter CLI to create
+the staged Android/iOS project, and `.3.5.3` adds the stable app/test contract;
+it does not use static platform templates.
 `.3.3.2` now implements the generated API runtime and OpenAPI starter assets.
 The static schema-v1 module catalog and repository annotations are implemented
 metadata; `smt extend` is explicitly deferred.
@@ -139,25 +139,26 @@ iOS lanes explicitly.
   asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=android,ios --org=com.example.smt --project-name=smt_mobile --description="A provider-neutral SMT Flutter mobile starter." <staged-mobile-directory>
   ```
 
-  Flutter owns the staged app/source/test/platform output. There are no static
-  Android/iOS templates and no Go post-create app/source/test/analysis writes.
+  Flutter owns the staged platform output. There are no static Android/iOS
+  templates; the Mobile worker owns the post-create app/source/test/config
+  contract.
   If the pinned toolchain is unavailable, Apply reports
   `asdf install flutter 3.44.9-stable` and `asdf current flutter` guidance and
   fails atomically. Current evidence is asdf Flutter create, pub get, and
   analyze passing; Android SDK absence, incomplete Xcode, and missing CocoaPods
   leave device/build lanes unverified. Mobile remains backend-independent and
   outside OCI Compose.
-- **`.3.5.3` verification (deferred/planned)** — `dart format`,
-  `flutter analyze`, unit/widget tests, `integration_test`, Android debug
-  builds, and iOS debug builds with `--no-codesign` where supported remain
-  unverified. Unavailable Flutter/Dart/Android/iOS SDK or device lanes are
-  explicit results, never silently skipped.
+- **`.3.5.3` verification (implemented)** — the Mobile worker adds the stable
+  app/config/unit/widget/native-integration contract and verifies Dart format,
+  `flutter analyze`, and unit/widget tests. The host has no Android SDK or
+  supported Android/iOS target, so integration and debug-build lanes are
+  explicit unverified results, never silently skipped.
 - **`.6.1.3` Mobile Taskfile** — activates only after the Mobile rollup closes,
   with dependency, format, analyze, test, integration, Android debug, iOS
   debug, and aggregate `verify` tasks.
 
-`.3.5.1` and `.3.5.2` are implemented. Remaining Mobile work is `.3.5.3`
-verification; Mobile remains outside OCI Compose.
+`.3.5.1`, `.3.5.2`, and `.3.5.3` are implemented; unavailable Mobile device
+and debug-build lanes remain explicit gaps. Mobile remains outside OCI Compose.
 
 ## Implemented `.3.1` root runtime contract
 
@@ -348,9 +349,9 @@ gate; `.4` adds the selectable catalog and repository module annotations, `.5`
 adds the six non-selectable platform declarations plus catalog/config
 validation boundaries, `.3.1` adds the root runtime contract artifacts, and
 `.3.3.2` adds the generated API runtime/OpenAPI assets. Remaining design scope
-is the remaining P0 Mobile verification lane followed by the P2/deferred Web
-and remaining Database starter work, packaging, and Podman-first runtime
-implementation. Out of scope for the current CLI are Web/Mobile/Database
+now records the completed P0 Mobile verification contract, followed by the
+P2/deferred Web and remaining Database starter work, packaging, and Podman-first
+runtime implementation. Out of scope for the current CLI are Web/Mobile/Database
 Containerfiles, platform
 repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
 or ArgoCD deployment, OpenTofu execution, a remote module registry,
