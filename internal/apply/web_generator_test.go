@@ -279,7 +279,7 @@ fi
 mkdir -p "$destination/.git/nested" "$destination/generated/.git" "$destination/app"
 printf 'CLI Web output\n' > "$destination/README.md"
 printf '# CLI ignore\ncli-only.txt\n' > "$destination/.gitignore"
-printf '{"name":"CLI package"}\n' > "$destination/package.json"
+printf '{"name":"CLI package","dependencies":{"next":"16.2.9"},"scripts":{"dev":"next dev"}}\n' > "$destination/package.json"
 printf '{"name":"should not survive Apply"}\n' > "$destination/package-lock.json"
 printf 'created by Next.js CLI\n' > "$destination/generated/cli-owned.txt"
 printf 'CLI App Router output\n' > "$destination/app/page.tsx"

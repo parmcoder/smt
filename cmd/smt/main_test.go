@@ -1177,6 +1177,7 @@ else
   for arg in "$@"; do destination="$arg"; done
 fi
 mkdir -p "$destination"
+printf '{"name":"smt-web","dependencies":{"next":"16.2.9"},"scripts":{"dev":"next dev"}}\n' > "$destination/package.json"
 `
 	if err := os.WriteFile(filepath.Join(directory, "asdf"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
