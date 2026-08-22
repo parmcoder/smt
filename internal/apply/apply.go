@@ -211,7 +211,7 @@ func buildWorkspace(ctx context.Context, root, publishedRoot string, cfg config.
 		return err
 	}
 	cs := components(cfg)
-	if err := writeArtifacts(root, publishedRoot, cs); err != nil {
+	if err := writeArtifacts(root, publishedRoot, cfg, cs); err != nil {
 		return err
 	}
 	databaseSelected := false
@@ -548,7 +548,7 @@ func copyDirectory(source, destination string) error {
 	return nil
 }
 
-func writeArtifacts(root, publishedRoot string, cs []component) error {
+func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []component) error {
 	selection := runtime.Selection{}
 	for _, c := range cs {
 		switch c.id {
@@ -578,6 +578,11 @@ func writeArtifacts(root, publishedRoot string, cs []component) error {
 		"docs/README.md":                 "---\ntitle: Documentation Workspace\n---\n# Documentation Workspace\n\nUse [[00-project/Agentic Development Workflow]].\n",
 		"docs/00-project/Agentic Development Workflow.md": "---\ntitle: Agentic Development Workflow\n---\n# Agentic Development Workflow\n\nBeads is canonical state. Agents create tickets directly with `bd create`, inspect and claim them with `bd show` and `bd update --claim`, and close them with `bd close`. Use `bd ready` and `bd blocked` to inspect work. SMT does not wrap ticket creation or review queues.\n",
 	}
+	if mobileE2ESelected(cfg, cs) {
+		for relative, contents := range mobileE2EFiles() {
+			files[filepath.Join("e2e", "mobile", relative)] = contents
+		}
+	}
 	for _, c := range cs {
 		if c.id == "web" {
 			files["agents/web_worker.toml"] = webWorkerManifest()
@@ -596,6 +601,28 @@ func writeArtifacts(root, publishedRoot string, cs []component) error {
 		}
 	}
 	return writeLefthookConfig(root, root, root)
+}
+
+func mobileE2ESelected(cfg config.Config, cs []component) bool {
+	if len(cfg.Repositories) == 0 {
+		return false
+	}
+	declaration := false
+	for _, module := range cfg.Repositories[0].Modules {
+		if module == "e2e" {
+			declaration = true
+			break
+		}
+	}
+	if !declaration {
+		return false
+	}
+	for _, c := range cs {
+		if c.id == "mobile" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeLefthookConfig(destination, repositoryRoot, workspaceRoot string) error {
