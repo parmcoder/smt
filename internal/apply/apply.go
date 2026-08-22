@@ -581,14 +581,21 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		"docs/README.md":                 "---\ntitle: Documentation Workspace\n---\n# Documentation Workspace\n\nUse [[00-project/Agentic Development Workflow]].\n",
 		"docs/00-project/Agentic Development Workflow.md": "---\ntitle: Agentic Development Workflow\n---\n# Agentic Development Workflow\n\nBeads is canonical state. Agents create tickets directly with `bd create`, inspect and claim them with `bd show` and `bd update --claim`, and close them with `bd close`. Use `bd ready` and `bd blocked` to inspect work. SMT does not wrap ticket creation or review queues.\n",
 	}
-	if mobileE2ESelected(cfg, cs) {
+	webSelected := webE2ESelected(cfg, cs)
+	mobileSelected := mobileE2ESelected(cfg, cs)
+	if mobileSelected {
 		for relative, contents := range mobileE2EFiles() {
 			files[filepath.Join("e2e", "mobile", relative)] = contents
 		}
 	}
-	if webE2ESelected(cfg, cs) {
+	if webSelected {
 		for relative, contents := range webE2EFiles() {
 			files[filepath.Join("e2e", "web", relative)] = contents
+		}
+	}
+	if webSelected || mobileSelected {
+		for relative, contents := range e2eOrchestrationFiles(webSelected, mobileSelected) {
+			files[relative] = contents
 		}
 	}
 	for _, c := range cs {
@@ -725,7 +732,6 @@ asdf exec npm run lint
 asdf exec npm run typecheck
 asdf exec npm run test
 asdf exec npm run build
-asdf exec npm run test:e2e
 ~~~
 `
 	}

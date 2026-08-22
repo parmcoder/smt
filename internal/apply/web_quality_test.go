@@ -34,7 +34,6 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		"test":         "vitest run",
 		"build":        "next build",
 		"start":        "next start",
-		"test:e2e":     "playwright test",
 	}
 	for name, want := range wantScripts {
 		if packageJSON.Scripts[name] != want {
@@ -43,7 +42,6 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 	}
 
 	wantDependencies := map[string]string{
-		"@playwright/test":          "1.62.1",
 		"@testing-library/dom":      "10.4.1",
 		"@testing-library/jest-dom": "7.0.1",
 		"@testing-library/react":    "16.3.2",
@@ -63,11 +61,10 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 	files := map[string][]string{
 		"eslint.config.mjs":           {"core-web-vitals", "typescript", "globalIgnores", "eslint-config-prettier"},
 		".prettierrc.json":            {"printWidth"},
-		".prettierignore":             {"node_modules", ".next", "playwright-report"},
+		".prettierignore":             {"node_modules", ".next"},
 		"vitest.config.ts":            {"jsdom", "vite-tsconfig-paths", "setupFiles"},
 		"test/setup.ts":               {"@testing-library/jest-dom/vitest"},
 		"test/quality.smoke.test.tsx": {"render", "jsdom", "quality harness"},
-		"playwright.config.ts":        {"@playwright/test", "127.0.0.1:3000", "npm run start", "trace"},
 	}
 	for relative, markers := range files {
 		contents, err := os.ReadFile(filepath.Join(destination, "web-app", relative))
@@ -91,18 +88,64 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		"asdf exec npm run lint",
 		"asdf exec npm run typecheck",
 		"asdf exec npm run test",
-		"asdf exec npm run test:e2e",
 	} {
 		if !strings.Contains(string(readme), want) {
 			t.Errorf("README missing %q:\n%s", want, readme)
 		}
 	}
+	if strings.Contains(string(readme), "test:e2e") {
+		t.Fatalf("Web README still advertises package-local E2E:\n%s", readme)
+	}
 
-	if _, err := os.Stat(filepath.Join(destination, "web-app", "package-lock.json")); err != nil {
+	if _, ok := packageJSON.Scripts["test:e2e"]; ok {
+		t.Fatalf("Web package still declares package-local test:e2e: %#v", packageJSON.Scripts)
+	}
+	if _, ok := packageJSON.DevDependencies["@playwright/test"]; ok {
+		t.Fatalf("Web package still declares @playwright/test: %#v", packageJSON.DevDependencies)
+	}
+
+	lockfilePath := filepath.Join(destination, "web-app", "package-lock.json")
+	lockContents, err := os.ReadFile(lockfilePath)
+	if err != nil {
 		t.Fatalf("Apply did not emit package-lock.json: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(destination, "web-app", "e2e")); !os.IsNotExist(err) {
-		t.Fatalf("Apply emitted Web-local E2E specs: %v", err)
+	var lockfile struct {
+		Packages map[string]json.RawMessage `json:"packages"`
+	}
+	if err := json.Unmarshal(lockContents, &lockfile); err != nil {
+		t.Fatalf("decode generated package-lock.json: %v", err)
+	}
+	var rootPackage struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(lockfile.Packages[""], &rootPackage); err != nil {
+		t.Fatalf("decode generated package-lock root package: %v", err)
+	}
+	if _, ok := rootPackage.DevDependencies["@playwright/test"]; ok {
+		t.Fatalf("package-lock root still declares @playwright/test: %#v", rootPackage.DevDependencies)
+	}
+	for _, packagePath := range []string{
+		"node_modules/@playwright/test",
+		"node_modules/playwright",
+		"node_modules/playwright-core",
+	} {
+		if _, ok := lockfile.Packages[packagePath]; ok {
+			t.Fatalf("package-lock still contains removed package %q", packagePath)
+		}
+	}
+	for _, relative := range []string{"playwright.config.ts", "e2e"} {
+		if _, err := os.Lstat(filepath.Join(destination, "web-app", relative)); !os.IsNotExist(err) {
+			t.Fatalf("Apply emitted removed Web-local E2E artifact %s: %v", relative, err)
+		}
+	}
+	for _, relative := range []string{"eslint.config.mjs", ".prettierignore"} {
+		contents, err := os.ReadFile(filepath.Join(destination, "web-app", relative))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(contents), "playwright-report") || strings.Contains(string(contents), "test-results") {
+			t.Fatalf("Web quality file %s still ignores package-local Playwright output:\n%s", relative, contents)
+		}
 	}
 }
 
@@ -230,7 +273,6 @@ func webQualityGeneratedFiles() []string {
 		"vitest.config.ts",
 		"test/setup.ts",
 		"test/quality.smoke.test.tsx",
-		"playwright.config.ts",
 		"README.md",
 	}
 }

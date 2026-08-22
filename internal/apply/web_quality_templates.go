@@ -21,8 +21,6 @@ export default defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    "playwright-report/**",
-    "test-results/**",
   ]),
 ]);
 `
@@ -39,8 +37,6 @@ const webQualityPrettierIgnore = `node_modules/
 .next/
 out/
 build/
-playwright-report/
-test-results/
 coverage/
 next-env.d.ts
 AGENTS.md
@@ -76,35 +72,6 @@ describe("Web quality harness", () => {
 });
 `
 
-const webQualityPlaywrightConfig = `import { defineConfig, devices } from "@playwright/test";
-
-const baseURL = "http://127.0.0.1:3000";
-
-export default defineConfig({
-  testDir: "./e2e",
-  fullyParallel: true,
-  forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 2 : 0,
-  reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
-  use: {
-    baseURL,
-    trace: "on-first-retry",
-  },
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
-  ],
-  webServer: {
-    command: "npm run start",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000,
-    url: baseURL,
-  },
-});
-`
-
 var webQualityScripts = map[string]string{
 	"format:check": "prettier --check .",
 	"format:write": "prettier --write .",
@@ -113,11 +80,9 @@ var webQualityScripts = map[string]string{
 	"test":         "vitest run",
 	"build":        "next build",
 	"start":        "next start",
-	"test:e2e":     "playwright test",
 }
 
 var webQualityDevDependencies = map[string]string{
-	"@playwright/test":          "1.62.1",
 	"@testing-library/dom":      "10.4.1",
 	"@testing-library/jest-dom": "7.0.1",
 	"@testing-library/react":    "16.3.2",
@@ -137,7 +102,6 @@ func webQualityFiles() map[string]string {
 		"vitest.config.ts":                              webQualityVitestConfig,
 		filepath.Join("test", "setup.ts"):               webQualityTestSetup,
 		filepath.Join("test", "quality.smoke.test.tsx"): webQualitySmokeTest,
-		"playwright.config.ts":                          webQualityPlaywrightConfig,
 	}
 }
 

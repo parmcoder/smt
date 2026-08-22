@@ -243,8 +243,9 @@ and focused tests and requires `build-web-apps:react-best-practices` plus
 `asdf exec npm install` and `asdf exec npm run dev` locally. `.3.2.2/.3`
 remain deferred and own lockfile creation, `eslint . --max-warnings=0`,
 Prettier, `tsc --noEmit`, Vitest/React Testing Library, `next build`,
-Playwright, browser/runtime checks, and related quality evidence. No real Web
-runtime lane is claimed by `.3.2.1`.
+and related Web app quality evidence. Root `.14.4` owns Playwright/browser
+contract smoke; no package-local E2E harness is generated in `web-app`. No
+real Web runtime lane is claimed by `.3.2.1`.
 
 ## Flutter Mobile manifest and planned runnable lane
 
@@ -332,7 +333,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Component | Generated manifest/lockfile | Required local tools | Task gates | Required skills | Optional MCP/runtime |
 | --- | --- | --- | --- | --- | --- |
 | Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, Task | child `build`, `run`, `test`, `coverage`, `mod`, `openapi`, `verify`; later durable format, vet, race, fuzz, vuln, migrations | `$godex:godex-go-backend` | gopls local; no Go MCP |
-| Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `package-lock.json` after later `npm install` | Node.js 24.18.0, Next.js 16.2.9, npm | `.3.2.2/.3` deferred: lockfile, Prettier, ESLint, TypeScript, Vitest/RTL, build, Playwright, browser/runtime checks | React best practices; frontend testing/debugging | Browser for rendered/E2E |
+| Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `package-lock.json` after later `npm install` | Node.js 24.18.0, Next.js 16.2.9, npm | `.3.2.2/.3` deferred: lockfile, Prettier, ESLint, TypeScript, Vitest/RTL, build, and Web app quality checks | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` implemented: format, analyze, unit/widget; integration/debug builds explicit unverified when targets/SDKs are unavailable; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
 | PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
