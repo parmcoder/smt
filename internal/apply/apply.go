@@ -586,6 +586,11 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 			files[filepath.Join("e2e", "mobile", relative)] = contents
 		}
 	}
+	if webE2ESelected(cfg, cs) {
+		for relative, contents := range webE2EFiles() {
+			files[filepath.Join("e2e", "web", relative)] = contents
+		}
+	}
 	for _, c := range cs {
 		if c.id == "web" {
 			files["agents/web_worker.toml"] = webWorkerManifest()
@@ -607,21 +612,35 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 }
 
 func mobileE2ESelected(cfg config.Config, cs []component) bool {
-	if len(cfg.Repositories) == 0 {
-		return false
-	}
-	declaration := false
-	for _, module := range cfg.Repositories[0].Modules {
-		if module == "e2e" {
-			declaration = true
-			break
-		}
-	}
-	if !declaration {
+	if !e2eDeclared(cfg) {
 		return false
 	}
 	for _, c := range cs {
 		if c.id == "mobile" {
+			return true
+		}
+	}
+	return false
+}
+
+func webE2ESelected(cfg config.Config, cs []component) bool {
+	if !e2eDeclared(cfg) {
+		return false
+	}
+	for _, c := range cs {
+		if c.id == "web" {
+			return true
+		}
+	}
+	return false
+}
+
+func e2eDeclared(cfg config.Config) bool {
+	if len(cfg.Repositories) == 0 {
+		return false
+	}
+	for _, module := range cfg.Repositories[0].Modules {
+		if module == "e2e" {
 			return true
 		}
 	}
