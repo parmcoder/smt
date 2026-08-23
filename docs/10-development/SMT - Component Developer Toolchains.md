@@ -74,22 +74,37 @@ in safe lowercase-hyphen form, capped at 63 characters, with
 
 Web uses `/healthz`; API health/readiness use `/healthz` and `/readyz`; and
 Database uses `pg_isready`. Web-to-API and API-to-Database dependencies are
-conditional on `service_healthy`. `.env.example` is examples-only with an
-empty `DATABASE_PASSWORD=` and no generated credentials.
+conditional on `service_healthy`. `.env.example` is examples-only with a named
+`DATABASE_VOLUME` and the local-development `DATABASE_PASSWORD=smt-dev-password`
+value. Replace it outside disposable local use; no `.env` is generated.
 
 `runtime.Preflight` is a pure, injectable contract for future Taskfile/CLI use:
 it reports invalid or colliding/occupied ports and missing Podman or Podman
 Compose prerequisites with actionable guidance. It does not execute external
 commands itself. Apply renders the files but does not invoke Preflight, Podman,
-Compose, socket probing, or health checks. Remaining Web/Database build
-contexts, Containerfiles, Mobile device/build execution, lifecycle tasks, and
-app-domain behavior remain deferred or host-unverified except for the generated
-Mobile source/test contract and API source/Taskfile contract.
+Compose, socket probing, or health checks. Remaining Web build contexts and
+Containerfiles, Database migration/lifecycle work, Mobile device/build
+execution, and app-domain behavior remain deferred or host-unverified except
+for the generated Mobile source/test contract, API source/Taskfile contract,
+and Database runtime/readiness contract.
+
+## Implemented `.3.4.1` Database runtime
+
+When Database is selected, Apply emits `database/Containerfile` from the pinned
+PostgreSQL `18-alpine` image, `database/.env.example` with the local-development
+`POSTGRES_PASSWORD=smt-dev-password` example, and `database/Taskfile.yml`. Replace
+the example value outside disposable local use. The child Taskfile builds the
+image, runs it with a named persistent volume on localhost, checks readiness
+with `pg_isready`, and exposes fail-fast `psql`/`diagnose` and stop/verify
+commands. The generated child has no API source, application schema, or
+migration command; API-owned migrations and live lifecycle verification remain
+the `.3.4.2` and `.3.4.3` slices.
 
 ## Generated manifest ownership
 
-The Web `.3.2.1` initializer below is implemented; Database and future runtime
-manifests remain planned starter behavior. Mobile `.3.5.1` owns the reviewed
+The Web `.3.2.1` initializer below is implemented; Database `.3.4.1` owns the
+reviewed runtime/readiness assets and has no component manifest or lockfile.
+Mobile `.3.5.1` owns the reviewed
 Flutter base-manifest policy: the CLI creates `pubspec.yaml`,
 `analysis_options.yaml`, and the project baseline during Apply; `pubspec.lock`
 and the pinned lint policy are produced and verified later after `pub get`. The
@@ -335,15 +350,22 @@ regression suites remain application-owned follow-up work.
 
 ## PostgreSQL / Database
 
-Baseline: PostgreSQL 18. Planned gates use `pg_isready`, fail-fast `psql`,
-golang-migrate v4.19.1 up/version checks, API-owned migrations, and disposable
-Podman-backed integration tests. No automatic migration, down, drop, or force.
-Reuse Godex database guidance; no DB MCP is required for v0.1.0.
+Baseline: PostgreSQL 18. The implemented `.3.4.1` child uses `pg_isready`,
+fail-fast `psql`, examples-only environment placeholders, and a named Podman
+volume. `.3.4.2` owns golang-migrate v4.19.1 up/version checks and API-owned
+migrations; `.3.4.3` owns disposable Podman-backed lifecycle verification. No
+automatic migration, down, drop, or force. Reuse Godex database guidance; no DB
+MCP is required for v0.1.0.
 
 ## Container / root workspace
 
 The generated API child Taskfile and API `Containerfile` are implemented above.
-The future root Taskfile will orchestrate component gates, data-service
+For any Web, API, or Database selection, Apply now emits a root Taskfile with
+`compose:config`, `compose:build`, `compose:up`, `compose:down`, and
+`compose:ps`. Each command passes the operator-managed root `.env` explicitly
+with `podman compose --env-file .env -f compose.yaml ...`; missing `.env` and,
+for Database, an empty `DATABASE_PASSWORD` fail before Compose starts. The
+broader root taskfile will later orchestrate component gates, data-service
 migration/readiness tasks, and Beads-aware aggregate verification; root task
 aggregation is `.6.1.2` and later.
 Podman/Compose smoke tests cover build, start, health/readiness, shutdown, and
@@ -358,8 +380,8 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `package-lock.json` after later `npm install` | Node.js 24.18.0, Next.js 16.2.9, npm | `.3.2.2/.3` deferred: lockfile, Prettier, ESLint, TypeScript, Vitest/RTL, build, and Web app quality checks | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` implemented: format, analyze, unit/widget; integration/debug builds explicit unverified when targets/SDKs are unavailable; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
-| PostgreSQL | None | PostgreSQL, psql, pg_isready, migrate, Podman | readiness, migration up/version, disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
-| Root/container | `compose.yaml`, `.env.example` | none for apply; Podman/Compose for deferred runtime | contract inspection; future smoke lifecycle, non-root, security, aggregate verify | project workflow guidance | no runtime execution in `.3.1` |
+| PostgreSQL | None; `.3.4.1` `Containerfile`, `.env.example`, and `Taskfile.yml` | PostgreSQL, psql, pg_isready, Podman | `.3.4.1` build/run/readiness/diagnose/verify; `.3.4.2` migration up/version; `.3.4.3` disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
+| Root/container | `compose.yaml`, `.env.example`, root `Taskfile.yml` for OCI selections | none for Apply; Podman/Compose for local lifecycle | explicit root `.env` Compose config/build/up/down/ps; broader smoke, non-root, security, and aggregate verify remain later | project workflow guidance | Podman/Compose runtime is operator-run |
 
 ## Research sources
 

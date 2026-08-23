@@ -80,8 +80,9 @@ non-generated version-1 configuration without provenance remains usable for
 lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
-release does not provide a Database runtime starter; `.3.2.1` provides the
-CLI-owned Web baseline and `.3.2.2/.3` provide Web quality/runtime tooling.
+Database `.3.4.1` provides the independent PostgreSQL runtime/readiness child;
+`.3.2.1` provides the CLI-owned Web baseline and `.3.2.2/.3` provide Web
+quality/runtime tooling.
 Mobile `.3.5.3` verification, platform repositories/scaffolds/runtime
 artifacts, Podman or Compose execution, a remote module registry, or
 `smt extend`; `.3.3.2` adds deterministic API source/OpenAPI assets and `.3.3.4`
@@ -212,13 +213,52 @@ basename, capped at 63 characters, with `smt-workspace` fallback.
 
 Web probes `/healthz`; API probes `/healthz` and `/readyz`; Database probes with
 `pg_isready`. Web-to-API and API-to-Database dependencies are conditional and
-use `service_healthy`. `.env.example` contains examples only and leaves
-`DATABASE_PASSWORD=` empty; no credentials or `.env` file are generated.
+use `service_healthy`. `.env.example` contains examples only, including the
+named `DATABASE_VOLUME` value and the local-development
+`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable
+local use; no `.env` file is generated.
+
+When Web, API, or Database is selected, Apply also emits the root Compose
+Taskfile entrypoints `compose:config`, `compose:build`, `compose:up`,
+`compose:down`, and `compose:ps`. These commands pass the root environment
+explicitly with `podman compose --env-file .env -f compose.yaml ...`; they do
+not rely on implicit Compose discovery. Initialize the operator-owned file
+before starting a Database workspace:
+
+```sh
+cp .env.example .env
+# review or replace DATABASE_PASSWORD, then run
+task compose:config
+task compose:build
+task compose:up
+```
+
+If the root `.env` is missing, the generated task fails before invoking Podman
+with copy/set guidance. Apply continues to generate only `.env.example`; no
+credential or `.env` file is created.
 
 The pure preflight API has actionable invalid-port, selected-port collision,
 occupied-port, missing-Podman, and missing-Podman-Compose errors for future
 Taskfile/CLI consumers. `smt apply` does not invoke that preflight, Podman,
 Compose, socket probing, or health checks.
+
+### Inspect the generated Database runtime
+
+When Database is selected, inspect its static runtime contract without starting
+Podman:
+
+```sh
+sed -n '1,220p' ../platform/database/Containerfile
+cat ../platform/database/.env.example
+sed -n '1,260p' ../platform/database/Taskfile.yml
+```
+
+The child uses PostgreSQL `18-alpine`, a named volume, `pg_isready` health and
+readiness checks, and fail-fast `psql` diagnostics. Copy `.env.example` to a
+local `.env`, review or replace the `POSTGRES_PASSWORD=smt-dev-password`
+example before `task run`; no `.env` is generated or committed. The child contains no application schema or migration
+commands. Apply writes these files only; Podman, PostgreSQL, and Task remain
+operator-run checks owned by the later Database lifecycle task.
 
 ### Inspect generated API manifests
 

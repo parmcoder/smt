@@ -126,8 +126,9 @@ current checkout, the asdf Flutter create, pub get, and analyze checks pass.
 The generated verification lane runs Dart format, Flutter analyze, and unit/widget
 tests after `pub get`. The current host has no Android SDK or supported Android/iOS
 target, so integration execution and Android/iOS debug builds are explicitly
-unverified. Mobile does not require local Compose to launch, while
-Compose/runtime Containerfiles remain later work.
+unverified. Mobile does not require local Compose to launch. The generated
+Database child now includes its PostgreSQL Containerfile and readiness
+Taskfile; Web runtime assets and root lifecycle orchestration remain later work.
 
 ## Planned local E2E workflow
 

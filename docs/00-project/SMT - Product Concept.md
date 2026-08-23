@@ -146,8 +146,9 @@ back to `smt-workspace`.
 Web probes `/healthz`; API health/readiness are `/healthz` and `/readyz`; and
 Database health uses `pg_isready`. Web depends conditionally on a healthy API,
 and API depends conditionally on a healthy Database. `.env.example` contains
-examples only with an empty `DATABASE_PASSWORD=`; no credentials or `.env`
-file is generated. The pure preflight API reports invalid or occupied ports
+examples only with a named `DATABASE_VOLUME` and the local-development
+`DATABASE_PASSWORD=smt-dev-password` value; replace it outside disposable
+local use. No `.env` file is generated. The pure preflight API reports invalid or occupied ports
 and missing Podman/Podman Compose prerequisites through injectable checks, but
 the static root Apply path remains offline and does not invoke Preflight,
 Podman, Compose, socket probing, or health checks. Selected Web Apply is the
@@ -207,10 +208,11 @@ resolution.
 After Apply, the local Web workflow is `asdf exec npm install` followed by
 `asdf exec npm run dev` from `web-app/`. The later `.3.2.2/.3` Web worker lanes
 own npm lockfile creation, quality, browser, and runtime checks; `.3.2.1`
-does not claim real npm or runtime evidence. Future Web/Database build
-contexts, Containerfiles, lifecycle tasks, broader Mobile API integration,
+does not claim real npm or runtime evidence. Future Web build contexts and
+Containerfiles, Database lifecycle tasks, broader Mobile API integration,
 platform runtime work, a remote module registry, and `smt extend` remain
-deferred; `.3.1` adds no app-domain behavior.
+deferred. Database `.3.4.1` now provides its independent PostgreSQL runtime
+and readiness assets; `.3.1` adds no app-domain behavior.
 
 The implemented `.3.3.1` API manifest slice adds static `go.mod` and `go.sum`
 only to selected API child repositories. They use module

@@ -52,10 +52,17 @@ func TestE2EOrchestrationApplyPreservesMetadataOnlyAndNonE2EBehavior(t *testing.
 			tt.install(t)
 			destination := filepath.Join(t.TempDir(), "workspace")
 			applyWorkspace(t, destination, tt.raw)
-			for _, relative := range coordinatorGeneratedFiles() {
+			for _, relative := range coordinatorSupportFiles() {
 				if _, err := os.Stat(filepath.Join(destination, relative)); !os.IsNotExist(err) {
 					t.Fatalf("unexpected coordinator artifact %s: %v", relative, err)
 				}
+			}
+			if tt.name == "without e2e" {
+				if _, err := os.Stat(filepath.Join(destination, "Taskfile.yml")); err != nil {
+					t.Fatalf("OCI workspace is missing its root Compose Taskfile: %v", err)
+				}
+			} else if _, err := os.Stat(filepath.Join(destination, "Taskfile.yml")); !os.IsNotExist(err) {
+				t.Fatalf("metadata-only e2e workspace unexpectedly has a root Taskfile: %v", err)
 			}
 		})
 	}
@@ -326,6 +333,10 @@ func assertPathExists(path string) error {
 
 func coordinatorGeneratedFiles() []string {
 	return []string{"Taskfile.yml", filepath.Join("e2e", "README.md"), filepath.Join("e2e", ".gitignore")}
+}
+
+func coordinatorSupportFiles() []string {
+	return []string{filepath.Join("e2e", "README.md"), filepath.Join("e2e", ".gitignore")}
 }
 
 func fullE2EBlueprintBytes() []byte {

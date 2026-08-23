@@ -55,6 +55,8 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 		"${WEB_PORT:-3100}:3000",
 		"${API_PORT:-8181}:8080",
 		"${DATABASE_PORT:-55432}:5432",
+		"database-data:/var/lib/postgresql",
+		"name: \"${DATABASE_VOLUME:-smt-postgres-data}\"",
 		"/healthz",
 		"/readyz",
 		"pg_isready -h database",
@@ -62,6 +64,7 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 		"./web-app",
 		"./apis",
 		"./database",
+		"dockerfile: Containerfile",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("compose missing %q:\n%s", want, compose)
@@ -70,8 +73,8 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 	if strings.Index(compose, "  web:") > strings.Index(compose, "  api:") || strings.Index(compose, "  api:") > strings.Index(compose, "  database:") {
 		t.Fatalf("compose services are not ordered web, api, database:\n%s", compose)
 	}
-	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=\n") {
-		t.Fatalf("env example must contain only an empty password example:\n%s", artifacts.EnvExample)
+	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_VOLUME=smt-postgres-data\n") || !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=smt-dev-password\n") {
+		t.Fatalf("env example must contain the local development password example:\n%s", artifacts.EnvExample)
 	}
 	if strings.Contains(compose, "secret") || strings.Contains(compose, "token") || strings.Contains(compose, "password: ") {
 		t.Fatalf("compose contains a credential-like value:\n%s", compose)

@@ -349,6 +349,10 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		if err := writeAPISourceFiles(bootstrap, databaseSelected); err != nil {
 			return plumbing.ZeroHash, err
 		}
+	} else if c.id == "database" {
+		if err := writeDatabaseRuntimeFiles(bootstrap); err != nil {
+			return plumbing.ZeroHash, err
+		}
 	}
 	wt, err := repo.Worktree()
 	if err != nil {
@@ -574,7 +578,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		".gitignore":                     "**/.DS_Store\n**/Thumbs.db\n**/desktop.ini\n\n.smt/\n.env\n",
 		"compose.yaml":                   string(runtimeArtifacts.Compose),
 		".env.example":                   string(runtimeArtifacts.EnvExample),
-		"README.md":                      "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n\nBeads configuration is tracked with the workspace; its embedded Dolt database and local runtime files stay on this machine and are ignored by Git.\n",
+		"README.md":                      rootReadme(len(selection.ServiceIDs()) > 0),
 		".tool-versions":                 toolVersions(cs),
 		"AGENTS.md":                      "# Project Agent Operating Agreement\n\nGo work uses `$godex:godex-go-backend`. Beads (`bd`) is the canonical task and issue state. Agents create tickets directly with `bd create`; the `work_manager` owns delivery decisions.\n\nWorkflow: `bd create -> worker -> tests -> manager review -> durable handoff/docs -> validation`. SMT does not wrap ticket creation, review queues, ready-work listing, or release readiness.\n\nOn the default branch, use ordinary `type(scope): summary` commits. On a Beads-ID branch, commits must use `type(scope): [BEAD-ID] summary`, with the ID exactly matching the branch.\n",
 		"agents/work_manager.toml":       "name = \"work_manager\"\nmodel_reasoning_effort = \"high\"\n\n# Prepared workspace contract\n# Web delivery route: work_manager -> web_worker -> doc_writer.\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",
@@ -583,6 +587,9 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		"prompts/build.md":               "# Build workflow\n\nCreate and manage tickets directly with Beads before editing code:\n\n`bd prime`\n`bd create --title=\"Short task title\" --description=\"Why this exists and what needs to be done\" --type=task --priority=2`\n`bd show <id>`\n`bd update <id> --claim`\n`bd ready`\n`bd blocked`\n`bd close <id> --reason=\"Completed\"`\n\nSMT does not wrap ticket creation, review queues, ready-work listing, or release readiness.\n\nOn the default branch use `type(scope): summary`; on a Beads-ID branch use `type(scope): [BEAD-ID] summary` with the ID exactly matching the branch.\n",
 		"docs/README.md":                 "---\ntitle: Documentation Workspace\n---\n# Documentation Workspace\n\nUse [[00-project/Agentic Development Workflow]].\n",
 		"docs/00-project/Agentic Development Workflow.md": "---\ntitle: Agentic Development Workflow\n---\n# Agentic Development Workflow\n\nBeads is canonical state. Agents create tickets directly with `bd create`, inspect and claim them with `bd show` and `bd update --claim`, and close them with `bd close`. Use `bd ready` and `bd blocked` to inspect work. SMT does not wrap ticket creation or review queues.\n",
+	}
+	if len(selection.ServiceIDs()) > 0 {
+		files["Taskfile.yml"] = rootComposeTaskfile(selection.Database)
 	}
 	webSelected := webE2ESelected(cfg, cs)
 	mobileSelected := mobileE2ESelected(cfg, cs)
@@ -597,7 +604,11 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		}
 	}
 	if webSelected || mobileSelected {
-		for relative, contents := range e2eOrchestrationFiles(webSelected, mobileSelected) {
+		e2eFiles := e2eOrchestrationFiles(webSelected, mobileSelected)
+		if _, ok := files["Taskfile.yml"]; ok {
+			e2eFiles["Taskfile.yml"] = addRootComposeTasks(e2eFiles["Taskfile.yml"], selection.Database)
+		}
+		for relative, contents := range e2eFiles {
 			files[relative] = contents
 		}
 	}

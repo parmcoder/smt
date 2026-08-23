@@ -388,19 +388,21 @@ and `DATABASE_PORT`; zero uses the reviewed default and a non-zero override
 must be a TCP port from 1 through 65535. The Compose project name is derived
 only from the destination basename: lowercase, safe hyphen form, capped at 63
 characters, with `smt-workspace` as the fallback. The same values appear in
-`.env.example`, which contains examples only and an empty
-`DATABASE_PASSWORD=`. Its declarative examples include `COMPOSE_PROJECT_NAME`,
-the three port overrides, `API_BASE_URL`, `DATABASE_HOST`, `DATABASE_NAME`, and
-`DATABASE_USER`; no credentials or `.env` file is generated.
+`.env.example`, which contains examples only and the local-development
+`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable local
+use. Its declarative examples include `COMPOSE_PROJECT_NAME`,
+the three port overrides, `DATABASE_VOLUME`, `API_BASE_URL`, `DATABASE_HOST`,
+`DATABASE_NAME`, and `DATABASE_USER`; no production or secret credentials or
+`.env` file is generated.
 
 Web's contract probes `/healthz`. API health/readiness are `/healthz` and
 `/readyz`, and Database health uses `pg_isready`. When both services are
 selected, Web depends on API with `condition: service_healthy`; when API and
 Database are selected, API depends on Database with the same condition. The
 generated `.3.1` contract may reference component build contexts at
-`./web-app`, `./apis`, and `./database`, but `.3.1` does not generate their
-Containerfiles or add application-domain behavior; later component work owns
-those build and runtime assets.
+`./web-app`, `./apis`, and `./database`. `.3.1` does not generate Web/API
+Containerfiles or add application-domain behavior; Database `.3.4.1` now owns
+the independent PostgreSQL Containerfile, Taskfile, and readiness assets.
 
 The pure `runtime.Preflight` API validates override ranges and selected-port
 collisions, can report occupied ports through an injected port check, and can
@@ -412,11 +414,14 @@ report missing Podman or Podman Compose through injected prerequisite checks.
  registry-access exception; for selected Mobile, it invokes only the staged
  local Flutter `create --empty --no-pub` command above. It does not invoke
  Preflight, Podman, Compose, socket probing, runtime health checks, `npm
- install`, `flutter pub get`, or package resolution. Remaining Web dependency,
- quality, browser, and runtime lanes, Database build contexts, Containerfiles,
- Mobile platform SDK/device verification, and component lifecycle tasks remain
- later work. Root and Database task
- aggregation belongs to `smt-4xf.6.1.2` and later.
+install`, `flutter pub get`, or package resolution. OCI-selected workspaces also
+receive root Compose Taskfile entrypoints that pass the operator-managed root
+`.env` explicitly and fail early when it is missing (or when a selected
+Database has no password). Remaining Web dependency, quality, browser, and
+runtime lanes, Database migration/lifecycle verification, Mobile platform
+SDK/device verification, and component lifecycle tasks remain later work. The
+broader root and Database task aggregation belongs to `smt-4xf.6.1.2` and
+later.
 
 ### Implemented `.3.3.1` API module manifests
 
@@ -561,8 +566,9 @@ implemented by the CLI or this release:
 The broader runnable-starter and platform work is planned, not implemented:
 the five layers remain in this repository initially, and the six platform
 capabilities above are declarations only. This release still provides no Web
-or Database runtime starters, component Containerfiles, platform repositories
-or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime,
+runtime starter or Web component Containerfile, while Database `.3.4.1`
+provides its independent PostgreSQL runtime/readiness starter. Platform
+repositories or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime,
 remote module registry, or `smt extend` command. Web `.3.2.1` is the implemented
 CLI-owned Next.js baseline; its dependency lockfile, quality, browser, and
 runtime lanes remain `.3.2.2/.3` work. Mobile `.3.5.2` is a Flutter

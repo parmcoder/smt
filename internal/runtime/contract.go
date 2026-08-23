@@ -13,9 +13,10 @@ const (
 	ServiceAPI      = "api"
 	ServiceDatabase = "database"
 
-	defaultWebPort      = 3000
-	defaultAPIPort      = 8080
-	defaultDatabasePort = 5432
+	defaultWebPort          = 3000
+	defaultAPIPort          = 8080
+	defaultDatabasePort     = 5432
+	defaultDatabasePassword = "smt-dev-password"
 )
 
 // Selection identifies the OCI services included in a generated workspace.
@@ -172,7 +173,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 	b.WriteString("services:\n")
 	if selection.Web {
 		b.WriteString("  web:\n")
-		b.WriteString("    build:\n      context: ./web-app\n")
+		b.WriteString("    build:\n      context: ./web-app\n      dockerfile: Containerfile\n")
 		fmt.Fprintf(&b, "    ports:\n      - \"${WEB_PORT:-%d}:3000\"\n", ports.web)
 		if selection.API {
 			b.WriteString("    environment:\n      API_BASE_URL: \"${API_BASE_URL:-http://api:8080}\"\n")
@@ -184,7 +185,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 	}
 	if selection.API {
 		b.WriteString("  api:\n")
-		b.WriteString("    build:\n      context: ./apis\n")
+		b.WriteString("    build:\n      context: ./apis\n      dockerfile: Containerfile\n")
 		fmt.Fprintf(&b, "    ports:\n      - \"${API_PORT:-%d}:8080\"\n", ports.api)
 		if selection.Database {
 			b.WriteString("    environment:\n      DATABASE_HOST: database\n      DATABASE_PORT: \"5432\"\n      DATABASE_NAME: smt\n      DATABASE_USER: smt\n      DATABASE_PASSWORD: \"${DATABASE_PASSWORD:-}\"\n")
@@ -196,16 +197,20 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 	}
 	if selection.Database {
 		b.WriteString("  database:\n")
-		b.WriteString("    build:\n      context: ./database\n")
+		b.WriteString("    build:\n      context: ./database\n      dockerfile: Containerfile\n")
 		fmt.Fprintf(&b, "    ports:\n      - \"${DATABASE_PORT:-%d}:5432\"\n", ports.database)
 		b.WriteString("    environment:\n      POSTGRES_DB: smt\n      POSTGRES_USER: smt\n      POSTGRES_PASSWORD: \"${DATABASE_PASSWORD:-}\"\n")
+		b.WriteString("    volumes:\n      - database-data:/var/lib/postgresql\n")
 		b.WriteString("    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -h database -U smt -d smt\"]\n      interval: 5s\n      timeout: 5s\n      retries: 10\n")
+	}
+	if selection.Database {
+		b.WriteString("\nvolumes:\n  database-data:\n    name: \"${DATABASE_VOLUME:-smt-postgres-data}\"\n")
 	}
 	return b.String()
 }
 
 func renderEnvExample(project string, ports resolvedPorts) string {
-	return fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nAPI_BASE_URL=http://api:8080\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=\n", project, ports.web, ports.api, ports.database)
+	return fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nDATABASE_VOLUME=smt-postgres-data\nAPI_BASE_URL=http://api:8080\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=%s\n", project, ports.web, ports.api, ports.database, defaultDatabasePassword)
 }
 
 // PreflightOptions provides injectable checks for future Taskfile/CLI use.

@@ -106,12 +106,15 @@ CRUD or domain behavior. Workspace creation remains deterministic; blueprint,
 static, and non-Web paths are offline. Selected Web `.3.2.1` uses the pinned
 `npx create-next-app` exception and may access the npm registry, but it still
 performs no installation or dependency resolution. Runtime tools are used only
-by later verification. `.3.1` emits the
-contract-only root `compose.yaml` and `.env.example`; `.3.2.1` uses the local
+by later verification. `.3.1` emits the root `compose.yaml`, `.env.example`,
+and, when an OCI service is selected, a root Taskfile whose Compose commands
+pass the operator-managed `.env` explicitly; `.3.2.1` uses the local
 Next.js CLI for the Web baseline; `.3.3.2` emits the API source/OpenAPI starter
-assets; and `.3.5.2` emits the Mobile source/platform assets. Web dependency,
-quality, browser, and runtime work, Database templates, Containerfiles,
-packaging, and Podman/Compose execution remain outside this contract.
+assets; `.3.4.1` emits the independent Database runtime/readiness assets; and
+`.3.5.2` emits the Mobile source/platform assets. Web dependency, quality,
+browser, and runtime work, remaining Containerfiles, packaging, and broader
+Podman/Compose lifecycle verification remain outside this contract. The root
+Taskfile entrypoints are operator-run and do not create `.env` or credentials.
 
 Platform capabilities are decomposed into `container`, `cicd`,
 `observability`, `iac`, `k8s`, and `argocd`; the `.5` catalog implements these
@@ -216,8 +219,10 @@ Default host bindings are Web `3000:3000`, API `8080:8080`, and Database
 `5432:5432`, with canonical `WEB_PORT`, `API_PORT`, and `DATABASE_PORT`
 overrides. The Compose project name is the normalized destination basename in
 safe lowercase-hyphen form, capped at 63 characters, with
-`smt-workspace` fallback. `.env.example` contains examples only, including an
-empty `DATABASE_PASSWORD=`; no credentials or `.env` file is generated.
+`smt-workspace` fallback. `.env.example` contains examples only, including the
+`DATABASE_VOLUME` name and the local-development
+`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable local
+use; no `.env` file is generated.
 
 Web probes `/healthz`; API health/readiness are `/healthz` and `/readyz`; and
 Database health uses `pg_isready`. Web-to-API and API-to-Database dependencies
@@ -228,10 +233,29 @@ selected-port collision, occupied-port, missing-Podman, and missing Podman
 Compose errors through injectable checks for later Taskfile/CLI use. It does
 not execute external commands itself. `smt apply` renders the contract files
 offline and does not invoke Preflight, Podman, Compose, socket probing, or
-health checks. Remaining Web/Database build contexts, Containerfiles, Mobile
-platform SDK/device verification, lifecycle tasks, and application-domain
-behavior remain deferred; `.3.3.2` owns the generated API source/Taskfile
-contract and `.3.5.2` owns the generated Mobile source/platform assets.
+health checks. Remaining Web build contexts and Containerfiles, Database
+migration and lifecycle work, Mobile platform SDK/device verification, and
+application-domain behavior remain deferred. `.3.3.2` owns the generated API
+source/Taskfile contract, `.3.4.1` owns the independent Database
+Containerfile/Taskfile/readiness contract, and `.3.5.2` owns the generated
+Mobile source/platform assets.
+
+## Implemented `.3.4.1` PostgreSQL runtime and readiness contract
+
+When Database is selected, Apply writes a deterministic child repository with
+a PostgreSQL `18-alpine` Containerfile, examples-only environment placeholders,
+a named-volume declaration, and a Taskfile for `build`, `run`, `ready`, `psql`,
+`diagnose`, `stop`, and `verify`. The image health check and the `ready` task
+use `pg_isready`; the fail-fast `psql` task runs a `SELECT 1` with
+`ON_ERROR_STOP=1` and preserves command output on failure.
+
+The generated Database child contains no API source, application schema, or
+migration commands. `run` requires an operator-provided local
+`POSTGRES_PASSWORD`, binds PostgreSQL to localhost, and uses the configured
+named Podman volume so stop/restart does not discard local data. Apply remains
+offline and does not invoke Podman, Task, PostgreSQL, or any runtime check;
+`.3.4.2` owns API migrations and `.3.4.3` owns live Database/API lifecycle
+verification.
 
 ## Implemented `.3.3.1` API manifest contract
 
@@ -373,9 +397,10 @@ browser/device lanes explicitly. Apply still does not install dependencies,
 browsers, SDKs, devices, credentials, or remote CI. The `.5` slice retains its
 platform/runtime boundaries, and `smt extend` remains deferred.
 
-Remaining Web dependency lockfile, quality, browser, and runtime assets and
-Database component manifests/lockfiles are deferred runnable-starter assets;
-Mobile `.3.5.1` lockfile/lint production and
+Remaining Web dependency lockfile, quality, browser, and runtime assets are
+deferred runnable-starter work. Database has no component manifests or
+lockfiles; its `.3.4.1` runtime and readiness assets are implemented. Mobile
+`.3.5.1` lockfile/lint production and
 verification occur after `pub get`, while `.3.5.2` is the implemented Flutter
 CLI project/source/platform baseline.
 Skills and MCP integrations remain distinct metadata and prerequisite
@@ -393,15 +418,15 @@ The accepted `.2` scope is the starter component taxonomy and configuration
 gate; `.4` adds the selectable catalog and repository module annotations, `.5`
 adds the six non-selectable platform declarations plus catalog/config
 validation boundaries, `.3.1` adds the root runtime contract artifacts,
-`.3.2.1` adds the staged CLI-owned Web baseline, and `.3.3.2` adds the
-generated API runtime/OpenAPI assets. Remaining design scope records the
-completed P0 Mobile verification contract, followed by deferred Web
-`.3.2.2/.3`, remaining Database starter work, packaging, and Podman-first
-runtime implementation. Mobile integration/device/build lanes remain explicit
+`.3.2.1` adds the staged CLI-owned Web baseline, `.3.3.2` adds the generated
+API runtime/OpenAPI assets, and `.3.4.1` adds the independent Database runtime
+and readiness assets. Remaining design scope records the completed P0 Mobile
+verification contract, followed by deferred Web `.3.2.2/.3`, API-owned
+migrations, Database/API lifecycle verification, packaging, and Podman-first
+runtime execution. Mobile integration/device/build lanes remain explicit
 unverified where the host lacks the required SDK or target. Out of scope for
-the current CLI are Web/Mobile/Database
-Containerfiles, platform
-repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
+the current CLI are Web/Mobile runtime execution, platform Containerfiles,
+platform repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
 or ArgoCD deployment, OpenTofu execution, a remote module registry,
 implementing `smt extend`, provider/cloud creation, fake CRUD, and AWS runtime
 selection.
