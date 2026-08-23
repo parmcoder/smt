@@ -44,6 +44,9 @@ func TestApplyGeneratesAPIStarterOnlyForAPISelection(t *testing.T) {
 			for _, relative := range []string{
 				"main.go",
 				"internal/server/server.go",
+				"internal/server/server_test.go",
+				"internal/server/config_test.go",
+				"internal/server/server_fuzz_test.go",
 				"cmd/openapi/main.go",
 				".env.example",
 				"openapi.yaml",
@@ -178,11 +181,12 @@ func TestApplyAPIOutputIsByteStableAcrossFreshDestinations(t *testing.T) {
 
 func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 	tests := map[string]struct {
-		raw     []byte
-		wantAPI bool
+		raw      []byte
+		wantAPI  bool
+		database bool
 	}{
 		"api-only":     {raw: apiBlueprintBytes(), wantAPI: true},
-		"api-database": {raw: fullMobileBlueprintBytes(), wantAPI: true},
+		"api-database": {raw: fullMobileBlueprintBytes(), wantAPI: true, database: true},
 		"without-api":  {raw: blueprintBytes()},
 	}
 	for name, tt := range tests {
@@ -196,7 +200,11 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				return
 			}
 			taskfile := readGeneratedAPIFile(t, filepath.Join(destination, "apis"), "Taskfile.yml")
-			wantTasks := []string{"build", "run", "test", "coverage", "mod", "openapi", "verify"}
+			wantTasks := []string{"build", "run", "test", "coverage", "test:race", "test:fuzz", "mod", "openapi"}
+			if tt.database {
+				wantTasks = append(wantTasks, "test:integration")
+			}
+			wantTasks = append(wantTasks, "verify")
 			if got := taskfileTaskNames(taskfile); strings.Join(got, ",") != strings.Join(wantTasks, ",") {
 				t.Fatalf("Taskfile tasks=%v, want %v:\n%s", got, wantTasks, taskfile)
 			}
@@ -213,6 +221,16 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 			} {
 				if !strings.Contains(taskfile, want) {
 					t.Fatalf("Taskfile missing %q:\n%s", want, taskfile)
+				}
+			}
+			if tt.database {
+				for _, want := range []string{
+					"test:integration:\n    preconditions:\n      - sh: test -n \"$$DATABASE_URL\"",
+					"go test -tags=integration ./...",
+				} {
+					if !strings.Contains(taskfile, want) {
+						t.Fatalf("API+Database Taskfile missing %q:\n%s", want, taskfile)
+					}
 				}
 			}
 			verify := taskfileTaskBlock(taskfile, "verify")
