@@ -99,9 +99,9 @@ type statusOutput struct {
 type emptyInput struct{}
 
 type requestMetrics struct {
-	requests  *prometheus.CounterVec
-	duration  *prometheus.HistogramVec
-	inflight  *prometheus.GaugeVec
+	requests *prometheus.CounterVec
+	duration *prometheus.HistogramVec
+	inflight *prometheus.GaugeVec
 }
 
 func newRequestMetrics(reg prometheus.Registerer) *requestMetrics {
@@ -258,7 +258,7 @@ func New(logger *slog.Logger) *Application {
 	huma.Get(api, "/healthz", func(context.Context, *emptyInput) (*statusOutput, error) {
 		return &statusOutput{Status: http.StatusOK, Body: statusBody{Status: "ok"}}, nil
 	})
-		huma.Get(api, "/readyz", func(context.Context, *emptyInput) (*statusOutput, error) {
+	huma.Get(api, "/readyz", func(context.Context, *emptyInput) (*statusOutput, error) {
 		status := "not_ready"
 		code := http.StatusServiceUnavailable
 		if readiness.Ready() {
@@ -396,16 +396,83 @@ tasks:
   test:fuzz:
     cmds:
       - go test -run=^$ -fuzz=FuzzValidRequestID -fuzztime=30s ./internal/server
+  format:check:
+    cmds:
+      - |
+        files="$(gofmt -l $(find . -type f -name '*.go' -not -path './vendor/*' -print))"
+        if [ -n "$files" ]; then
+          printf '%s\n' "$files" >&2
+          exit 1
+        fi
+  lint:
+    cmds:
+      - go tool golangci-lint run ./...
+  vuln:
+    cmds:
+      - go tool govulncheck ./...
+  vet:
+    cmds:
+      - go vet ./...
   mod:
     cmds:
       - go mod verify
   openapi:
     cmds:
-      - tmp="$$(mktemp)" && trap 'rm -f "$$tmp"' EXIT && GOPROXY=off GOSUMDB=off go run ./cmd/openapi > "$$tmp" && cmp -s "$$tmp" openapi.yaml
-  verify:
-    deps: [build, test, mod, openapi]
+      - tmp="$(mktemp)" && trap 'rm -f "$tmp"' EXIT && GOPROXY=off GOSUMDB=off go run ./cmd/openapi > "$tmp" && cmp -s "$tmp" openapi.yaml
+  container:build:
+    preconditions:
+      - sh: command -v podman
+        msg: Podman is required; install and configure it before running task container:build
     cmds:
-      - go vet ./...
+      - podman build --pull=missing --format=oci --file Containerfile --tag smt-api:local .
+  container:build:production:
+    preconditions:
+      - sh: command -v podman
+        msg: Podman is required; install and configure it before running task container:build:production
+    cmds:
+      - podman build --pull=never --format=oci --file Containerfile --tag "${SMT_API_PRODUCTION_IMAGE:-smt-api:production}" .
+  container:verify:
+    deps: [container:build]
+    preconditions:
+      - sh: command -v podman
+        msg: Podman is required; install and configure it before running task container:verify
+    cmds:
+      - |
+        set -eu
+        container="${SMT_API_CONTAINER_NAME:-smt-api-verify}"
+        image="${SMT_API_IMAGE:-smt-api:local}"
+        host_port="${SMT_API_HOST_PORT:-18080}"
+        cleanup() {
+          podman rm -f "$container" >/dev/null 2>&1 || true
+        }
+        verify() {
+          podman rm -f "$container" >/dev/null 2>&1 || true
+          podman run --detach --name "$container" --publish "127.0.0.1:${host_port}:8080" "$image"
+          test "$(podman exec "$container" id -u)" = "10001"
+          healthy=false
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+            if podman exec "$container" wget -q -O - http://127.0.0.1:8080/healthz >/dev/null && podman exec "$container" wget -q -O - http://127.0.0.1:8080/readyz >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$healthy" != true ]; then
+            echo "API container did not become healthy; inspect Podman logs and verify the generated image" >&2
+            return 1
+          fi
+          podman stop --time 10 "$container"
+          test "$(podman wait "$container")" = "0"
+        }
+        if verify; then
+          status=0
+        else
+          status=$?
+        fi
+        cleanup
+        exit "$status"
+  verify:
+    deps: [format:check, lint, vuln, vet, build, test, mod, openapi, container:verify]
 `
 
 const apiOpenAPIYAML = `components:
@@ -546,6 +613,7 @@ func apiSourceFiles(databaseSelected bool) map[string]string {
 		"cmd/openapi/main.go":                 apiOpenAPICommandGo,
 		".env.example":                        apiEnvExample,
 		"Taskfile.yml":                        apiTaskfileYAML(databaseSelected),
+		"Containerfile":                       apiContainerfile,
 		"openapi.yaml":                        apiOpenAPIYAML,
 		"go.mod":                              goMod,
 		"go.sum":                              goSum,

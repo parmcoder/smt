@@ -10,7 +10,7 @@ tags:
   - skills
   - mcp
 created: 2026-08-17
-updated: 2026-08-22
+updated: 2026-08-23
 ---
 # SMT — Component Developer Toolchains
 
@@ -18,7 +18,7 @@ updated: 2026-08-22
 
 This is a researched planned contract for generated component repositories; its
 component toolchain sections remain planned unless marked implemented. It
-refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it; `.3.2.1` adds the staged CLI-owned Web baseline; and `.3.3.2` adds deterministic API source and OpenAPI assets without packaging or runtime execution. Current `smt apply` remains deterministic: non-Web and static paths are offline and do not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration. Selected Web `.3.2.1` is the sole pinned `npx` initializer exception that may access the npm registry, while still skipping `npm install`, lockfile publication, and dependency resolution. Apply rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
+refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it; `.3.2.1` adds the staged CLI-owned Web baseline; `.3.3.2` adds deterministic API source and OpenAPI assets; and `.3.3.4` adds API packaging and non-root runtime verification tasks. Current `smt apply` remains deterministic: non-Web and static paths are offline and do not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration. Selected Web `.3.2.1` is the sole pinned `npx` initializer exception that may access the npm registry, while still skipping `npm install`, lockfile publication, and dependency resolution. Apply rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
 
 Each component has four layers: native CLI/toolchain; repeatable Taskfile
 gates; agent skills; and optional MCP/live-runtime integration. Taskfiles use
@@ -188,17 +188,39 @@ manifest variants.
 The API child also receives deterministic `Taskfile.yml` with top-level
 `dotenv: ['.env']`; it never copies or mutates `.env`. Its tasks are `build`
 (`mkdir -p bin && go build -trimpath -o bin/apis .`), `run` (depends on
-`build`, then runs `./bin/apis`), `test`, `coverage`, `mod` (`go mod verify`),
-offline byte-comparing `openapi`, and `verify` (depends on `build`, `test`,
-`mod`, and `openapi`, then runs `go vet ./...`). API+Database receives the
-same API Taskfile but no database migration/readiness tasks yet; those belong
-to `smt-4xf.6.1.2` and later. Task v3.52.0 verified dotenv-driven `/healthz`
-and bounded process cleanup in the generated-child harness.
+`build`, then runs `./bin/apis`), `test`, `coverage`, `test:race`, `test:fuzz`,
+`format:check`, `lint`, `vuln`, `vet`, `mod` (`go mod verify`), offline
+byte-comparing `openapi`, development `container:build`, production
+`container:build:production`, `container:verify`, and aggregate
+`verify`. API+Database receives the same API Taskfile but no data-service
+migration/readiness tasks yet; those belong to `smt-4xf.6.1.2` and later. Task
+v3.52.0 verified dotenv-driven `/healthz` and bounded process cleanup in the
+generated-child harness.
+
+## Implemented `.3.3.4` API non-root runtime package
+
+When API is selected, Apply also emits a deterministic `Containerfile` in the
+API child. It uses the pinned `golang:1.26.5-alpine` builder and `alpine:3.22`
+runtime, compiles a static trimmed Linux binary, exposes port `8080`, uses
+`SIGTERM`, and runs as UID/GID `10001`. The image health check probes both
+`/healthz` and `/readyz`; it does not start another service, run migrations, or
+configure a workspace runtime.
+
+The child Taskfile adds `format:check` with `gofmt`, pinned `go tool`
+`golangci-lint` and `govulncheck` checks, a development `container:build`
+that uses `--pull=missing`, an explicit production
+`container:build:production` that uses `--pull=never`, and a bounded
+`container:verify`. The runtime check uses caller-installed Podman to
+build the image, verify non-root identity, wait up to 30 seconds for health and
+readiness, then stop and wait for clean exit. It reports missing Go tools,
+Task, or Podman as an unavailable local prerequisite; Apply never installs
+them or executes the generated tasks. Live image and runtime evidence remains
+environment-dependent.
 
 API-selected Apply writes embedded assets only and performs no network,
 Go/package-manager command, tool installation, Task execution, Podman, listener,
-or runtime execution. It adds no credentials, domain CRUD, database connectivity/readiness,
-migrations, root Taskfile changes, Containerfiles, or non-root packaging. Durable unit/race/fuzz/
+or runtime execution. It adds no credentials, domain CRUD, data-service
+connectivity/readiness, or root Taskfile changes. Durable unit/race/fuzz/
 integration coverage is `.3.3.3`; non-root packaging/runtime verification is
 `.3.3.4`. `go mod tidy` remains a later source-closure check; `go mod verify`
 evidence is limited to the generated child `mod` task, and human E2E remains a
@@ -320,10 +342,10 @@ Reuse Godex database guidance; no DB MCP is required for v0.1.0.
 
 ## Container / root workspace
 
-The generated API child Taskfile is implemented above. The future root Taskfile
-will orchestrate component gates, Database migration/readiness tasks, and
-Beads-aware aggregate verification; root task aggregation is `.6.1.2` and
-later.
+The generated API child Taskfile and API `Containerfile` are implemented above.
+The future root Taskfile will orchestrate component gates, data-service
+migration/readiness tasks, and Beads-aware aggregate verification; root task
+aggregation is `.6.1.2` and later.
 Podman/Compose smoke tests cover build, start, health/readiness, shutdown, and
 non-root identity. Gitleaks/security tasks are required before a production
 candidate. SBOM, signing, and remote CI are deferred.
@@ -332,7 +354,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 
 | Component | Generated manifest/lockfile | Required local tools | Task gates | Required skills | Optional MCP/runtime |
 | --- | --- | --- | --- | --- | --- |
-| Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, Task | child `build`, `run`, `test`, `coverage`, `mod`, `openapi`, `verify`; later durable format, vet, race, fuzz, vuln, migrations | `$godex:godex-go-backend` | gopls local; no Go MCP |
+| Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `.3.3.4` `Containerfile` and `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, govulncheck, Task, Podman | child `build`, `run`, `test`, `coverage`, `format:check`, `lint`, `vet`, `race`, `fuzz`, `vuln`, `mod`, `openapi`, `container:build`, `container:verify`, `verify`; data-service gates remain later | `$godex:godex-go-backend` | gopls local; no Go MCP |
 | Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `package-lock.json` after later `npm install` | Node.js 24.18.0, Next.js 16.2.9, npm | `.3.2.2/.3` deferred: lockfile, Prettier, ESLint, TypeScript, Vitest/RTL, build, and Web app quality checks | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` implemented: format, analyze, unit/widget; integration/debug builds explicit unverified when targets/SDKs are unavailable; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |

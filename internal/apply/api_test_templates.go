@@ -287,7 +287,7 @@ func apiTaskfileYAML(databaseSelected bool) string {
 	}
 	integrationTask := `  test:integration:
     preconditions:
-      - sh: test -n "$$DATABASE_URL"
+      - sh: test -n "$DATABASE_URL"
         msg: DATABASE_URL is required; start the disposable PostgreSQL service before running task test:integration
     cmds:
       - go test -tags=integration ./...

@@ -343,6 +343,9 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		}
 	}
 	if c.id == "api" {
+		if err := appendAPIReadme(filepath.Join(bootstrap, "README.md")); err != nil {
+			return plumbing.ZeroHash, err
+		}
 		if err := writeAPISourceFiles(bootstrap, databaseSelected); err != nil {
 			return plumbing.ZeroHash, err
 		}
@@ -763,6 +766,72 @@ Mobile is an Android/iOS workload and remains outside Compose; this Web child
 does not install browsers, SDKs, credentials, or cloud integrations.
 `
 	}
+	return os.WriteFile(path, []byte(text), 0o644)
+}
+
+func appendAPIReadme(path string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	text := string(contents)
+	if strings.Contains(text, "## SMT API runtime") {
+		return nil
+	}
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	text += `
+## SMT API runtime
+
+The generated API uses the pinned Go 1.26.5 toolchain. Install and select the
+toolchain manually before running the child checks:
+
+~~~sh
+asdf install golang 1.26.5
+asdf current golang
+task format:check
+task lint
+task vuln
+task test
+task openapi
+~~~
+
+The pinned static checks are also available directly when Task is not
+installed:
+
+~~~sh
+go tool golangci-lint run ./...
+go tool govulncheck ./...
+~~~
+
+The API listens on HTTP_ADDR, defaulting to :8080. It exposes /healthz and
+/readyz for health and readiness, and receives SIGTERM for graceful shutdown.
+The generated Containerfile builds a static API binary and runs it as a
+non-root UID/GID 10001 in the pinned Alpine 3.22 runtime. Podman is a
+caller-owned prerequisite;
+Apply does not install tools, build images, start containers, or execute tasks.
+
+~~~sh
+task container:build
+task container:build:production
+task container:verify
+task verify
+~~~
+
+task container:build is the local development image path. It uses Podman's
+--pull=missing policy to fetch an absent pinned base image once. Production
+builds must use task container:build:production; that task uses
+--pull=never, so the caller or build system must preload and verify the
+pinned base images before building. Set SMT_API_PRODUCTION_IMAGE to choose the
+production image tag; it defaults to smt-api:production.
+
+If Go, the pinned Go tools, Task, or Podman is missing, record the lane as
+unavailable, install or configure the prerequisite manually, and rerun the
+command. This child contains only the API server and its local runtime checks;
+other services and workspace coordination remain outside this slice. This work
+is tracked by smt-4xf.3.3.4.
+`
 	return os.WriteFile(path, []byte(text), 0o644)
 }
 
