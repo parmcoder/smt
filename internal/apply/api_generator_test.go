@@ -50,6 +50,8 @@ func TestApplyGeneratesAPIStarterOnlyForAPISelection(t *testing.T) {
 				"cmd/openapi/main.go",
 				".env.example",
 				"openapi.yaml",
+				"Taskfile.yml",
+				"Containerfile",
 				"README.md",
 				".gitignore",
 				"lefthook.yml",
@@ -200,7 +202,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				return
 			}
 			taskfile := readGeneratedAPIFile(t, filepath.Join(destination, "apis"), "Taskfile.yml")
-			wantTasks := []string{"build", "run", "test", "coverage", "test:race", "test:fuzz", "mod", "openapi"}
+			wantTasks := []string{"build", "run", "test", "coverage", "test:race", "test:fuzz", "format:check", "lint", "vuln", "vet", "mod", "openapi", "container:build", "container:build:production", "container:verify"}
 			if tt.database {
 				wantTasks = append(wantTasks, "test:integration")
 			}
@@ -217,7 +219,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				"mod:\n    cmds:\n      - go mod verify",
 				"go run ./cmd/openapi",
 				"cmp -s",
-				"verify:\n    deps: [build, test, mod, openapi]\n    cmds:\n      - go vet ./...",
+				"verify:\n    deps: [format:check, lint, vuln, vet, build, test, mod, openapi, container:verify]\n",
 			} {
 				if !strings.Contains(taskfile, want) {
 					t.Fatalf("Taskfile missing %q:\n%s", want, taskfile)
@@ -225,7 +227,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 			}
 			if tt.database {
 				for _, want := range []string{
-					"test:integration:\n    preconditions:\n      - sh: test -n \"$$DATABASE_URL\"",
+					"test:integration:\n    preconditions:\n      - sh: test -n \"$DATABASE_URL\"",
 					"go test -tags=integration ./...",
 				} {
 					if !strings.Contains(taskfile, want) {
@@ -286,7 +288,7 @@ func TestGeneratedAPITaskfileCommandsAndDotenvRuntime(t *testing.T) {
 	destination := applyAPIWorkspace(t, apiBlueprintBytes())
 	apiRoot := filepath.Join(destination, "apis")
 	taskEnv := generatedTaskEnvironment()
-	for _, taskName := range []string{"build", "mod", "test", "coverage", "openapi"} {
+	for _, taskName := range []string{"build", "mod", "format:check", "test", "coverage", "openapi"} {
 		runGeneratedTask(t, taskPath, apiRoot, taskName, taskEnv)
 	}
 	for _, relative := range []string{"bin/apis", "coverage.out"} {

@@ -8,7 +8,7 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-08-22
+updated: 2026-08-23
 ---
 # SMT — Command Recipes
 
@@ -80,12 +80,12 @@ non-generated version-1 configuration without provenance remains usable for
 lifecycle and diagnostic commands, but is not applyable as a new generated
 blueprint. An existing destination file or directory is refused without
 overwrite, merge, regeneration, upgrade, or `smt extend` execution. This
-release does not provide Web runtime/quality execution or a Database runtime
-starter; `.3.2.1` provides the CLI-owned Web baseline while `.3.2.2/.3`
-remain deferred. Mobile `.3.5.3` verification, component Containerfiles, platform
-repositories/scaffolds/runtime artifacts, Podman or Compose execution, a
-remote module registry, or `smt extend`; `.3.3.2` adds only deterministic API
-source/OpenAPI assets. The generated `compose.yaml` and
+release does not provide a Database runtime starter; `.3.2.1` provides the
+CLI-owned Web baseline and `.3.2.2/.3` provide Web quality/runtime tooling.
+Mobile `.3.5.3` verification, platform repositories/scaffolds/runtime
+artifacts, Podman or Compose execution, a remote module registry, or
+`smt extend`; `.3.3.2` adds deterministic API source/OpenAPI assets and `.3.3.4`
+adds the API `Containerfile` and child runtime tasks. The generated `compose.yaml` and
 `.env.example` are contract-only root artifacts. Generated module annotations
 are persisted, but apply does not
 execute their verification recipes, install referenced tools/skills/MCP,
@@ -293,8 +293,8 @@ shutdown.
 
 API-selected Apply only writes embedded assets. It performs no network,
 Go/package-manager command, tool installation, Task execution, Podman, listener,
-or runtime execution. It adds no credentials, domain CRUD, database connectivity/readiness,
-migrations, root Taskfile changes, Containerfiles, or non-root packaging.
+or runtime execution. It adds no credentials, domain CRUD, data-service
+connectivity/readiness, or root Taskfile changes.
 
 ### Use the generated API child Taskfile
 
@@ -308,18 +308,37 @@ mutate `.env`. Its task surface is:
 | `run` | Depends on `build`, then runs `./bin/apis`; `.env` supplies the variables parsed by `LoadConfig()`. |
 | `test` | `go test ./...` |
 | `coverage` | `go test ./... -coverprofile=coverage.out` |
+| `test:race` | `go test -race ./...` |
+| `test:fuzz` | Runs the bounded request-ID fuzz target. |
+| `format:check` | Lists Go files needing formatting and fails when any are found. |
+| `lint` | `go tool golangci-lint run ./...` using the pinned tool directive. |
+| `vuln` | `go tool govulncheck ./...` using the pinned tool directive. |
+| `vet` | `go vet ./...` |
 | `mod` | `go mod verify` |
 | `openapi` | Offline `GOPROXY=off GOSUMDB=off go run ./cmd/openapi`, compared byte-for-byte with `openapi.yaml`. |
-| `verify` | Depends on `build`, `test`, `mod`, and `openapi`, then runs `go vet ./...`. |
+| `container:build` | Development image: caller-installed Podman builds the generated `Containerfile` with `--pull=missing`, fetching absent pinned base images. |
+| `container:build:production` | Production image: builds with `--pull=never` and `${SMT_API_PRODUCTION_IMAGE:-smt-api:production}`, requiring preloaded and verified base images. |
+| `container:verify` | Podman verifies non-root identity, `/healthz`, `/readyz`, and graceful stop with a bounded wait. |
+| `verify` | Depends on static quality, Go tests, OpenAPI, and container tasks; it does not start data services. |
 
-API+Database receives the same API Taskfile and no database migration or
+API+Database receives the same API Taskfile and no data-service migration or
 readiness tasks yet; those belong to `smt-4xf.6.1.2` and later. Task v3.52.0
 verified the generated-child harness, including dotenv-driven `/healthz` and
-bounded process cleanup. `smt apply` writes the child Taskfile but never runs
-Task; there are no implicit installs or network work, and the root Taskfile is
-unchanged. Durable unit/race/fuzz/integration coverage remains `.3.3.3`,
-non-root packaging/runtime verification remains `.3.3.4`, and human E2E is not
-claimed.
+bounded process cleanup. `smt apply` writes the child Taskfile and
+`Containerfile` but never runs Task, builds an image, or starts a runtime; there
+are no implicit installs or network work, and the root Taskfile is unchanged.
+Durable unit/race/fuzz/integration coverage remains `.3.3.3`; non-root
+packaging/runtime verification is implemented in `.3.3.4`; and live image
+execution remains an explicit environment-dependent lane, not an Apply-time
+claim.
+
+The `.3.3.4` API child `Containerfile` uses the pinned
+`golang:1.26.5-alpine` builder and `alpine:3.22` runtime, produces a static
+trimmed binary, runs as UID/GID `10001`, exposes `8080`, and uses `SIGTERM`.
+The image health check covers `/healthz` and `/readyz`. If Go, the pinned Go
+tools, Task, or Podman is unavailable, record the relevant check as unavailable
+and follow the manual setup guidance in the generated API README. Apply does
+not install prerequisites, build an image, start a container, or run a task.
 
 The command above is a local regeneration recipe. It is not evidence of
 `go mod tidy` or human E2E completion; `go mod verify` evidence is limited to
