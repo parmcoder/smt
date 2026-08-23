@@ -56,9 +56,16 @@ func TestApplyGeneratesAPITestSuiteForAPISelection(t *testing.T) {
 				"func TestRequestIDMiddleware",
 				"func TestRunStopsOnContextCancellation",
 				"httptest.NewRecorder",
+				"if err := response.Body.Close(); err != nil",
 			} {
 				if !strings.Contains(serverTest, marker) {
 					t.Fatalf("generated server tests missing %q:\n%s", marker, serverTest)
+				}
+			}
+			serverSource := readGeneratedAPIFile(t, apiRoot, filepath.Join("internal", "server", "server.go"))
+			for _, marker := range []string{"collectors.NewGoCollector()", "collectors.NewProcessCollector"} {
+				if !strings.Contains(serverSource, marker) {
+					t.Fatalf("generated server source missing current Prometheus collector %q:\n%s", marker, serverSource)
 				}
 			}
 			configTest := readGeneratedAPIFile(t, apiRoot, filepath.Join("internal", "server", "config_test.go"))

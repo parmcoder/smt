@@ -1,0 +1,14 @@
+aws_region          = "us-east-1"
+name                = "smt-zitadel"
+environment         = "prod"
+availability_zones  = ["us-east-1a", "us-east-1b"]
+ami_id              = "ami-00000000000000000"
+certificate_arn     = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+domain_name         = "login.example.com"
+route53_zone_id     = null
+route53_record_name = ""
+
+# Use an immutable digest for each image in production.
+zitadel_image       = "ghcr.io/zitadel/zitadel:v4.16.2"
+zitadel_login_image = "ghcr.io/zitadel/zitadel-login:v4.16.2"
+proxy_image         = "traefik:v3.5.3"

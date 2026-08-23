@@ -14,7 +14,7 @@ import (
 func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("\n\n\n\n\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("\n\n\n\nn\nn\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCreateDefaultBlueprintLoadsWithExpectedConfiguration(t *testing.T) {
 func TestCreateAllComponentsOmitsDevOpsPromptAndArtifacts(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("\n\n\n\n\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("\n\n\n\nn\nn\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -118,7 +118,7 @@ func isPlatformModuleID(id string) bool {
 func TestCreateAllowsExplicitMobileOptOutWithDeterministicSelection(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	result, err := Create(strings.NewReader("y\nn\ny\nn\nn\ny\n"), &out, destination)
+	result, err := Create(strings.NewReader("y\nn\ny\nn\nn\nn\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -139,8 +139,8 @@ func TestCreateAllowsExplicitMobileOptOutWithDeterministicSelection(t *testing.T
 
 func TestCreateE2EQualityDeclarationIsOptionalAndRootOnly(t *testing.T) {
 	for name, input := range map[string]string{
-		"default opt-out": "\n\n\n\nn\ny\n",
-		"selected":        "\n\n\n\ny\ny\n",
+		"default opt-out": "\n\n\n\nn\nn\ny\n",
+		"selected":        "\n\n\n\nn\ny\ny\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "smt.yaml")
@@ -172,6 +172,30 @@ func TestCreateE2EQualityDeclarationIsOptionalAndRootOnly(t *testing.T) {
 	}
 }
 
+func TestCreateIdentityDeclarationIsOptionalAndRootOnly(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "smt.yaml")
+	var out bytes.Buffer
+	if _, err := Create(strings.NewReader("n\nn\ny\ny\ny\nn\ny\n"), &out, destination); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "Include IDENTITY infrastructure declaration? [y/N]") {
+		t.Fatalf("prompts = %q, want catalog-derived identity prompt", out.String())
+	}
+	cfg, err := config.Load(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(cfg.Repositories[0].Modules, ","), "identity"; got != want {
+		t.Fatalf("root modules = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(cfg.Commit.Scopes, ","), "repo,api,database"; got != want {
+		t.Fatalf("scopes = %q, want %q", got, want)
+	}
+	if len(cfg.Repositories) != 3 {
+		t.Fatalf("repositories = %#v, want root, API, and Database only", cfg.Repositories)
+	}
+}
+
 func TestE2EPromptAndRootModuleUseCatalogDefinition(t *testing.T) {
 	definition, err := e2eModuleDefinition()
 	if err != nil {
@@ -179,7 +203,7 @@ func TestE2EPromptAndRootModuleUseCatalogDefinition(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	if _, err := Create(strings.NewReader("\n\n\n\ny\ny\n"), &out, destination); err != nil {
+	if _, err := Create(strings.NewReader("\n\n\n\nn\ny\ny\n"), &out, destination); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	wantPrompt := fmt.Sprintf("Include %s %s declaration? [y/N]", strings.ToUpper(definition.ID), definition.Category)
@@ -214,7 +238,7 @@ func TestQualityRootLookupFollowsMutatedCatalogDefinition(t *testing.T) {
 	}
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
 	var out bytes.Buffer
-	if _, err := Create(strings.NewReader("\n\n\n\ny\ny\n"), &out, destination); err != nil {
+	if _, err := Create(strings.NewReader("\n\n\n\nn\ny\ny\n"), &out, destination); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	wantPrompt := fmt.Sprintf("Include %s %s declaration? [y/N]", strings.ToUpper(definition.ID), definition.Category)
@@ -269,7 +293,7 @@ func TestCreateEmitsDeterministicProvenance(t *testing.T) {
 	var outputs [2][]byte
 	for i := range outputs {
 		destination := filepath.Join(t.TempDir(), "smt.yaml")
-		if _, err := Create(strings.NewReader("y\nn\ny\ny\nn\ny\n"), &bytes.Buffer{}, destination); err != nil {
+		if _, err := Create(strings.NewReader("y\nn\ny\ny\nn\nn\ny\n"), &bytes.Buffer{}, destination); err != nil {
 			t.Fatalf("Create() error = %v", err)
 		}
 		var err error
@@ -290,7 +314,7 @@ func TestCreateEmitsDeterministicProvenance(t *testing.T) {
 func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "custom.yaml")
 	var out bytes.Buffer
-	_, err := Create(strings.NewReader("y\nperhaps\nn\nn\ny\nn\ny\n"), &out, destination)
+	_, err := Create(strings.NewReader("y\nperhaps\nn\nn\ny\nn\nn\ny\n"), &out, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -308,7 +332,7 @@ func TestCreateRetriesAndUsesSelectedComponents(t *testing.T) {
 
 func TestCreateAllowsExplicitMobileOptOut(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "smt.yaml")
-	_, err := Create(strings.NewReader("y\nn\ny\nn\nn\ny\n"), &bytes.Buffer{}, destination)
+	_, err := Create(strings.NewReader("y\nn\ny\nn\nn\nn\ny\n"), &bytes.Buffer{}, destination)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -325,7 +349,7 @@ func TestCreateAllowsExplicitMobileOptOut(t *testing.T) {
 }
 
 func TestCreateAllNoAndInputEndDoNotWrite(t *testing.T) {
-	for name, input := range map[string]string{"all no": "n\nn\nn\nn\nn\n", "component eof": "y\n"} {
+	for name, input := range map[string]string{"all no": "n\nn\nn\nn\nn\nn\n", "component eof": "y\n"} {
 		t.Run(name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "smt.yaml")
 			result, err := Create(strings.NewReader(input), &bytes.Buffer{}, destination)
@@ -369,7 +393,7 @@ func TestCreateRejectsMissingParentAndPreservesExistingSymlink(t *testing.T) {
 }
 
 func TestCreateDeclineAndConfirmationEOFAreNoWriteCancellations(t *testing.T) {
-	for name, input := range map[string]string{"decline": "y\ny\ny\ny\nn\nn\n", "confirmation eof": "y\ny\ny\ny\nn\n"} {
+	for name, input := range map[string]string{"decline": "y\ny\ny\ny\nn\nn\nn\n", "confirmation eof": "y\ny\ny\ny\nn\nn\n"} {
 		t.Run(name, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), "smt.yaml")
 			result, err := Create(strings.NewReader(input), &bytes.Buffer{}, destination)

@@ -555,6 +555,19 @@ repositories:
 	}
 }
 
+func TestRepositoryModulesRejectIdentityWithoutDatabase(t *testing.T) {
+	raw := `version: 1
+commit: {types: [feat], scopes: [repo, api]}
+workspace: {stack: {api: go}}
+repositories:
+  - {id: repo, path: ., scope: repo, modules: [identity]}
+  - {id: api, path: apis, component: api, technology: go, scope: api, modules: [api]}
+`
+	if _, err := LoadBytes([]byte(raw), "/tmp/smt.yaml"); err == nil || !strings.Contains(err.Error(), `requires capability "database"`) {
+		t.Fatalf("LoadBytes() error = %v, want identity database dependency error", err)
+	}
+}
+
 func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 	catalog := BuiltInModuleCatalog()
 	if err := catalog.Validate(); err != nil {
@@ -563,7 +576,7 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 	if catalog.SchemaVersion != 1 {
 		t.Fatalf("schema version = %d, want 1", catalog.SchemaVersion)
 	}
-	wantIDs := []string{"web", "mobile", "api", "database", "e2e", "container", "cicd", "observability", "iac", "k8s", "argocd"}
+	wantIDs := []string{"web", "mobile", "api", "database", "identity", "e2e", "container", "cicd", "observability", "iac", "k8s", "argocd"}
 	if len(catalog.Modules) != len(wantIDs) {
 		t.Fatalf("catalog IDs = %#v, want exactly %#v", catalog.Modules, wantIDs)
 	}
@@ -571,19 +584,19 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 		if catalog.Modules[i].ID != want {
 			t.Fatalf("catalog module %d = %#v, want ID %q", i, catalog.Modules[i], want)
 		}
-		if catalog.Modules[i].Selectable != (i < 5) {
+		if catalog.Modules[i].Selectable != (i < 6) {
 			t.Fatalf("catalog module %q selectable = %t, want %t", want, catalog.Modules[i].Selectable, i < 5)
 		}
-		if i >= 5 && (catalog.Modules[i].Category != "platform" || catalog.Modules[i].Layer != "platform-delivery") {
+		if i >= 6 && (catalog.Modules[i].Category != "platform" || catalog.Modules[i].Layer != "platform-delivery") {
 			t.Fatalf("platform module %q category/layer = %q/%q, want platform/platform-delivery", want, catalog.Modules[i].Category, catalog.Modules[i].Layer)
 		}
 		if len(catalog.Modules[i].CompletionCriteria) == 0 {
 			t.Fatalf("catalog module %q lacks completion criteria", want)
 		}
-		if i < 5 && (len(catalog.Modules[i].Verification) == 0 || len(catalog.Modules[i].ScaffoldAssets) == 0 || len(catalog.Modules[i].Agents) == 0 || len(catalog.Modules[i].Skills) == 0) {
+		if i < 6 && (len(catalog.Modules[i].Verification) == 0 || len(catalog.Modules[i].ScaffoldAssets) == 0 || len(catalog.Modules[i].Agents) == 0 || len(catalog.Modules[i].Skills) == 0) {
 			t.Fatalf("selectable catalog module %q lacks declarative verification/assets/agent/skill fields: %#v", want, catalog.Modules[i])
 		}
-		if i >= 5 && len(catalog.Modules[i].ScaffoldAssets) != 0 {
+		if i >= 6 && len(catalog.Modules[i].ScaffoldAssets) != 0 {
 			t.Fatalf("platform module %q has scaffold assets: %#v", want, catalog.Modules[i].ScaffoldAssets)
 		}
 		for _, verification := range catalog.Modules[i].Verification {
@@ -597,6 +610,7 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 		"mobile":        {Path: "mobile-app", Scope: "mobile", Mode: "independent", Targets: []string{"mobile"}},
 		"api":           {Path: "apis", Scope: "api", Mode: "independent", Targets: []string{"api"}},
 		"database":      {Path: "database", Scope: "database", Mode: "independent", Targets: []string{"database"}},
+		"identity":      {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo"}},
 		"e2e":           {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo"}},
 		"container":     {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"web", "api"}},
 		"cicd":          {Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo", "web", "mobile", "api", "database"}},
@@ -611,7 +625,7 @@ func TestBuiltInModuleCatalogIsExactAndDeclarative(t *testing.T) {
 			t.Fatalf("module %q placement = %#v, want %#v", module.ID, module.Repository, want)
 		}
 	}
-	for _, module := range catalog.Modules[5:] {
+	for _, module := range catalog.Modules[6:] {
 		if strings.Join(module.Provides, ",") != module.ID {
 			t.Fatalf("platform module %q provides = %v, want its own capability", module.ID, module.Provides)
 		}

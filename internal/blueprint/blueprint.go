@@ -22,6 +22,7 @@ type Selection struct {
 	Mobile   bool
 	API      bool
 	Database bool
+	Identity bool
 	E2E      bool
 }
 
@@ -42,6 +43,9 @@ func Create(in io.Reader, out io.Writer, destination string) (Result, error) {
 	selection, err := promptSelection(reader, out)
 	if err != nil {
 		return Result{}, err
+	}
+	if selection.Identity && !selection.Database {
+		return Result{}, errors.New("identity requires Database")
 	}
 	if !selection.Web && !selection.Mobile && !selection.API && !selection.Database {
 		return Result{}, errors.New("select at least one component")
@@ -107,6 +111,14 @@ func promptSelection(reader *bufio.Reader, out io.Writer) (Selection, error) {
 	if err != nil {
 		return Selection{}, err
 	}
+	identityModule, err := identityModuleDefinition()
+	if err != nil {
+		return Selection{}, err
+	}
+	identity, err := askOptionalModule(reader, out, identityModule)
+	if err != nil {
+		return Selection{}, err
+	}
 	e2eModule, err := e2eModuleDefinition()
 	if err != nil {
 		return Selection{}, err
@@ -115,7 +127,7 @@ func promptSelection(reader *bufio.Reader, out io.Writer) (Selection, error) {
 	if err != nil {
 		return Selection{}, err
 	}
-	return Selection{Web: web, Mobile: mobile, API: api, Database: database, E2E: e2e}, nil
+	return Selection{Web: web, Mobile: mobile, API: api, Database: database, Identity: identity, E2E: e2e}, nil
 }
 
 func askComponent(reader *bufio.Reader, out io.Writer, label string) (bool, error) {
@@ -165,6 +177,15 @@ func e2eModuleDefinition() (config.ModuleDefinition, error) {
 	return config.QualityRootModule(moduleCatalogSource())
 }
 
+func identityModuleDefinition() (config.ModuleDefinition, error) {
+	for _, module := range moduleCatalogSource().Modules {
+		if module.ID == "identity" {
+			return module, nil
+		}
+	}
+	return config.ModuleDefinition{}, errors.New("identity module is missing from the catalog")
+}
+
 func askConfirmation(reader *bufio.Reader, out io.Writer) (bool, error) {
 	for {
 		fmt.Fprint(out, "Write this blueprint? [y/N] ")
@@ -197,7 +218,7 @@ func readAnswer(reader *bufio.Reader) (answer string, ended bool, err error) {
 }
 
 func (s Selection) labels() []string {
-	labels := make([]string, 0, 4)
+	labels := make([]string, 0, 5)
 	if s.Web {
 		labels = append(labels, "Web")
 	}
@@ -210,6 +231,9 @@ func (s Selection) labels() []string {
 	if s.Database {
 		labels = append(labels, "Database")
 	}
+	if s.Identity {
+		labels = append(labels, "ZITADEL identity")
+	}
 	return labels
 }
 
@@ -220,8 +244,19 @@ func marshal(selection Selection) ([]byte, error) {
 	}
 	stack := config.WorkspaceStack{}
 	root := config.Repository{ID: "repo", Path: ".", Scope: "repo", Remote: config.Remote{DefaultBranch: "main"}}
+	var rootModules []string
+	if selection.Identity {
+		identityModule, err := identityModuleDefinition()
+		if err != nil {
+			return nil, err
+		}
+		rootModules = append(rootModules, identityModule.ID)
+	}
 	if selection.E2E {
-		root.Modules = []string{e2eModule.ID}
+		rootModules = append(rootModules, e2eModule.ID)
+	}
+	if len(rootModules) > 0 {
+		root.Modules = rootModules
 	}
 	repos := []config.Repository{root}
 	scopes := []string{"repo"}

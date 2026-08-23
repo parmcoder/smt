@@ -67,6 +67,19 @@ func TestRootComposeTasksMergeWithE2ECoordinator(t *testing.T) {
 	}
 }
 
+func TestRootComposeTasksGuardZitadelSecrets(t *testing.T) {
+	text := rootComposeTaskfile(true, true)
+	for _, marker := range []string{
+		"ZITADEL_MASTERKEY",
+		"ZITADEL_DB_PASSWORD",
+		"starting the ZITADEL Compose services",
+	} {
+		if !strings.Contains(text, marker) {
+			t.Fatalf("identity Compose Taskfile missing %q:\n%s", marker, text)
+		}
+	}
+}
+
 func TestGeneratedRootComposeUpUsesRootEnvFileAndGuardsMissingEnv(t *testing.T) {
 	destination := filepath.Join(t.TempDir(), "workspace")
 	applyWorkspace(t, destination, databaseBlueprintBytes())

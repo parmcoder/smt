@@ -464,6 +464,14 @@ var builtInModuleCatalog = ModuleCatalog{
 			ScaffoldAssets: []ScaffoldAsset{{ID: "database-declaration", Path: "migrations", Revision: "postgresql-18", Version: "v1"}},
 		},
 		{
+			ID: "identity", Selectable: true, Category: "infrastructure", Layer: "shared-infrastructure", Provides: []string{"identity", "oidc"}, Requires: []string{"database"},
+			Repository:         ModuleRepositoryPlacement{Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo"}},
+			CompletionCriteria: []string{"identity.declaration"}, Agents: []string{"backend_worker"},
+			Skills:         []string{"godex:godex-go-backend"},
+			Verification:   []VerificationRequirement{{ID: "identity-compose", Argv: []string{"task", "compose:config"}, MutatesWorktree: false}},
+			ScaffoldAssets: []ScaffoldAsset{{ID: "identity-compose", Path: "compose.yaml", Revision: "zitadel-v4.16.2", Version: "v1"}},
+		},
+		{
 			ID: "e2e", Selectable: true, Category: "quality", Layer: "quality-verification", Provides: []string{"e2e"},
 			Optional: []string{"web", "api", "mobile"}, Repository: ModuleRepositoryPlacement{Path: ".", Scope: "repo", Mode: "attached", Targets: []string{"repo"}},
 			CompletionCriteria: []string{"e2e.declaration"},

@@ -49,8 +49,9 @@ func TestApplyGeneratesAPIRuntimeArtifacts(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"gofmt -l",
-		"go tool golangci-lint run ./...",
-		"go tool govulncheck ./...",
+		"go tool -modfile=\"$tool_dir/go.mod\" golangci-lint run ./...",
+		"go tool -modfile=\"$tool_dir/go.mod\" govulncheck ./...",
+		"go mod tidy -modfile=\"$tool_dir/go.mod\"",
 		"go vet ./...",
 		"podman build --pull=missing",
 		"podman run",
@@ -74,8 +75,9 @@ func TestApplyGeneratesAPIRuntimeArtifacts(t *testing.T) {
 	for _, marker := range []string{
 		"asdf install golang 1.26.5",
 		"asdf current golang",
-		"go tool golangci-lint run ./...",
-		"go tool govulncheck ./...",
+		"task lint",
+		"task vuln",
+		"isolated temporary module file",
 		"task container:build",
 		"task container:build:production",
 		"task container:verify",

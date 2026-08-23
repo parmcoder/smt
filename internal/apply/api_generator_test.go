@@ -125,6 +125,11 @@ func TestApplyGeneratesAPIStarterOnlyForAPISelection(t *testing.T) {
 				"HTTP_IDLE_TIMEOUT=60s",
 				"HTTP_MAX_HEADER_BYTES=1048576",
 				"HTTP_SHUTDOWN_TIMEOUT=10s",
+				"OIDC_ISSUER_URL=",
+				"OIDC_DISCOVERY_URL=",
+				"OIDC_JWKS_URL=",
+				"OIDC_AUDIENCE=",
+				"OIDC_REQUIRED_SCOPES=openid,profile,email",
 			} {
 				if !strings.Contains(envExample, want) {
 					t.Fatalf(".env.example missing %q:\n%s", want, envExample)
@@ -443,15 +448,20 @@ func TestGeneratedAPIConfigUsesTypedEnvironmentParsing(t *testing.T) {
 	}
 	configBlock := server[configStart : configStart+configEnd]
 	for _, tag := range []string{
-		`HTTPAddr          string        ` + "`env:\"HTTP_ADDR\" envDefault:\":8080\"`" + ``,
-		`AppEnv            string        ` + "`env:\"APP_ENV\" envDefault:\"development\"`" + ``,
-		`LogLevel          slog.Level    ` + "`env:\"LOG_LEVEL\" envDefault:\"info\"`" + ``,
-		`ReadTimeout       time.Duration ` + "`env:\"HTTP_READ_TIMEOUT\" envDefault:\"15s\"`" + ``,
-		`ReadHeaderTimeout time.Duration ` + "`env:\"HTTP_READ_HEADER_TIMEOUT\" envDefault:\"5s\"`" + ``,
-		`WriteTimeout      time.Duration ` + "`env:\"HTTP_WRITE_TIMEOUT\" envDefault:\"15s\"`" + ``,
-		`IdleTimeout       time.Duration ` + "`env:\"HTTP_IDLE_TIMEOUT\" envDefault:\"60s\"`" + ``,
-		`MaxHeaderBytes    int           ` + "`env:\"HTTP_MAX_HEADER_BYTES\" envDefault:\"1048576\"`" + ``,
-		`ShutdownTimeout   time.Duration ` + "`env:\"HTTP_SHUTDOWN_TIMEOUT\" envDefault:\"10s\"`" + ``,
+		`HTTPAddr           string        ` + "`env:\"HTTP_ADDR\" envDefault:\":8080\"`" + ``,
+		`AppEnv             string        ` + "`env:\"APP_ENV\" envDefault:\"development\"`" + ``,
+		`LogLevel           slog.Level    ` + "`env:\"LOG_LEVEL\" envDefault:\"info\"`" + ``,
+		`ReadTimeout        time.Duration ` + "`env:\"HTTP_READ_TIMEOUT\" envDefault:\"15s\"`" + ``,
+		`ReadHeaderTimeout  time.Duration ` + "`env:\"HTTP_READ_HEADER_TIMEOUT\" envDefault:\"5s\"`" + ``,
+		`WriteTimeout       time.Duration ` + "`env:\"HTTP_WRITE_TIMEOUT\" envDefault:\"15s\"`" + ``,
+		`IdleTimeout        time.Duration ` + "`env:\"HTTP_IDLE_TIMEOUT\" envDefault:\"60s\"`" + ``,
+		`MaxHeaderBytes     int           ` + "`env:\"HTTP_MAX_HEADER_BYTES\" envDefault:\"1048576\"`" + ``,
+		`ShutdownTimeout    time.Duration ` + "`env:\"HTTP_SHUTDOWN_TIMEOUT\" envDefault:\"10s\"`" + ``,
+		`OIDCIssuerURL      string        ` + "`env:\"OIDC_ISSUER_URL\"`" + ``,
+		`OIDCDiscoveryURL   string        ` + "`env:\"OIDC_DISCOVERY_URL\"`" + ``,
+		`OIDCJWKSURL        string        ` + "`env:\"OIDC_JWKS_URL\"`" + ``,
+		`OIDCAudience       string        ` + "`env:\"OIDC_AUDIENCE\"`" + ``,
+		`OIDCRequiredScopes string        ` + "`env:\"OIDC_REQUIRED_SCOPES\" envDefault:\"openid,profile,email\"`" + ``,
 	} {
 		if !strings.Contains(configBlock, tag) {
 			t.Fatalf("generated Config is missing direct field tag %q:\n%s", tag, configBlock)

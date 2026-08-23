@@ -45,6 +45,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humagin"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -54,15 +55,20 @@ const (
 )
 
 type Config struct {
-	HTTPAddr          string        ` + "`env:\"HTTP_ADDR\" envDefault:\":8080\"`" + `
-	AppEnv            string        ` + "`env:\"APP_ENV\" envDefault:\"development\"`" + `
-	LogLevel          slog.Level    ` + "`env:\"LOG_LEVEL\" envDefault:\"info\"`" + `
-	ReadTimeout       time.Duration ` + "`env:\"HTTP_READ_TIMEOUT\" envDefault:\"15s\"`" + `
-	ReadHeaderTimeout time.Duration ` + "`env:\"HTTP_READ_HEADER_TIMEOUT\" envDefault:\"5s\"`" + `
-	WriteTimeout      time.Duration ` + "`env:\"HTTP_WRITE_TIMEOUT\" envDefault:\"15s\"`" + `
-	IdleTimeout       time.Duration ` + "`env:\"HTTP_IDLE_TIMEOUT\" envDefault:\"60s\"`" + `
-	MaxHeaderBytes    int           ` + "`env:\"HTTP_MAX_HEADER_BYTES\" envDefault:\"1048576\"`" + `
-	ShutdownTimeout   time.Duration ` + "`env:\"HTTP_SHUTDOWN_TIMEOUT\" envDefault:\"10s\"`" + `
+	HTTPAddr           string        ` + "`env:\"HTTP_ADDR\" envDefault:\":8080\"`" + `
+	AppEnv             string        ` + "`env:\"APP_ENV\" envDefault:\"development\"`" + `
+	LogLevel           slog.Level    ` + "`env:\"LOG_LEVEL\" envDefault:\"info\"`" + `
+	ReadTimeout        time.Duration ` + "`env:\"HTTP_READ_TIMEOUT\" envDefault:\"15s\"`" + `
+	ReadHeaderTimeout  time.Duration ` + "`env:\"HTTP_READ_HEADER_TIMEOUT\" envDefault:\"5s\"`" + `
+	WriteTimeout       time.Duration ` + "`env:\"HTTP_WRITE_TIMEOUT\" envDefault:\"15s\"`" + `
+	IdleTimeout        time.Duration ` + "`env:\"HTTP_IDLE_TIMEOUT\" envDefault:\"60s\"`" + `
+	MaxHeaderBytes     int           ` + "`env:\"HTTP_MAX_HEADER_BYTES\" envDefault:\"1048576\"`" + `
+	ShutdownTimeout    time.Duration ` + "`env:\"HTTP_SHUTDOWN_TIMEOUT\" envDefault:\"10s\"`" + `
+	OIDCIssuerURL      string        ` + "`env:\"OIDC_ISSUER_URL\"`" + `
+	OIDCDiscoveryURL   string        ` + "`env:\"OIDC_DISCOVERY_URL\"`" + `
+	OIDCJWKSURL        string        ` + "`env:\"OIDC_JWKS_URL\"`" + `
+	OIDCAudience       string        ` + "`env:\"OIDC_AUDIENCE\"`" + `
+	OIDCRequiredScopes string        ` + "`env:\"OIDC_REQUIRED_SCOPES\" envDefault:\"openid,profile,email\"`" + `
 }
 
 func LoadConfig() (Config, error) {
@@ -247,7 +253,7 @@ func New(logger *slog.Logger) *Application {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	registry := prometheus.NewRegistry()
-	registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	metrics := newRequestMetrics(registry)
 	router.Use(requestIDMiddleware(), recoveryMiddleware(logger), requestMetricsMiddleware(metrics))
 	readiness := &Readiness{}
@@ -370,6 +376,11 @@ HTTP_WRITE_TIMEOUT=15s
 HTTP_IDLE_TIMEOUT=60s
 HTTP_MAX_HEADER_BYTES=1048576
 HTTP_SHUTDOWN_TIMEOUT=10s
+OIDC_ISSUER_URL=
+OIDC_DISCOVERY_URL=
+OIDC_JWKS_URL=
+OIDC_AUDIENCE=
+OIDC_REQUIRED_SCOPES=openid,profile,email
 `
 
 const apiTaskfileBaseYAML = `version: '3'
@@ -406,10 +417,24 @@ tasks:
         fi
   lint:
     cmds:
-      - go tool golangci-lint run ./...
+      - |
+        set -eu
+        tool_dir="$(mktemp -d)"
+        trap 'rm -rf "$tool_dir"' EXIT
+        cp go.mod "$tool_dir/go.mod"
+        cp go.sum "$tool_dir/go.sum"
+        go mod tidy -modfile="$tool_dir/go.mod"
+        go tool -modfile="$tool_dir/go.mod" golangci-lint run ./...
   vuln:
     cmds:
-      - go tool govulncheck ./...
+      - |
+        set -eu
+        tool_dir="$(mktemp -d)"
+        trap 'rm -rf "$tool_dir"' EXIT
+        cp go.mod "$tool_dir/go.mod"
+        cp go.sum "$tool_dir/go.sum"
+        go mod tidy -modfile="$tool_dir/go.mod"
+        go tool -modfile="$tool_dir/go.mod" govulncheck ./...
   vet:
     cmds:
       - go vet ./...

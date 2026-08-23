@@ -141,7 +141,9 @@ func waitForTestHTTP(t *testing.T, client *http.Client, endpoint string) {
 	for time.Now().Before(deadline) {
 		response, err := client.Get(endpoint)
 		if err == nil {
-			response.Body.Close()
+			if err := response.Body.Close(); err != nil {
+				t.Fatalf("close readiness response body: %v", err)
+			}
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
