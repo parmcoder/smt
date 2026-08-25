@@ -215,14 +215,18 @@ service. API-only, Database-only, Web-only, API+Database, all-OCI, empty, and
 Mobile-only selections remain valid, with only selected OCI services emitted.
 Default host bindings are `3000:3000`, `8080:8080`, `5432:5432`, and
 `8081:80` for the local ZITADEL proxy; override them with `WEB_PORT`,
-`API_PORT`, `DATABASE_PORT`, and `ZITADEL_PORT`. The project name is the safe
-lowercase-hyphen destination basename, capped at 63 characters, with
-`smt-workspace` fallback.
+`API_PORT`, `DATABASE_PORT`, and `ZITADEL_PORT`. When an override is unset,
+the generated `.env.example` derives deterministic workspace-scoped host
+ports so workspaces can run in parallel; explicit overrides remain
+authoritative. The project name is the safe lowercase-hyphen destination
+basename, capped at 63 characters, with `smt-workspace` fallback. Generated
+local resource names are scoped as `<project>-postgres-data`,
+`<project>-zitadel`, and `<project>-zitadel-bootstrap`.
 
 Web probes `/healthz`; API probes `/healthz` and `/readyz`; Database probes with
 `pg_isready`. Web-to-API and API-to-Database dependencies are conditional and
 use `service_healthy`. `.env.example` contains examples only, including the
-named `DATABASE_VOLUME` value and the local-development
+generated local resource names and the local-development
 `DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable
 local use; no `.env` file is generated.
 

@@ -139,14 +139,18 @@ ignores `.env`. Compose contains only selected `web`, `api`, and `database`
 services; Mobile remains outside OCI Compose. API-only, Database-only, Web-only,
 API+Database, all-OCI, empty, and Mobile-only selections remain valid. Default
 bindings are Web `3000:3000`, API `8080:8080`, and Database `5432:5432`, with
-`WEB_PORT`, `API_PORT`, and `DATABASE_PORT` overrides. The project name is the
+`WEB_PORT`, `API_PORT`, and `DATABASE_PORT` overrides. When an override is
+unset, the generated `.env.example` derives a deterministic workspace-scoped
+host port so fresh workspaces can run in parallel. The project name is the
 safe lowercase-hyphen destination basename capped at 63 characters, falling
-back to `smt-workspace`.
+back to `smt-workspace`; generated local resource names use that project as
+`<project>-postgres-data`, `<project>-zitadel`, and
+`<project>-zitadel-bootstrap`.
 
 Web probes `/healthz`; API health/readiness are `/healthz` and `/readyz`; and
 Database health uses `pg_isready`. Web depends conditionally on a healthy API,
 and API depends conditionally on a healthy Database. `.env.example` contains
-examples only with a named `DATABASE_VOLUME` and the local-development
+examples only with the generated local resource names and the
 `DATABASE_PASSWORD=smt-dev-password` value; replace it outside disposable
 local use. No `.env` file is generated. The pure preflight API reports invalid or occupied ports
 and missing Podman/Podman Compose prerequisites through injectable checks, but

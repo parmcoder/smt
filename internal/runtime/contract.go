@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"fmt"
+	"hash/fnv"
 	"path/filepath"
 	"strings"
 )
@@ -119,9 +120,10 @@ func Render(options RenderOptions) (Artifacts, error) {
 		return Artifacts{}, err
 	}
 	project := NormalizeProjectName(options.WorkspacePath)
+	examplePorts := workspacePorts(project, ports, options.Ports)
 	return Artifacts{
 		Compose:    []byte(renderCompose(project, options.Selection, ports)),
-		EnvExample: []byte(renderEnvExample(project, ports, options.Selection.Identity)),
+		EnvExample: []byte(renderEnvExample(project, examplePorts, options.Selection.Identity)),
 	}, nil
 }
 
@@ -180,6 +182,29 @@ func resolvePorts(overrides PortOverrides) (resolvedPorts, error) {
 
 func invalidPort(key string, port int) error {
 	return fmt.Errorf("%s must be a decimal TCP port from 1 through 65535 (got %d); change %s", key, port, key)
+}
+
+func workspacePorts(project string, ports resolvedPorts, overrides PortOverrides) resolvedPorts {
+	offset := projectPortOffset(project)
+	if overrides.Web == 0 {
+		ports.web = defaultWebPort + offset
+	}
+	if overrides.API == 0 {
+		ports.api = defaultAPIPort + offset
+	}
+	if overrides.Database == 0 {
+		ports.database = defaultDatabasePort + offset
+	}
+	if overrides.Identity == 0 {
+		ports.identity = defaultIdentityPort + offset
+	}
+	return ports
+}
+
+func projectPortOffset(project string) int {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(project))
+	return int(hash.Sum32() % 1000)
 }
 
 func validateSelection(selection Selection) error {
@@ -259,21 +284,25 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 		b.WriteString("    healthcheck:\n      test: [\"CMD\", \"/app/zitadel\", \"ready\"]\n      interval: 10s\n      timeout: 30s\n      retries: 12\n      start_period: 20s\n")
 		b.WriteString("  zitadel-login:\n    image: \"${ZITADEL_LOGIN_IMAGE:-ghcr.io/zitadel/zitadel-login:" + defaultZitadelVersion + "}\"\n    restart: unless-stopped\n    environment:\n      ZITADEL_API_URL: http://zitadel:8080\n      NEXT_PUBLIC_BASE_PATH: /ui/v2/login\n      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat\n      CUSTOM_REQUEST_HEADERS: \"Host:${ZITADEL_DOMAIN:-localhost},X-Forwarded-Proto:${ZITADEL_PUBLIC_SCHEME:-http}\"\n    volumes:\n      - zitadel-bootstrap:/zitadel/bootstrap:ro\n    networks: [zitadel]\n    depends_on:\n      zitadel:\n        condition: service_healthy\n    healthcheck:\n      test: [\"CMD\", \"/bin/sh\", \"-c\", \"node /app/healthcheck.mjs http://localhost:3000/ui/v2/login/healthy\"]\n      interval: 10s\n      timeout: 30s\n      retries: 12\n      start_period: 20s\n")
 		b.WriteString("  proxy:\n    image: \"${TRAEFIK_IMAGE:-traefik:v3.5.3}\"\n    restart: unless-stopped\n    command:\n      - --providers.docker=true\n      - --providers.docker.exposedbydefault=false\n      - --providers.docker.network=zitadel\n      - --entrypoints.web.address=:80\n      - --ping=true\n    ports:\n      - \"${ZITADEL_PORT:-" + fmt.Sprintf("%d", ports.identity) + "}:80\"\n    networks: [zitadel]\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n    depends_on:\n      zitadel:\n        condition: service_healthy\n      zitadel-login:\n        condition: service_healthy\n    labels:\n      - traefik.enable=true\n      - traefik.docker.network=zitadel\n      - traefik.http.services.zitadel-api.loadbalancer.server.port=8080\n      - traefik.http.services.zitadel-api.loadbalancer.server.scheme=h2c\n      - traefik.http.routers.zitadel-api.rule=Host(`${ZITADEL_DOMAIN:-localhost}`) && !PathPrefix(`/ui/v2/login`)\n      - traefik.http.routers.zitadel-api.entrypoints=web\n      - traefik.http.routers.zitadel-api.service=zitadel-api\n      - traefik.http.services.zitadel-login.loadbalancer.server.port=3000\n      - traefik.http.routers.zitadel-login.rule=Host(`${ZITADEL_DOMAIN:-localhost}`) && PathPrefix(`/ui/v2/login`)\n      - traefik.http.routers.zitadel-login.entrypoints=web\n      - traefik.http.routers.zitadel-login.service=zitadel-login\n")
-		b.WriteString("networks:\n  zitadel:\n    name: \"${ZITADEL_NETWORK:-zitadel}\"\n")
-		b.WriteString("\nvolumes:\n  database-data:\n    name: \"${DATABASE_VOLUME:-smt-postgres-data}\"\n  zitadel-bootstrap:\n    name: \"${ZITADEL_BOOTSTRAP_VOLUME:-smt-zitadel-bootstrap}\"\n")
-		return b.String()
+		fmt.Fprintf(&b, "networks:\n  zitadel:\n    name: \"${ZITADEL_NETWORK:-%s-zitadel}\"\n", project)
+		fmt.Fprintf(&b, "\nvolumes:\n  database-data:\n    name: \"${DATABASE_VOLUME:-%s-postgres-data}\"\n  zitadel-bootstrap:\n    name: \"${ZITADEL_BOOTSTRAP_VOLUME:-%s-zitadel-bootstrap}\"\n", project, project)
+		compose := b.String()
+		network := fmt.Sprintf("${ZITADEL_NETWORK:-%s-zitadel}", project)
+		compose = strings.ReplaceAll(compose, "--providers.docker.network=zitadel", "--providers.docker.network="+network)
+		compose = strings.ReplaceAll(compose, "traefik.docker.network=zitadel", "traefik.docker.network="+network)
+		return compose
 	}
 	if selection.Database {
-		b.WriteString("\nvolumes:\n  database-data:\n    name: \"${DATABASE_VOLUME:-smt-postgres-data}\"\n")
+		fmt.Fprintf(&b, "\nvolumes:\n  database-data:\n    name: \"${DATABASE_VOLUME:-%s-postgres-data}\"\n", project)
 	}
 	return b.String()
 }
 
 func renderEnvExample(project string, ports resolvedPorts, identitySelected bool) string {
-	env := fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nDATABASE_VOLUME=smt-postgres-data\nAPI_BASE_URL=http://api:8080\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=%s\n", project, ports.web, ports.api, ports.database, defaultDatabasePassword)
+	env := fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nDATABASE_VOLUME=%s-postgres-data\nAPI_BASE_URL=http://api:8080\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=%s\n", project, ports.web, ports.api, ports.database, project, defaultDatabasePassword)
 	if identitySelected {
 		env += "# Production deployments must replace the pinned tags below with immutable @sha256 image references.\n"
-		env += fmt.Sprintf("ZITADEL_PORT=%d\nZITADEL_VERSION=%s\nZITADEL_IMAGE=ghcr.io/zitadel/zitadel:%s\nZITADEL_LOGIN_IMAGE=ghcr.io/zitadel/zitadel-login:%s\nTRAEFIK_IMAGE=traefik:v3.5.3\nZITADEL_DB_INIT_IMAGE=postgres:18-alpine\nZITADEL_DB_NAME=zitadel\nZITADEL_DB_USER=zitadel\nZITADEL_DB_PASSWORD=%s\nZITADEL_DATABASE_POSTGRES_DSN=postgresql://zitadel:%s@database:5432/zitadel?sslmode=disable\nZITADEL_MASTERKEY=%s\nZITADEL_DOMAIN=localhost\nZITADEL_EXTERNALPORT=%d\nZITADEL_EXTERNALSECURE=false\nZITADEL_PUBLIC_SCHEME=http\nZITADEL_HEALTH_PATH=/debug/healthz\nZITADEL_READY_PATH=/debug/ready\nOIDC_ISSUER_URL=http://localhost:%d\nOIDC_DISCOVERY_URL=http://localhost:%d/.well-known/openid-configuration\nOIDC_JWKS_URL=http://localhost:%d/oauth/v2/keys\nOIDC_AUDIENCE=smt-api\nOIDC_REQUIRED_SCOPES=openid,profile,email\nOIDC_CLIENT_ID=local-placeholder\nOIDC_WEB_REDIRECT_URI=http://localhost:3000/auth/callback\nOIDC_MOBILE_REDIRECT_URI=com.example.smt:/oauth/callback\n", defaultIdentityPort, defaultZitadelVersion, defaultZitadelVersion, defaultZitadelVersion, defaultIdentityPassword, defaultIdentityPassword, defaultIdentityMasterkey, ports.identity, ports.identity, ports.identity, ports.identity)
+		env += fmt.Sprintf("ZITADEL_PORT=%d\nZITADEL_NETWORK=%s-zitadel\nZITADEL_BOOTSTRAP_VOLUME=%s-zitadel-bootstrap\nZITADEL_VERSION=%s\nZITADEL_IMAGE=ghcr.io/zitadel/zitadel:%s\nZITADEL_LOGIN_IMAGE=ghcr.io/zitadel/zitadel-login:%s\nTRAEFIK_IMAGE=traefik:v3.5.3\nZITADEL_DB_INIT_IMAGE=postgres:18-alpine\nZITADEL_DB_NAME=zitadel\nZITADEL_DB_USER=zitadel\nZITADEL_DB_PASSWORD=%s\nZITADEL_DATABASE_POSTGRES_DSN=postgresql://zitadel:%s@database:5432/zitadel?sslmode=disable\nZITADEL_MASTERKEY=%s\nZITADEL_DOMAIN=localhost\nZITADEL_EXTERNALPORT=%d\nZITADEL_EXTERNALSECURE=false\nZITADEL_PUBLIC_SCHEME=http\nZITADEL_HEALTH_PATH=/debug/healthz\nZITADEL_READY_PATH=/debug/ready\nOIDC_ISSUER_URL=http://localhost:%d\nOIDC_DISCOVERY_URL=http://localhost:%d/.well-known/openid-configuration\nOIDC_JWKS_URL=http://localhost:%d/oauth/v2/keys\nOIDC_AUDIENCE=smt-api\nOIDC_REQUIRED_SCOPES=openid,profile,email\nOIDC_CLIENT_ID=local-placeholder\nOIDC_WEB_REDIRECT_URI=http://localhost:%d/auth/callback\nOIDC_MOBILE_REDIRECT_URI=com.example.smt:/oauth/callback\n", ports.identity, project, project, defaultZitadelVersion, defaultZitadelVersion, defaultZitadelVersion, defaultIdentityPassword, defaultIdentityPassword, defaultIdentityMasterkey, ports.identity, ports.identity, ports.identity, ports.identity, ports.web)
 	}
 	return env
 }

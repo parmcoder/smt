@@ -68,15 +68,19 @@ and root `.gitignore` ignores `.env`. Compose contains only selected `web`,
 Database-only, Web-only, API+Database, all-OCI, empty, and Mobile-only
 selections remain valid. Default host bindings are Web `3000:3000`, API
 `8080:8080`, and Database `5432:5432`, overridden by `WEB_PORT`, `API_PORT`,
-and `DATABASE_PORT`. The project name is the normalized destination basename
-in safe lowercase-hyphen form, capped at 63 characters, with
-`smt-workspace` fallback.
+and `DATABASE_PORT`. When an override is unset, the generated `.env.example`
+derives a deterministic workspace-scoped host port so fresh workspaces can run
+in parallel. The project name is the normalized destination basename in safe
+lowercase-hyphen form, capped at 63 characters, with `smt-workspace` fallback;
+generated local resource names use `<project>-postgres-data`,
+`<project>-zitadel`, and `<project>-zitadel-bootstrap`.
 
 Web uses `/healthz`; API health/readiness use `/healthz` and `/readyz`; and
 Database uses `pg_isready`. Web-to-API and API-to-Database dependencies are
-conditional on `service_healthy`. `.env.example` is examples-only with a named
-`DATABASE_VOLUME` and the local-development `DATABASE_PASSWORD=smt-dev-password`
-value. Replace it outside disposable local use; no `.env` is generated.
+conditional on `service_healthy`. `.env.example` is examples-only with the
+generated local resource names and the local-development
+`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable
+local use; no `.env` is generated.
 
 `runtime.Preflight` is a pure, injectable contract for future Taskfile/CLI use:
 it reports invalid or colliding/occupied ports and missing Podman or Podman
