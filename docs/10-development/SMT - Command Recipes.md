@@ -171,9 +171,10 @@ The planned milestones are:
   The opted-in lane passes format, analyze, and unit/widget tests; this host
   has no Android SDK or supported Android/iOS target, so integration and debug
   builds are explicit unverified results, never silently skipped.
-- `.6.1.3`: after the Mobile rollup closes, expose the native Flutter
-  verification interface and fast Lefthook profile. Do not generate a Mobile
-  Taskfile; root aggregation invokes direct `asdf exec flutter` commands.
+- `.6.1.3`: expose the native Flutter verification interface and fast Lefthook
+  profile. Do not generate a Mobile Taskfile; root and child Lefthook invoke
+  `asdf exec dart format` and `asdf exec flutter analyze`, while full test,
+  integration, and debug-build lanes remain explicit.
 
 Apply runs only the staged Flutter create plus static Mobile verification-file
 writes; it does not run `pub get` or these verification commands. Current

@@ -232,6 +232,70 @@ func TestMobileApplyGeneratesVerificationContract(t *testing.T) {
 	}
 }
 
+func TestMobileApplyGeneratesNativeVerificationLefthookProfile(t *testing.T) {
+	installFakeASDF(t, false)
+	destination := filepath.Join(t.TempDir(), "workspace")
+	applyMobileWorkspace(t, destination)
+
+	rootHook, err := os.ReadFile(filepath.Join(destination, "lefthook.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	childHook, err := os.ReadFile(filepath.Join(destination, "mobile-app", "lefthook.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, hook := range map[string]string{"root": string(rootHook), "mobile": string(childHook)} {
+		for _, marker := range []string{
+			"commit-msg:",
+			"pre-push:",
+			"asdf exec dart format --output=none --set-exit-if-changed lib test integration_test",
+			"asdf exec flutter analyze",
+		} {
+			if !strings.Contains(hook, marker) {
+				t.Fatalf("%s Lefthook config missing %q:\n%s", name, marker, hook)
+			}
+		}
+		if strings.Contains(hook, "Taskfile") || strings.Contains(hook, "flutter test") {
+			t.Fatalf("%s Lefthook fast profile contains a full verification lane:\n%s", name, hook)
+		}
+	}
+	if !strings.Contains(string(rootHook), "cd mobile-app && asdf exec dart format") || !strings.Contains(string(rootHook), "cd mobile-app && asdf exec flutter analyze") {
+		t.Fatalf("root Lefthook does not dispatch native Mobile commands from the workspace root:\n%s", rootHook)
+	}
+	if strings.Contains(string(childHook), "cd mobile-app") {
+		t.Fatalf("Mobile child Lefthook must run from its own repository:\n%s", childHook)
+	}
+	if _, err := os.Stat(filepath.Join(destination, "mobile-app", "Taskfile.yml")); !os.IsNotExist(err) {
+		t.Fatalf("Mobile output contains a Taskfile: %v", err)
+	}
+}
+
+func TestMobileApplyDocumentsNativeVerificationLanes(t *testing.T) {
+	installFakeASDF(t, false)
+	destination := filepath.Join(t.TempDir(), "workspace")
+	applyMobileWorkspace(t, destination)
+
+	readme, err := os.ReadFile(filepath.Join(destination, "mobile-app", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"## Verification",
+		"asdf exec dart format --output=none --set-exit-if-changed lib test integration_test",
+		"asdf exec flutter analyze",
+		"asdf exec flutter test",
+		"asdf exec flutter test integration_test/app_test.dart -d <device-id>",
+		"asdf exec flutter build apk --debug",
+		"asdf exec flutter build ios --debug --no-codesign",
+		"unavailable",
+	} {
+		if !strings.Contains(string(readme), marker) {
+			t.Fatalf("Mobile README missing verification marker %q:\n%s", marker, readme)
+		}
+	}
+}
+
 func TestMobileApplyVerificationContractIsDeterministic(t *testing.T) {
 	installFakeASDF(t, false)
 	parent := t.TempDir()
@@ -389,6 +453,22 @@ func TestRealFlutterCreatePubGetAndAnalyzeWhenOptedIn(t *testing.T) {
 			continue
 		}
 		t.Fatalf("asdf %v failed: %v: %s", args, err, output)
+	}
+}
+
+func applyMobileWorkspace(t *testing.T, destination string) {
+	t.Helper()
+	cfg, err := config.LoadBytes(mobileBlueprintBytes(), filepath.Join(filepath.Dir(destination), "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		Config:        *cfg,
+		Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+		Beads:         initializerFunc(func(context.Context, string) error { return nil }),
+	}
+	if err := service.Apply(context.Background(), destination, mobileBlueprintBytes()); err != nil {
+		t.Fatal(err)
 	}
 }
 

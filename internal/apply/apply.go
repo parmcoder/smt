@@ -338,7 +338,11 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		if err := writeFile(filepath.Join(bootstrap, ".gitignore"), componentIgnore(c.kind)); err != nil {
 			return plumbing.ZeroHash, err
 		}
-		if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root); err != nil {
+		if c.id == "mobile" {
+			if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root, "mobile"); err != nil {
+				return plumbing.ZeroHash, err
+			}
+		} else if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root); err != nil {
 			return plumbing.ZeroHash, err
 		}
 	}
@@ -633,7 +637,13 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 			return err
 		}
 	}
-	return writeLefthookConfig(root, root, root)
+	profiles := []string(nil)
+	for _, c := range cs {
+		if c.id == "mobile" {
+			profiles = append(profiles, "mobile")
+		}
+	}
+	return writeLefthookConfig(root, root, root, profiles...)
 }
 
 func mobileE2ESelected(cfg config.Config, cs []component) bool {
@@ -684,20 +694,37 @@ func identityDeclared(cfg config.Config) bool {
 	return false
 }
 
-func writeLefthookConfig(destination, repositoryRoot, workspaceRoot string) error {
-	contents, err := lefthookConfig(repositoryRoot, workspaceRoot)
+func writeLefthookConfig(destination, repositoryRoot, workspaceRoot string, profiles ...string) error {
+	contents, err := lefthookConfig(repositoryRoot, workspaceRoot, profiles...)
 	if err != nil {
 		return err
 	}
 	return writeFile(filepath.Join(destination, "lefthook.yml"), contents)
 }
 
-func lefthookConfig(repositoryRoot, workspaceRoot string) (string, error) {
+func lefthookConfig(repositoryRoot, workspaceRoot string, profiles ...string) (string, error) {
 	configPath, err := filepath.Rel(repositoryRoot, filepath.Join(workspaceRoot, "smt.yaml"))
 	if err != nil {
 		return "", fmt.Errorf("resolve root config path: %w", err)
 	}
-	return "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config " + filepath.ToSlash(configPath) + " {1}\n", nil
+	config := "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config " + filepath.ToSlash(configPath) + " {1}\n"
+	if hasLefthookProfile(profiles, "mobile") {
+		prefix := ""
+		if filepath.Clean(repositoryRoot) == filepath.Clean(workspaceRoot) {
+			prefix = "cd mobile-app && "
+		}
+		config += "pre-push:\n  commands:\n    mobile-format:\n      run: " + prefix + "asdf exec dart format --output=none --set-exit-if-changed lib test integration_test\n    mobile-analyze:\n      run: " + prefix + "asdf exec flutter analyze\n"
+	}
+	return config, nil
+}
+
+func hasLefthookProfile(profiles []string, want string) bool {
+	for _, profile := range profiles {
+		if profile == want {
+			return true
+		}
+	}
+	return false
 }
 
 func writeFile(path, value string) error {
@@ -896,8 +923,8 @@ or generate client secrets. This work is tracked by smt-4xf.3.3.4.
 	return os.WriteFile(path, []byte(text), 0o644)
 }
 
-func writeLefthookConfigIfAbsent(destination, repositoryRoot, workspaceRoot string) error {
-	contents, err := lefthookConfig(repositoryRoot, workspaceRoot)
+func writeLefthookConfigIfAbsent(destination, repositoryRoot, workspaceRoot string, profiles ...string) error {
+	contents, err := lefthookConfig(repositoryRoot, workspaceRoot, profiles...)
 	if err != nil {
 		return err
 	}
@@ -1010,6 +1037,35 @@ asdf exec flutter devices
 asdf install flutter 3.44.9-stable installs the version recorded by the
 workspace .tool-versions file. If Flutter reports that the selected version
 is not installed, run that command before continuing.
+
+## Verification
+
+Apply does not resolve dependencies or run verification. After the explicit
+asdf exec flutter pub get setup above, the fast local checks are:
+
+~~~sh
+asdf exec dart format --output=none --set-exit-if-changed lib test integration_test
+asdf exec flutter analyze
+~~~
+
+The full host-supported unit/widget lane is:
+
+~~~sh
+asdf exec flutter test
+~~~
+
+Integration and debug-build lanes are explicit and require the matching
+platform SDK, simulator/emulator, or device. Run them directly:
+
+~~~sh
+asdf exec flutter test integration_test/app_test.dart -d <device-id>
+asdf exec flutter build apk --debug
+asdf exec flutter build ios --debug --no-codesign
+~~~
+
+Missing Flutter, Android, iOS, simulator, emulator, or device prerequisites
+are reported as unavailable and are never silently skipped. No signing, store
+publishing, MCP installation, or remote CI is performed.
 
 ## Android emulator setup
 
