@@ -295,5 +295,31 @@ func apiTaskfileYAML(databaseSelected bool) string {
       - go test -tags=integration ./...
 
 `
-	return strings.Replace(taskfile, "  verify:\n", integrationTask+"  verify:\n", 1)
+	migrationTasks := `  migrate:create:
+    preconditions:
+      - sh: test -n "{{.NAME}}"
+        msg: NAME is required; use task migrate:create NAME=add_example
+    cmds:
+      - go tool migrate create -ext sql -dir migrations -seq "{{.NAME}}"
+  migrate:up:
+    preconditions:
+      - sh: test -n "$DATABASE_URL"
+        msg: DATABASE_URL is required; set it in .env before running task migrate:up
+    cmds:
+      - go tool migrate -path migrations -database "$DATABASE_URL" up
+  migrate:version:
+    preconditions:
+      - sh: test -n "$DATABASE_URL"
+        msg: DATABASE_URL is required; set it in .env before running task migrate:version
+    cmds:
+      - go tool migrate -path migrations -database "$DATABASE_URL" version
+  migrate:validate:
+    preconditions:
+      - sh: test -n "$DATABASE_URL"
+        msg: DATABASE_URL is required; set it in .env before running task migrate:validate
+    cmds:
+      - sh scripts/validate-migrations.sh
+
+`
+	return strings.Replace(taskfile, "  verify:\n", integrationTask+migrationTasks+"  verify:\n", 1)
 }

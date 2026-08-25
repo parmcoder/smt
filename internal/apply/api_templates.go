@@ -367,7 +367,7 @@ func main() {
 }
 `
 
-const apiEnvExample = `HTTP_ADDR=:8080
+const apiEnvExampleBase = `HTTP_ADDR=:8080
 APP_ENV=development
 LOG_LEVEL=info
 HTTP_READ_TIMEOUT=15s
@@ -636,7 +636,7 @@ func apiSourceFiles(databaseSelected bool) map[string]string {
 		"internal/server/config_test.go":      apiConfigTestGo,
 		"internal/server/server_fuzz_test.go": apiServerFuzzTestGo,
 		"cmd/openapi/main.go":                 apiOpenAPICommandGo,
-		".env.example":                        apiEnvExample,
+		".env.example":                        apiEnvExample(databaseSelected),
 		"Taskfile.yml":                        apiTaskfileYAML(databaseSelected),
 		"Containerfile":                       apiContainerfile,
 		"openapi.yaml":                        apiOpenAPIYAML,
@@ -644,6 +644,9 @@ func apiSourceFiles(databaseSelected bool) map[string]string {
 		"go.sum":                              goSum,
 	}
 	if databaseSelected {
+		for relative, contents := range apiMigrationFiles() {
+			files[relative] = contents
+		}
 		files["internal/server/database_integration_test.go"] = apiDatabaseIntegrationTestGo
 	}
 	return files

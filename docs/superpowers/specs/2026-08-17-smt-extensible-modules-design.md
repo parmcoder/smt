@@ -238,7 +238,7 @@ Compose errors through injectable checks for later Taskfile/CLI use. It does
 not execute external commands itself. `smt apply` renders the contract files
 offline and does not invoke Preflight, Podman, Compose, socket probing, or
 health checks. Remaining Web build contexts and Containerfiles, Database
-migration and lifecycle work, Mobile platform SDK/device verification, and
+lifecycle work, Mobile platform SDK/device verification, and
 application-domain behavior remain deferred. `.3.3.2` owns the generated API
 source/Taskfile contract, `.3.4.1` owns the independent Database
 Containerfile/Taskfile/readiness contract, and `.3.5.2` owns the generated
@@ -260,6 +260,24 @@ named Podman volume so stop/restart does not discard local data. Apply remains
 offline and does not invoke Podman, Task, PostgreSQL, or any runtime check;
 `.3.4.2` owns API migrations and `.3.4.3` owns live Database/API lifecycle
 verification.
+
+## Implemented `.3.4.2` API-owned migrations
+
+When API and Database are selected together, Apply emits the API-owned
+`migrations/000001_baseline.up.sql` and `.down.sql` pair, each containing only
+the deterministic no-op `SELECT 1;`, plus `scripts/validate-migrations.sh`.
+The API `.env.example` adds a blank operator-provided `DATABASE_URL=` entry.
+The API Taskfile conditionally adds `migrate:create NAME=...`, `migrate:up`,
+`migrate:version`, and `migrate:validate` using the pinned `go tool migrate`
+command shape. Validation runs up and then version and preserves native
+failures without rollback. These tasks are explicit and are not dependencies
+of `verify`.
+
+API-only and Database-only outputs contain no migration assets or commands.
+Apply remains offline and does not execute migrations, provision credentials or
+databases, start services, add startup migration behavior, emit destructive
+down/drop/force commands, or change root orchestration. `DATABASE_URL` is an
+operator contract; `.3.4.3` owns live PostgreSQL/Podman lifecycle verification.
 
 ## Implemented `.3.3.1` API manifest contract
 
@@ -322,8 +340,8 @@ top-level `dotenv: ['.env']`; it does not copy or mutate `.env`. The tasks are
 `build` with trimpath output `bin/apis`, `run` of that built binary, `test`,
 `coverage`, `mod` (`go mod verify`), offline byte-comparing `openapi`, and
 `verify` depending on `build`, `test`, `mod`, and `openapi` before `go vet
-./...`. API+Database gets the same API Taskfile and no database
-migration/readiness tasks yet; those belong to `smt-4xf.6.1.2` and later. The
+./...`. API+Database gets conditional API-owned migration tasks and the
+neutral baseline; database readiness and live lifecycle remain later. The
 Task v3.52.0 child harness verified dotenv-driven `/healthz` and bounded
 process cleanup.
 
@@ -337,8 +355,8 @@ graceful shutdown with the configured timeout.
 
 API-selected Apply writes embedded deterministic assets only: no network, Go or
 package-manager command, tool installation, Podman, listener, or runtime
-execution. No credentials, domain CRUD, DB connectivity/readiness, migrations,
-root Taskfile changes, Containerfiles, non-root packaging, or `smt extend` are
+execution. No credentials, domain CRUD, DB connectivity/readiness, root
+Taskfile changes, Containerfiles, non-root packaging, or `smt extend` are
 added; Apply never executes the generated child Taskfile. No implicit installs
 or network work are performed.
 Durable unit/race/fuzz/integration coverage is `.3.3.3`; non-root packaging and
@@ -423,10 +441,10 @@ gate; `.4` adds the selectable catalog and repository module annotations, `.5`
 adds the six non-selectable platform declarations plus catalog/config
 validation boundaries, `.3.1` adds the root runtime contract artifacts,
 `.3.2.1` adds the staged CLI-owned Web baseline, `.3.3.2` adds the generated
-API runtime/OpenAPI assets, and `.3.4.1` adds the independent Database runtime
-and readiness assets. Remaining design scope records the completed P0 Mobile
-verification contract, followed by deferred Web `.3.2.2/.3`, API-owned
-migrations, Database/API lifecycle verification, packaging, and Podman-first
+API runtime/OpenAPI assets, `.3.4.1` adds the independent Database runtime
+and readiness assets, and `.3.4.2` adds conditional API-owned migrations.
+Remaining design scope records the completed P0 Mobile verification contract,
+followed by deferred Web `.3.2.2/.3`, Database/API lifecycle verification, packaging, and Podman-first
 runtime execution. Mobile integration/device/build lanes remain explicit
 unverified where the host lacks the required SDK or target. Out of scope for
 the current CLI are Web/Mobile runtime execution, platform Containerfiles,

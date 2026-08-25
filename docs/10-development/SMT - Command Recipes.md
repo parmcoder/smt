@@ -371,10 +371,16 @@ mutate `.env`. Its task surface is:
 | `container:build` | Development image: caller-installed Podman builds the generated `Containerfile` with `--pull=missing`, fetching absent pinned base images. |
 | `container:build:production` | Production image: builds with `--pull=never` and `${SMT_API_PRODUCTION_IMAGE:-smt-api:production}`, requiring preloaded and verified base images. |
 | `container:verify` | Podman verifies non-root identity, `/healthz`, `/readyz`, and graceful stop with a bounded wait. |
+| `migrate:create NAME=...` | API+Database only: runs `go tool migrate create -ext sql -dir migrations -seq NAME`; it requires an explicit migration name. |
+| `migrate:up` | API+Database only: applies pending migrations with `go tool migrate -path migrations -database "$DATABASE_URL" up`. |
+| `migrate:version` | API+Database only: reports the current version with the pinned migrate tool and explicit `DATABASE_URL`. |
+| `migrate:validate` | API+Database only: runs `up` and then `version`, preserving native failures without rollback. |
 | `verify` | Depends on static quality, Go tests, OpenAPI, and container tasks; it does not start data services. |
 
-API+Database receives the same API Taskfile and no data-service migration or
-readiness tasks yet; those belong to `smt-4xf.6.1.2` and later. Task v3.52.0
+API+Database receives the migration tasks above, the blank operator-provided
+`DATABASE_URL=` example, and a deterministic no-op baseline pair. API-only and
+Database-only outputs contain none of these migration assets or commands.
+Database readiness and live lifecycle tasks remain later. Task v3.52.0
 verified the generated-child harness, including dotenv-driven `/healthz` and
 bounded process cleanup. `smt apply` writes the child Taskfile and
 `Containerfile` but never runs Task, builds an image, or starts a runtime; there

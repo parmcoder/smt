@@ -423,7 +423,7 @@ install`, `flutter pub get`, or package resolution. OCI-selected workspaces also
 receive root Compose Taskfile entrypoints that pass the operator-managed root
 `.env` explicitly and fail early when it is missing (or when a selected
 Database has no password). Remaining Web dependency, quality, browser, and
-runtime lanes, Database migration/lifecycle verification, Mobile platform
+runtime lanes, Database lifecycle verification, Mobile platform
 SDK/device verification, and component lifecycle tasks remain later work. The
 broader root and Database task aggregation belongs to `smt-4xf.6.1.2` and
 later.
@@ -507,21 +507,41 @@ The API child also receives deterministic `Taskfile.yml` with top-level
 `build`, then runs `./bin/apis`), `test`, `coverage`, `mod` (`go mod verify`),
 `openapi` (offline `GOPROXY=off GOSUMDB=off` generation compared byte-for-byte
 with `openapi.yaml`), and `verify` (depends on `build`, `test`, `mod`, and
-`openapi`, then runs `go vet ./...`). The same child Taskfile is emitted for
-API+Database, with no database migration or readiness tasks yet; those belong
-to `smt-4xf.6.1.2` and later. The generated Task CLI harness was verified
+`openapi`, then runs `go vet ./...`). API+Database additionally receives
+conditional API-owned `migrate:create`, `migrate:up`, `migrate:version`, and
+`migrate:validate` tasks plus the neutral baseline assets; readiness and live
+database lifecycle tasks remain later. The generated Task CLI harness was verified
 with Task v3.52.0, including dotenv-driven `/healthz` and bounded process
 cleanup.
 
 API-selected Apply writes embedded deterministic assets only: it performs no
 network, Go or package-manager command, tool installation, Task execution, Podman invocation,
 listener start, or runtime execution. This slice adds no credentials, domain
-CRUD, database connectivity/readiness, migrations, root Taskfile changes,
+CRUD, database connectivity/readiness, or root Taskfile changes,
 Containerfiles, non-root packaging, or `smt extend`. Durable unit/race/fuzz/integration coverage is
 `.3.3.3`; non-root packaging and runtime verification are `.3.3.4`. Later
 human and Podman gates remain required. `go mod tidy` and human E2E remain
 unverified; `go mod verify` evidence is limited to the generated child Task
 harness and accepted focused implementation tests.
+
+### Implemented `.3.4.2` API-owned migrations
+
+When API and Database are both selected, Apply emits deterministic
+`migrations/000001_baseline.up.sql` and `.down.sql` files containing only
+`SELECT 1;`, a `scripts/validate-migrations.sh` helper, and a blank
+operator-provided `DATABASE_URL=` entry in the API `.env.example`. The generated
+API Taskfile adds `migrate:create NAME=...` using the pinned
+`go tool migrate create -ext sql -dir migrations -seq NAME` shape,
+`migrate:up`, `migrate:version`, and `migrate:validate`; validation runs up and
+then version and preserves native failures without rollback. These tasks are
+explicit and are never dependencies of `verify`.
+
+API-only and Database-only selections emit no migration assets or migration
+tasks. Apply remains offline: it does not invoke Go, Task, migrations,
+PostgreSQL, Podman, or database provisioning. `DATABASE_URL` is an explicit
+operator contract; real PostgreSQL/Podman lifecycle verification belongs to
+`.3.4.3`. No automatic down, drop, force, startup migration, credentials, or
+root orchestration is generated.
 
 Legacy DevOps-shaped configurations are rejected by `smt apply` before any
 destination mutation. The migration-oriented error directs the operator to

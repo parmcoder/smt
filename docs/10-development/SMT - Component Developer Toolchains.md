@@ -87,7 +87,7 @@ it reports invalid or colliding/occupied ports and missing Podman or Podman
 Compose prerequisites with actionable guidance. It does not execute external
 commands itself. Apply renders the files but does not invoke Preflight, Podman,
 Compose, socket probing, or health checks. Remaining Web build contexts and
-Containerfiles, Database migration/lifecycle work, Mobile device/build
+Containerfiles, Database lifecycle work, Mobile device/build
 execution, and app-domain behavior remain deferred or host-unverified except
 for the generated Mobile source/test contract, API source/Taskfile contract,
 and Database runtime/readiness contract.
@@ -101,8 +101,8 @@ the example value outside disposable local use. The child Taskfile builds the
 image, runs it with a named persistent volume on localhost, checks readiness
 with `pg_isready`, and exposes fail-fast `psql`/`diagnose` and stop/verify
 commands. The generated child has no API source, application schema, or
-migration command; API-owned migrations and live lifecycle verification remain
-the `.3.4.2` and `.3.4.3` slices.
+migration command; API-owned migration assets are `.3.4.2` and live lifecycle
+verification is `.3.4.3`.
 
 ## Generated manifest ownership
 
@@ -211,8 +211,9 @@ The API child also receives deterministic `Taskfile.yml` with top-level
 `format:check`, `lint`, `vuln`, `vet`, `mod` (`go mod verify`), offline
 byte-comparing `openapi`, development `container:build`, production
 `container:build:production`, `container:verify`, and aggregate
-`verify`. API+Database receives the same API Taskfile but no data-service
-migration/readiness tasks yet; those belong to `smt-4xf.6.1.2` and later. Task
+`verify`. API+Database receives conditional API-owned migration tasks and a
+neutral baseline; data-service readiness and live lifecycle tasks remain later.
+Task
 v3.52.0 verified dotenv-driven `/healthz` and bounded process cleanup in the
 generated-child harness.
 
@@ -356,8 +357,9 @@ regression suites remain application-owned follow-up work.
 
 Baseline: PostgreSQL 18. The implemented `.3.4.1` child uses `pg_isready`,
 fail-fast `psql`, examples-only environment placeholders, and a named Podman
-volume. `.3.4.2` owns golang-migrate v4.19.1 up/version checks and API-owned
-migrations; `.3.4.3` owns disposable Podman-backed lifecycle verification. No
+volume. `.3.4.2` owns API-owned golang-migrate v4.19.1 create/up/version/validate
+tasks and migrations; `.3.4.3` owns disposable Podman-backed lifecycle
+verification. No
 automatic migration, down, drop, or force. Reuse Godex database guidance; no DB
 MCP is required for v0.1.0.
 
@@ -380,11 +382,11 @@ candidate. SBOM, signing, and remote CI are deferred.
 
 | Component | Generated manifest/lockfile | Required local tools | Task gates | Required skills | Optional MCP/runtime |
 | --- | --- | --- | --- | --- | --- |
-| Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `.3.3.4` `Containerfile` and `Taskfile.yml` | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, govulncheck, Task, Podman | child `build`, `run`, `test`, `coverage`, `format:check`, `lint`, `vet`, `race`, `fuzz`, `vuln`, `mod`, `openapi`, `container:build`, `container:verify`, `verify`; data-service gates remain later | `$godex:godex-go-backend` | gopls local; no Go MCP |
+| Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `.3.3.4` `Containerfile` and `Taskfile.yml`; `.3.4.2` conditional migration assets | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, govulncheck, Task, Podman | child `build`, `run`, `test`, `coverage`, `format:check`, `lint`, `vet`, `race`, `fuzz`, `vuln`, `mod`, `openapi`, `container:build`, `container:verify`, `verify`; API+Database adds `migrate:create`, `migrate:up`, `migrate:version`, `migrate:validate` | `$godex:godex-go-backend` | gopls local; no Go MCP |
 | Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `package-lock.json` after later `npm install` | Node.js 24.18.0, Next.js 16.2.9, npm | `.3.2.2/.3` deferred: lockfile, Prettier, ESLint, TypeScript, Vitest/RTL, build, and Web app quality checks | React best practices; frontend testing/debugging | Browser for rendered/E2E |
 | Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` implemented: format, analyze, unit/widget; integration/debug builds explicit unverified when targets/SDKs are unavailable; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
-| PostgreSQL | None; `.3.4.1` `Containerfile`, `.env.example`, and `Taskfile.yml` | PostgreSQL, psql, pg_isready, Podman | `.3.4.1` build/run/readiness/diagnose/verify; `.3.4.2` migration up/version; `.3.4.3` disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
+| PostgreSQL | None; `.3.4.1` `Containerfile`, `.env.example`, and `Taskfile.yml` | PostgreSQL, psql, pg_isready, Podman | `.3.4.1` build/run/readiness/diagnose/verify; API+Database `.3.4.2` migration create/up/version/validate; `.3.4.3` disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
 | Root/container | `compose.yaml`, `.env.example`, root `Taskfile.yml` for OCI selections | none for Apply; Podman/Compose for local lifecycle | explicit root `.env` Compose config/build/up/down/ps; broader smoke, non-root, security, and aggregate verify remain later | project workflow guidance | Podman/Compose runtime is operator-run |
 
 ## Research sources

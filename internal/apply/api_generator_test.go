@@ -209,7 +209,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 			taskfile := readGeneratedAPIFile(t, filepath.Join(destination, "apis"), "Taskfile.yml")
 			wantTasks := []string{"build", "run", "test", "coverage", "test:race", "test:fuzz", "format:check", "lint", "vuln", "vet", "mod", "openapi", "container:build", "container:build:production", "container:verify"}
 			if tt.database {
-				wantTasks = append(wantTasks, "test:integration")
+				wantTasks = append(wantTasks, "test:integration", "migrate:create", "migrate:up", "migrate:version", "migrate:validate")
 			}
 			wantTasks = append(wantTasks, "verify")
 			if got := taskfileTaskNames(taskfile); strings.Join(got, ",") != strings.Join(wantTasks, ",") {
@@ -234,6 +234,11 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				for _, want := range []string{
 					"test:integration:\n    preconditions:\n      - sh: test -n \"$DATABASE_URL\"",
 					"go test -tags=integration ./...",
+					"migrate:create:\n    preconditions:\n      - sh: test -n \"{{.NAME}}\"",
+					"go tool migrate create -ext sql -dir migrations -seq \"{{.NAME}}\"",
+					"go tool migrate -path migrations -database \"$DATABASE_URL\" up",
+					"go tool migrate -path migrations -database \"$DATABASE_URL\" version",
+					"sh scripts/validate-migrations.sh",
 				} {
 					if !strings.Contains(taskfile, want) {
 						t.Fatalf("API+Database Taskfile missing %q:\n%s", want, taskfile)
@@ -241,7 +246,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				}
 			}
 			verify := taskfileTaskBlock(taskfile, "verify")
-			for _, forbidden := range []string{"go test ./...", "go mod verify", "go run ./cmd/openapi", "cp .env.example .env", "go install", "go get", "migrate"} {
+			for _, forbidden := range []string{"go test ./...", "go mod verify", "go run ./cmd/openapi", "cp .env.example .env", "go install", "go get"} {
 				if forbidden == "go test ./..." || forbidden == "go mod verify" || forbidden == "go run ./cmd/openapi" {
 					if strings.Contains(verify, forbidden) {
 						t.Fatalf("verify duplicates dependency recipe %q:\n%s", forbidden, verify)
@@ -251,6 +256,9 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				if strings.Contains(taskfile, forbidden) {
 					t.Fatalf("Taskfile contains forbidden %q:\n%s", forbidden, taskfile)
 				}
+			}
+			if !tt.database && strings.Contains(taskfile, "migrate") {
+				t.Fatalf("API-only Taskfile contains migration commands:\n%s", taskfile)
 			}
 			if strings.Contains(taskfile, "- go run .\n") {
 				t.Fatalf("Taskfile contains the obsolete standalone go run recipe:\n%s", taskfile)

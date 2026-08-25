@@ -343,7 +343,7 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		}
 	}
 	if c.id == "api" {
-		if err := appendAPIReadme(filepath.Join(bootstrap, "README.md")); err != nil {
+		if err := appendAPIReadme(filepath.Join(bootstrap, "README.md"), databaseSelected); err != nil {
 			return plumbing.ZeroHash, err
 		}
 		if err := writeAPISourceFiles(bootstrap, databaseSelected); err != nil {
@@ -793,7 +793,7 @@ does not install browsers, SDKs, credentials, or cloud integrations.
 	return os.WriteFile(path, []byte(text), 0o644)
 }
 
-func appendAPIReadme(path string) error {
+func appendAPIReadme(path string, databaseSelected bool) error {
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -855,6 +855,31 @@ builds must use task container:build:production; that task uses
 --pull=never, so the caller or build system must preload and verify the
 pinned base images before building. Set SMT_API_PRODUCTION_IMAGE to choose the
 production image tag; it defaults to smt-api:production.
+`
+	if databaseSelected {
+		text += `
+## SMT API database migrations
+
+When the API and Database components are selected together, migrations are
+explicit operator-run tasks. Copy the example environment file and provide a
+connection string for the database you intend to use:
+
+~~~sh
+cp .env.example .env
+# Set DATABASE_URL in .env; Apply does not provision a database or run migrations.
+task migrate:create NAME=add_example
+task migrate:up
+task migrate:version
+task migrate:validate
+~~~
+
+The baseline migration is a deterministic no-op. migrate:validate applies
+pending migrations and then reports the current version, preserving native
+failures and without an automatic rollback. Database startup, readiness, and
+real PostgreSQL lifecycle checks remain operator-owned.
+`
+	}
+	text += `
 
 If Go, the pinned Go tools, Task, or Podman is missing, record the lane as
 unavailable, install or configure the prerequisite manually, and rerun the
