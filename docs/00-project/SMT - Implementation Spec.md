@@ -400,6 +400,16 @@ the three port overrides, `DATABASE_VOLUME`, `API_BASE_URL`, `DATABASE_HOST`,
 `DATABASE_NAME`, and `DATABASE_USER`; no production or secret credentials or
 `.env` file is generated.
 
+When the optional identity module is selected, the generated proxy always uses
+Podman. Traefik retains its Docker-compatible provider because that provider
+speaks the Podman API, but its endpoint is explicitly
+`unix:///var/run/podman/podman.sock`; the host socket is supplied through
+`PODMAN_SOCKET` and never falls back to `/var/run/docker.sock`. The generated
+example assumes the rootless Linux socket
+`/run/user/1000/podman/podman.sock`; operators must change it for another UID,
+rootful Podman (`/run/podman/podman.sock`), or their local Podman machine and
+enable the Podman API socket before `task compose:up`.
+
 Web's contract probes `/healthz`. API health/readiness are `/healthz` and
 `/readyz`, and Database health uses `pg_isready`. When both services are
 selected, Web depends on API with `condition: service_healthy`; when API and
