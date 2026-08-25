@@ -33,8 +33,13 @@ repositories are ordered `repo`, `web`, `mobile`, `api`, `database`; an opt-out
 omits the Mobile entry. New blueprints have no DevOps prompt,
 `workspace.stack.devops`, `infra` repository, or Docker/OpenTofu metadata or
 artifacts. After Database, it offers the optional default-no
+`Include ZITADEL identity module? [y/N]` question. Identity requires Database,
+records only `modules: [identity]` on the root, and adds the local ZITADEL
+Compose contract plus generic OIDC environment keys without enforcing login or
+generating client secrets. It then offers the optional default-no
 `Include E2E quality declaration? [y/N]` question. Opting in records only
-`modules: [e2e]` on the root; component repositories receive exact module IDs.
+`modules: [e2e]` on the root; selecting both records `[identity, e2e]` in prompt
+order and component repositories receive exact module IDs.
 Current Apply remains metadata-only for E2E; the P0 `smt-4xf.14` rollup will
 generate attached `e2e/web` and `e2e/mobile` packages only for selected Web or
 Mobile targets, while no-target E2E remains metadata-only. It writes `smt.yaml`
@@ -203,13 +208,16 @@ cat ../platform/.env.example
 grep -n '\.env' ../platform/.gitignore
 ```
 
-Compose service IDs are only `web`, `api`, and `database`, in that order when
-selected; Mobile is not an OCI service. API-only, Database-only, Web-only,
-API+Database, all-OCI, empty, and Mobile-only selections remain valid, with
-only selected OCI services emitted. Default host bindings are `3000:3000`,
-`8080:8080`, and `5432:5432`; override them with `WEB_PORT`, `API_PORT`, and
-`DATABASE_PORT`. The project name is the safe lowercase-hyphen destination
-basename, capped at 63 characters, with `smt-workspace` fallback.
+Compose service IDs are `web`, `api`, `database`, and optional `zitadel`
+in that order when selected; the identity contract also emits idempotent
+`zitadel-db-init`, `zitadel-login`, and `proxy` services. Mobile is not an OCI
+service. API-only, Database-only, Web-only, API+Database, all-OCI, empty, and
+Mobile-only selections remain valid, with only selected OCI services emitted.
+Default host bindings are `3000:3000`, `8080:8080`, `5432:5432`, and
+`8081:80` for the local ZITADEL proxy; override them with `WEB_PORT`,
+`API_PORT`, `DATABASE_PORT`, and `ZITADEL_PORT`. The project name is the safe
+lowercase-hyphen destination basename, capped at 63 characters, with
+`smt-workspace` fallback.
 
 Web probes `/healthz`; API probes `/healthz` and `/readyz`; Database probes with
 `pg_isready`. Web-to-API and API-to-Database dependencies are conditional and

@@ -119,6 +119,54 @@ func TestRenderSupportsDatabaseOnlyAndEmptySelections(t *testing.T) {
 	}
 }
 
+func TestRenderIdentityAddsPinnedServicesAndOIDCContract(t *testing.T) {
+	artifacts, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/identity-workspace",
+		Selection:     Selection{API: true, Database: true, Identity: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(artifacts.Compose)
+	var document map[string]any
+	if err := yaml.Unmarshal(artifacts.Compose, &document); err != nil {
+		t.Fatalf("identity Compose is invalid YAML: %v\n%s", err, artifacts.Compose)
+	}
+	for _, service := range []string{"database", "zitadel-db-init", "zitadel", "zitadel-login", "proxy"} {
+		if !strings.Contains(compose, "  "+service+":\n") {
+			t.Fatalf("Compose missing identity service %q:\n%s", service, compose)
+		}
+	}
+	for _, marker := range []string{
+		"ghcr.io/zitadel/zitadel:",
+		"ghcr.io/zitadel/zitadel-login:",
+		"/debug/ready",
+		"/debug/healthz",
+		"h2c",
+		"ZITADEL_EXTERNALDOMAIN",
+		"ZITADEL_DATABASE_POSTGRES_DSN",
+		"PGHOST: database",
+		"CREATE ROLE",
+		"CREATE DATABASE",
+		"\\gexec",
+		"OIDC_ISSUER_URL:",
+		"networks: [default, zitadel]",
+		"condition: service_completed_successfully",
+		"OIDC_ISSUER_URL=",
+		"OIDC_AUDIENCE=",
+	} {
+		if !strings.Contains(compose+string(artifacts.EnvExample), marker) {
+			t.Fatalf("identity artifacts missing %q:\ncompose=%s\nenv=%s", marker, compose, artifacts.EnvExample)
+		}
+	}
+	if !strings.Contains(string(artifacts.EnvExample), "ZITADEL_MASTERKEY=smt-zitadel-masterkey-local-0000\n") {
+		t.Fatalf("identity env example must use the 32-byte local master key placeholder:\n%s", artifacts.EnvExample)
+	}
+	if strings.Index(compose, "  database:") > strings.Index(compose, "  zitadel-db-init:") || strings.Index(compose, "  zitadel-db-init:") > strings.Index(compose, "  zitadel:\n") || strings.Index(compose, "  zitadel:\n") > strings.Index(compose, "  zitadel-login:") || strings.Index(compose, "  zitadel-login:") > strings.Index(compose, "  proxy:") {
+		t.Fatalf("identity services are not dependency ordered:\n%s", compose)
+	}
+}
+
 func TestRenderIsByteStable(t *testing.T) {
 	options := RenderOptions{WorkspacePath: "/tmp/stable", Selection: Selection{Web: true, API: true}}
 	first, err := Render(options)

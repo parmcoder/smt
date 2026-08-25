@@ -890,6 +890,35 @@ func TestServiceWritesDeterministicRuntimeArtifactsForSelectedOCIComponents(t *t
 	}
 }
 
+func TestServiceWritesZitadelRuntimeArtifactsForIdentitySelection(t *testing.T) {
+	parent := t.TempDir()
+	destination := filepath.Join(parent, "identity-workspace")
+	raw := identityBlueprintBytes()
+	cfg, err := config.LoadBytes(raw, filepath.Join(parent, "blueprint.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		Config:        *cfg,
+		Prerequisites: prerequisiteFunc(func(context.Context) error { return nil }),
+		Beads:         initializerFunc(func(context.Context, string) error { return nil }),
+	}
+	if err := service.Apply(context.Background(), destination, raw); err != nil {
+		t.Fatal(err)
+	}
+	compose, err := os.ReadFile(filepath.Join(destination, "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(compose), "  zitadel:\n") || !strings.Contains(string(compose), "  zitadel-db-init:\n") {
+		t.Fatalf("identity Compose = %s", compose)
+	}
+	envExample, err := os.ReadFile(filepath.Join(destination, ".env.example"))
+	if err != nil || !strings.Contains(string(envExample), "ZITADEL_MASTERKEY=") || !strings.Contains(string(envExample), "OIDC_ISSUER_URL=") {
+		t.Fatalf("identity env example = %q, err=%v", envExample, err)
+	}
+}
+
 func TestServiceWritesPortableLefthookConfigurationWithoutLefthookOnPath(t *testing.T) {
 	logPath := installFakeNextASDF(t, false)
 	parent := t.TempDir()
@@ -931,6 +960,23 @@ commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert
 repositories:
   - {id: repo, path: ., scope: repo, remote: {url: ""}}
   - {id: web, path: web-app, component: web, technology: nextjs, scope: web, modules: [web], remote: {url: ""}}
+workflow:
+  policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
+  plugins:
+    - {source: parmcoder/codex-obsidian, selectors: [codex-obsidian-writer, codex-obsidian-markdown]}
+    - {source: parmcoder/godex, selectors: [godex-go-backend]}
+`)
+}
+
+func identityBlueprintBytes() []byte {
+	return []byte(`version: 1
+workspace: {ai_assist: codex, stack: {api: go, database: postgresql}}
+provenance: {tool: smt, smt_version: v0.1.0, template_set_version: v1}
+commit: {types: [feat, fix, refactor, perf, test, docs, build, ci, chore, revert], scopes: [repo, api, database]}
+repositories:
+  - {id: repo, path: ., scope: repo, modules: [identity], remote: {url: ""}}
+  - {id: api, path: apis, component: api, technology: go, scope: api, modules: [api], remote: {url: ""}}
+  - {id: database, path: database, component: database, technology: postgresql, scope: database, modules: [database], remote: {url: ""}}
 workflow:
   policy: {manager: work_manager, implementation: backend_worker, documentation: doc_writer, review_required: true}
   plugins:

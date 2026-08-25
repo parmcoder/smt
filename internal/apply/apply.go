@@ -570,6 +570,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 			selection.Database = true
 		}
 	}
+	selection.Identity = identityDeclared(cfg)
 	runtimeArtifacts, err := runtime.Render(runtime.RenderOptions{WorkspacePath: publishedRoot, Selection: selection})
 	if err != nil {
 		return fmt.Errorf("render runtime artifacts: %w", err)
@@ -578,7 +579,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		".gitignore":                     "**/.DS_Store\n**/Thumbs.db\n**/desktop.ini\n\n.smt/\n.env\n",
 		"compose.yaml":                   string(runtimeArtifacts.Compose),
 		".env.example":                   string(runtimeArtifacts.EnvExample),
-		"README.md":                      rootReadme(len(selection.ServiceIDs()) > 0),
+		"README.md":                      rootReadme(len(selection.ServiceIDs()) > 0, selection.Identity),
 		".tool-versions":                 toolVersions(cs),
 		"AGENTS.md":                      "# Project Agent Operating Agreement\n\nGo work uses `$godex:godex-go-backend`. Beads (`bd`) is the canonical task and issue state. Agents create tickets directly with `bd create`; the `work_manager` owns delivery decisions.\n\nWorkflow: `bd create -> worker -> tests -> manager review -> durable handoff/docs -> validation`. SMT does not wrap ticket creation, review queues, ready-work listing, or release readiness.\n\nOn the default branch, use ordinary `type(scope): summary` commits. On a Beads-ID branch, commits must use `type(scope): [BEAD-ID] summary`, with the ID exactly matching the branch.\n",
 		"agents/work_manager.toml":       "name = \"work_manager\"\nmodel_reasoning_effort = \"high\"\n\n# Prepared workspace contract\n# Web delivery route: work_manager -> web_worker -> doc_writer.\ncommit_format = \"type(scope): [BEAD-ID] summary on a Beads-ID branch\"\n",
@@ -589,7 +590,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		"docs/00-project/Agentic Development Workflow.md": "---\ntitle: Agentic Development Workflow\n---\n# Agentic Development Workflow\n\nBeads is canonical state. Agents create tickets directly with `bd create`, inspect and claim them with `bd show` and `bd update --claim`, and close them with `bd close`. Use `bd ready` and `bd blocked` to inspect work. SMT does not wrap ticket creation or review queues.\n",
 	}
 	if len(selection.ServiceIDs()) > 0 {
-		files["Taskfile.yml"] = rootComposeTaskfile(selection.Database)
+		files["Taskfile.yml"] = rootComposeTaskfile(selection.Database, selection.Identity)
 	}
 	webSelected := webE2ESelected(cfg, cs)
 	mobileSelected := mobileE2ESelected(cfg, cs)
@@ -606,7 +607,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 	if webSelected || mobileSelected {
 		e2eFiles := e2eOrchestrationFiles(webSelected, mobileSelected)
 		if _, ok := files["Taskfile.yml"]; ok {
-			e2eFiles["Taskfile.yml"] = addRootComposeTasks(e2eFiles["Taskfile.yml"], selection.Database)
+			e2eFiles["Taskfile.yml"] = addRootComposeTasks(e2eFiles["Taskfile.yml"], selection.Database, selection.Identity)
 		}
 		for relative, contents := range e2eFiles {
 			files[relative] = contents
@@ -662,6 +663,18 @@ func e2eDeclared(cfg config.Config) bool {
 	}
 	for _, module := range cfg.Repositories[0].Modules {
 		if module == "e2e" {
+			return true
+		}
+	}
+	return false
+}
+
+func identityDeclared(cfg config.Config) bool {
+	if len(cfg.Repositories) == 0 {
+		return false
+	}
+	for _, module := range cfg.Repositories[0].Modules {
+		if module == "identity" {
 			return true
 		}
 	}
@@ -808,12 +821,13 @@ task test
 task openapi
 ~~~
 
-The pinned static checks are also available directly when Task is not
-installed:
+The pinned static checks use an isolated temporary module file so Go 1.26 can
+load the transitive tool graph without mutating the generated application
+module. Run them through Task:
 
 ~~~sh
-go tool golangci-lint run ./...
-go tool govulncheck ./...
+task lint
+task vuln
 ~~~
 
 The API listens on HTTP_ADDR, defaulting to :8080. It exposes /healthz and
@@ -840,8 +854,11 @@ production image tag; it defaults to smt-api:production.
 If Go, the pinned Go tools, Task, or Podman is missing, record the lane as
 unavailable, install or configure the prerequisite manually, and rerun the
 command. This child contains only the API server and its local runtime checks;
-other services and workspace coordination remain outside this slice. This work
-is tracked by smt-4xf.3.3.4.
+other services and workspace coordination remain outside this slice. The
+optional OIDC contract is represented by OIDC_ISSUER_URL, OIDC_DISCOVERY_URL,
+OIDC_JWKS_URL, OIDC_AUDIENCE, and OIDC_REQUIRED_SCOPES. These values document
+the future verifier boundary only; this starter does not enforce authentication
+or generate client secrets. This work is tracked by smt-4xf.3.3.4.
 `
 	return os.WriteFile(path, []byte(text), 0o644)
 }
@@ -1045,8 +1062,11 @@ func ValidateBlueprint(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("apply requires a valid quality root module: %w", err)
 	}
-	if len(cfg.Repositories[0].Modules) > 1 || (len(cfg.Repositories[0].Modules) == 1 && cfg.Repositories[0].Modules[0] != qualityRoot.ID) {
-		return fmt.Errorf("apply requires root modules to be omitted or exactly [%s]", qualityRoot.ID)
+	allowedRootModules := map[string]bool{qualityRoot.ID: true, "identity": true}
+	for _, module := range cfg.Repositories[0].Modules {
+		if !allowedRootModules[module] {
+			return fmt.Errorf("apply requires root modules to contain only %s or identity", qualityRoot.ID)
+		}
 	}
 	expected := []component{{"web", "web-app", "web", "web", "nextjs", ""}, {"mobile", "mobile-app", "mobile", "mobile", "flutter", ""}, {"api", "apis", "api", "api", "go", ""}, {"database", "database", "database", "database", "postgresql", ""}}
 	stacks := []string{cfg.Workspace.Stack.Web, cfg.Workspace.Stack.Mobile, cfg.Workspace.Stack.API, cfg.Workspace.Stack.Database}
