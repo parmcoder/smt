@@ -227,8 +227,9 @@ the normalized destination basename in safe lowercase-hyphen form, capped at
 are scoped as `<project>-postgres-data`, `<project>-zitadel`, and
 `<project>-zitadel-bootstrap`; explicit resource overrides remain supported.
 `.env.example` contains examples only, including the local-development
-`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable local
-use; no `.env` file is generated.
+`DATABASE_PASSWORD=smt-dev-password` value and the matching internal
+`DATABASE_URL`. Replace them outside disposable local use; no `.env` file is
+generated.
 
 Web probes `/healthz`; API health/readiness are `/healthz` and `/readyz`; and
 Database health uses `pg_isready`. Web-to-API and API-to-Database dependencies

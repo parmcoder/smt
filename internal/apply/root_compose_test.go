@@ -52,6 +52,9 @@ func TestApplyGeneratesRootComposeTaskfileWithExplicitEnvFile(t *testing.T) {
 	if !strings.Contains(string(envExample), "DATABASE_PASSWORD=smt-dev-password\n") {
 		t.Fatalf("root env example is missing the local development password:\n%s", envExample)
 	}
+	if !strings.Contains(string(envExample), "DATABASE_URL=postgresql://smt:smt-dev-password@database:5432/smt?sslmode=disable\n") {
+		t.Fatalf("root env example is missing the local API database URL:\n%s", envExample)
+	}
 }
 
 func TestRootComposeTasksMergeWithE2ECoordinator(t *testing.T) {

@@ -394,10 +394,11 @@ the fallback. Generated local resource names are scoped by that project as
 `<project>-postgres-data`, `<project>-zitadel`, and
 `<project>-zitadel-bootstrap`, while explicit resource overrides remain
 supported. The same values appear in `.env.example`, which contains examples
-only and the local-development `DATABASE_PASSWORD=smt-dev-password` value.
-Replace it outside disposable local use. Its declarative examples include `COMPOSE_PROJECT_NAME`,
-the three port overrides, `DATABASE_VOLUME`, `API_BASE_URL`, `DATABASE_HOST`,
-`DATABASE_NAME`, and `DATABASE_USER`; no production or secret credentials or
+only and the local-development `DATABASE_PASSWORD=smt-dev-password` value plus
+the matching internal `DATABASE_URL`. Replace them outside disposable local use.
+Its declarative examples include `COMPOSE_PROJECT_NAME`, the three port
+overrides, `DATABASE_VOLUME`, `API_BASE_URL`, `DATABASE_HOST`, `DATABASE_NAME`,
+`DATABASE_USER`, and `DATABASE_URL`; no production or secret credentials or
 `.env` file is generated.
 
 When the optional identity module is selected, the generated proxy uses

@@ -83,6 +83,24 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 	}
 }
 
+func TestRenderAPIComposeInjectsDatabaseURLFromRootEnv(t *testing.T) {
+	artifacts, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/api-database-workspace",
+		Selection:     Selection{API: true, Database: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(artifacts.Compose)
+	envExample := string(artifacts.EnvExample)
+	if !strings.Contains(compose, `DATABASE_URL: "${DATABASE_URL:-}"`) {
+		t.Fatalf("API Compose must pass the operator DATABASE_URL into the container:\n%s", compose)
+	}
+	if !strings.Contains(envExample, "DATABASE_URL=postgresql://smt:smt-dev-password@database:5432/smt?sslmode=disable\n") {
+		t.Fatalf("root .env.example must contain the complete local API database URL:\n%s", envExample)
+	}
+}
+
 func TestRenderSupportsDatabaseOnlyAndEmptySelections(t *testing.T) {
 	for name, selection := range map[string]Selection{
 		"database-only": {Database: true},
