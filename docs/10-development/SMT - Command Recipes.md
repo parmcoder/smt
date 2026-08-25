@@ -245,12 +245,10 @@ task compose:build
 task compose:up
 ```
 
-For an identity-enabled workspace, set `PODMAN_SOCKET` in `.env` to the active
-Podman API socket before `task compose:up`. Rootless Linux commonly uses
-`/run/user/<uid>/podman/podman.sock`; enable that socket with
-`systemctl --user enable --now podman.socket`. Rootful Podman commonly uses
-`/run/podman/podman.sock`. Traefik uses its Docker-compatible provider against
-that Podman socket; this workflow does not use Docker or `/var/run/docker.sock`.
+For an identity-enabled workspace, the generated Traefik file-provider
+configuration routes the configured `ZITADEL_DOMAIN` to the ZITADEL API and
+login services. No machine-specific container-engine socket configuration is
+required before `task compose:up`.
 
 If the root `.env` is missing, the generated task fails before invoking Podman
 with copy/set guidance. Apply continues to generate only `.env.example`; no

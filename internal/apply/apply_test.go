@@ -917,16 +917,27 @@ func TestServiceWritesZitadelRuntimeArtifactsForIdentitySelection(t *testing.T) 
 	if err != nil || !strings.Contains(string(envExample), "ZITADEL_MASTERKEY=") || !strings.Contains(string(envExample), "OIDC_ISSUER_URL=") {
 		t.Fatalf("identity env example = %q, err=%v", envExample, err)
 	}
-	if !strings.Contains(string(envExample), "PODMAN_SOCKET=/run/user/1000/podman/podman.sock\n") {
-		t.Fatalf("identity env example is missing the Podman socket setting: %s", envExample)
+	dynamic, err := os.ReadFile(filepath.Join(destination, "traefik", "dynamic.yaml"))
+	if err != nil {
+		t.Fatalf("static Traefik config = %q, err=%v", dynamic, err)
+	}
+	for _, marker := range []string{"url: h2c://zitadel:8080", "url: http://zitadel-login:3000", "ZITADEL_DOMAIN"} {
+		if !strings.Contains(string(dynamic), marker) {
+			t.Fatalf("static Traefik config is missing %q:\n%s", marker, dynamic)
+		}
+	}
+	for _, forbidden := range []string{"PODMAN_SOCKET", "/run/user/1000", "/var/run/podman"} {
+		if strings.Contains(string(compose)+string(envExample)+string(dynamic), forbidden) {
+			t.Fatalf("generated identity artifacts must not contain %q", forbidden)
+		}
 	}
 	readme, err := os.ReadFile(filepath.Join(destination, "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"always uses Podman", "PODMAN_SOCKET", "podman.socket", "does not use Docker"} {
-		if !strings.Contains(string(readme), marker) {
-			t.Fatalf("identity README is missing %q:\n%s", marker, readme)
+	for _, forbidden := range []string{"PODMAN_SOCKET", "podman.socket", "Docker-compatible provider"} {
+		if strings.Contains(string(readme), forbidden) {
+			t.Fatalf("identity README must not instruct users about %q:\n%s", forbidden, readme)
 		}
 	}
 }

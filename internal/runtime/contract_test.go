@@ -157,8 +157,8 @@ func TestRenderIdentityAddsPinnedServicesAndOIDCContract(t *testing.T) {
 		"OIDC_ISSUER_URL=",
 		"OIDC_AUDIENCE=",
 	} {
-		if !strings.Contains(compose+string(artifacts.EnvExample), marker) {
-			t.Fatalf("identity artifacts missing %q:\ncompose=%s\nenv=%s", marker, compose, artifacts.EnvExample)
+		if !strings.Contains(compose+string(artifacts.EnvExample)+string(artifacts.TraefikDynamic), marker) {
+			t.Fatalf("identity artifacts missing %q:\ncompose=%s\nenv=%s\ntraefik=%s", marker, compose, artifacts.EnvExample, artifacts.TraefikDynamic)
 		}
 	}
 	if !strings.Contains(string(artifacts.EnvExample), "ZITADEL_MASTERKEY=smt-zitadel-masterkey-local-0000\n") {
@@ -200,7 +200,39 @@ func TestRenderIdentityEmitsFirstInstanceLoginBootstrapContract(t *testing.T) {
 	}
 }
 
-func TestRenderIdentityPlacesTraefikLabelsOnRoutedServices(t *testing.T) {
+func TestRenderIdentityUsesStaticTraefikProvider(t *testing.T) {
+	artifacts, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/identity-routing",
+		Selection:     Selection{API: true, Database: true, Identity: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(artifacts.Compose)
+	for _, want := range []string{
+		"--providers.file.directory=/etc/traefik/dynamic",
+		"./traefik:/etc/traefik/dynamic:ro",
+		"ZITADEL_DOMAIN: \"${ZITADEL_DOMAIN:-localhost}\"",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("identity Compose missing static Traefik marker %q:\n%s", want, compose)
+		}
+	}
+	for _, forbidden := range []string{
+		"providers.docker",
+		"PODMAN_SOCKET",
+		"/var/run/podman",
+		"/run/user/1000",
+		"traefik.docker",
+		"labels:",
+	} {
+		if strings.Contains(compose, forbidden) {
+			t.Fatalf("identity Compose must not contain %q:\n%s", forbidden, compose)
+		}
+	}
+}
+
+func TestRenderIdentityStaticTraefikDynamicConfig(t *testing.T) {
 	artifacts, err := Render(RenderOptions{
 		WorkspacePath: "/tmp/identity-routing",
 		Selection:     Selection{API: true, Database: true, Identity: true},
@@ -209,72 +241,31 @@ func TestRenderIdentityPlacesTraefikLabelsOnRoutedServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	var document map[string]any
-	if err := yaml.Unmarshal(artifacts.Compose, &document); err != nil {
-		t.Fatalf("identity Compose is invalid YAML: %v\n%s", err, artifacts.Compose)
+	if err := yaml.Unmarshal(artifacts.TraefikDynamic, &document); err != nil {
+		t.Fatalf("static Traefik config is invalid YAML: %v\n%s", err, artifacts.TraefikDynamic)
 	}
-	services, ok := document["services"].(map[string]any)
-	if !ok {
-		t.Fatalf("services = %#v, want mapping", document["services"])
+	if _, ok := document["http"]; !ok {
+		t.Fatalf("static Traefik config is missing http configuration: %s", artifacts.TraefikDynamic)
 	}
-	labels := func(serviceName string) []string {
-		service, ok := services[serviceName].(map[string]any)
-		if !ok {
-			t.Fatalf("service %q = %#v, want mapping", serviceName, services[serviceName])
-		}
-		values, ok := service["labels"].([]any)
-		if !ok {
-			return nil
-		}
-		result := make([]string, 0, len(values))
-		for _, value := range values {
-			result = append(result, value.(string))
-		}
-		return result
-	}
-	for serviceName, want := range map[string][]string{
-		"zitadel": {
-			"traefik.enable=true",
-			"traefik.http.services.zitadel-api.loadbalancer.server.port=8080",
-			"traefik.http.routers.zitadel-api.service=zitadel-api",
-		},
-		"zitadel-login": {
-			"traefik.http.services.zitadel-login.loadbalancer.server.port=3000",
-			"traefik.http.routers.zitadel-login.service=zitadel-login",
-		},
+	for _, want := range []string{
+		"Host(`{{ env \"ZITADEL_DOMAIN\" }}`) && !PathPrefix(`/ui/v2/login`)",
+		"Host(`{{ env \"ZITADEL_DOMAIN\" }}`) && PathPrefix(`/ui/v2/login`)",
+		"url: h2c://zitadel:8080",
+		"url: http://zitadel-login:3000",
 	} {
-		got := labels(serviceName)
-		for _, marker := range want {
-			if !containsString(got, marker) {
-				t.Fatalf("service %q labels missing %q: %v", serviceName, marker, got)
-			}
+		if !strings.Contains(string(artifacts.TraefikDynamic), want) {
+			t.Fatalf("static Traefik config missing %q:\n%s", want, artifacts.TraefikDynamic)
 		}
 	}
-	if got := labels("proxy"); len(got) != 0 {
-		t.Fatalf("proxy must not own routed-service labels: %v", got)
-	}
-}
-
-func TestRenderIdentityUsesPodmanSocketForTraefik(t *testing.T) {
-	artifacts, err := Render(RenderOptions{
-		WorkspacePath: "/tmp/identity-podman",
-		Selection:     Selection{API: true, Database: true, Identity: true},
+	withoutIdentity, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/no-identity",
+		Selection:     Selection{API: true, Database: true},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	compose := string(artifacts.Compose)
-	env := string(artifacts.EnvExample)
-	for _, want := range []string{
-		"--providers.docker.endpoint=unix:///var/run/podman/podman.sock",
-		"${PODMAN_SOCKET:-/run/user/1000/podman/podman.sock}:/var/run/podman/podman.sock:ro",
-		"PODMAN_SOCKET=/run/user/1000/podman/podman.sock\n",
-	} {
-		if !strings.Contains(compose+env, want) {
-			t.Fatalf("identity artifacts missing Podman marker %q:\ncompose=%s\nenv=%s", want, compose, env)
-		}
-	}
-	if strings.Contains(compose, "/var/run/docker.sock") {
-		t.Fatalf("identity Compose must not mount the Docker socket:\n%s", compose)
+	if len(withoutIdentity.TraefikDynamic) != 0 {
+		t.Fatalf("non-identity artifacts must not include Traefik dynamic config: %s", withoutIdentity.TraefikDynamic)
 	}
 }
 
@@ -323,8 +314,8 @@ func TestRenderScopesComposeDefaultsPerWorkspace(t *testing.T) {
 		"name: \"${DATABASE_VOLUME:-ddp-postgres-data}\"",
 		"name: \"${ZITADEL_NETWORK:-ddp-zitadel}\"",
 		"name: \"${ZITADEL_BOOTSTRAP_VOLUME:-ddp-zitadel-bootstrap}\"",
-		"--providers.docker.network=${ZITADEL_NETWORK:-ddp-zitadel}",
-		"traefik.docker.network=${ZITADEL_NETWORK:-ddp-zitadel}",
+		"./traefik:/etc/traefik/dynamic:ro",
+		"--providers.file.directory=/etc/traefik/dynamic",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("ddp Compose missing scoped fallback %q:\n%s", want, compose)
@@ -361,7 +352,7 @@ func TestRenderIsByteStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(first.Compose) != string(second.Compose) || string(first.EnvExample) != string(second.EnvExample) {
+	if string(first.Compose) != string(second.Compose) || string(first.EnvExample) != string(second.EnvExample) || string(first.TraefikDynamic) != string(second.TraefikDynamic) {
 		t.Fatal("rendered runtime artifacts are not byte-stable")
 	}
 }

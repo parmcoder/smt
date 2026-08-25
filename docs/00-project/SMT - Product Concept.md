@@ -134,7 +134,8 @@ rollup is implemented; the `.5` platform/runtime boundaries and deferred
 `smt extend` remain unchanged.
 
 The implemented `.3.1` slice adds a deterministic root runtime contract:
-`smt apply` writes `compose.yaml` and `.env.example`, and root `.gitignore`
+`smt apply` writes `compose.yaml` and `.env.example` and, for identity
+selection, `traefik/dynamic.yaml`; root `.gitignore`
 ignores `.env`. Compose contains only selected `web`, `api`, and `database`
 services; Mobile remains outside OCI Compose. API-only, Database-only, Web-only,
 API+Database, all-OCI, empty, and Mobile-only selections remain valid. Default

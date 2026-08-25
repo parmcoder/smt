@@ -589,6 +589,9 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		"docs/README.md":                 "---\ntitle: Documentation Workspace\n---\n# Documentation Workspace\n\nUse [[00-project/Agentic Development Workflow]].\n",
 		"docs/00-project/Agentic Development Workflow.md": "---\ntitle: Agentic Development Workflow\n---\n# Agentic Development Workflow\n\nBeads is canonical state. Agents create tickets directly with `bd create`, inspect and claim them with `bd show` and `bd update --claim`, and close them with `bd close`. Use `bd ready` and `bd blocked` to inspect work. SMT does not wrap ticket creation or review queues.\n",
 	}
+	if len(runtimeArtifacts.TraefikDynamic) > 0 {
+		files["traefik/dynamic.yaml"] = string(runtimeArtifacts.TraefikDynamic)
+	}
 	if len(selection.ServiceIDs()) > 0 {
 		files["Taskfile.yml"] = rootComposeTaskfile(selection.Database, selection.Identity)
 	}
