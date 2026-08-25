@@ -201,10 +201,10 @@ iOS lanes explicitly.
   `flutter analyze`, and unit/widget tests. The host has no Android SDK or
   supported Android/iOS target, so integration and debug-build lanes are
   explicit unverified results, never silently skipped.
-- **`.6.1.3` Mobile native verification** — activates after the Mobile rollup
-  closes with direct `asdf exec flutter` format, analyze, test, integration,
-  and debug-build lanes plus a fast format/analyze Lefthook profile. It does
-  not generate a Mobile Taskfile.
+- **`.6.1.3` Mobile native verification** — provides `asdf exec dart format`
+  plus direct `asdf exec flutter` analyze, test, integration, and debug-build
+  lanes with a fast format/analyze Lefthook profile. It does not generate a
+  Mobile Taskfile.
 
 `.3.5.1`, `.3.5.2`, and `.3.5.3` are implemented; unavailable Mobile device
 and debug-build lanes remain explicit gaps. Mobile remains outside OCI Compose.

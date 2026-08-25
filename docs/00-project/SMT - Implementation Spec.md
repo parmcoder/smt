@@ -866,8 +866,9 @@ the staged Flutter CLI output. Confirm the exact `asdf exec flutter
 --org=com.example.smt --project-name=smt_mobile
 --description="A provider-neutral SMT Flutter mobile starter."
 <staged-mobile-directory>` invocation is preserved. Run
-`asdf install flutter 3.44.9-stable`, `asdf current flutter`, `asdf exec flutter pub get`, and
-`asdf exec flutter analyze`; if Android or iOS SDK/device lanes are unavailable,
+`asdf install flutter 3.44.9-stable`, `asdf current flutter`, `asdf exec flutter pub get`,
+`asdf exec dart format --output=none --set-exit-if-changed lib test integration_test`,
+`asdf exec flutter analyze`, and `asdf exec flutter test`; if Android or iOS SDK/device lanes are unavailable,
 record them explicitly rather than silently skipping them. Do not claim signing
 or store publication. At one additional fresh destination,
 exercise one safe prerequisite, staging, Beads, or publish failure and verify
