@@ -1,6 +1,9 @@
 package apply
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 const apiMainGo = `package main
 
@@ -346,6 +349,180 @@ func Run(ctx context.Context) error {
 }
 `
 
+func apiServerGoForSelection(databaseSelected bool) string {
+	if !databaseSelected {
+		return apiServerGo
+	}
+
+	source := apiServerGo
+	source = strings.Replace(source, "\t\"strconv\"\n", "\t\"strconv\"\n\t\"strings\"\n", 1)
+	source = strings.Replace(source,
+		"\t\"github.com/gin-gonic/gin\"\n",
+		"\t\"github.com/gin-gonic/gin\"\n\t\"github.com/jackc/pgx/v5/pgxpool\"\n",
+		1,
+	)
+	source = strings.Replace(source,
+		"\tOIDCRequiredScopes string        `env:\"OIDC_REQUIRED_SCOPES\" envDefault:\"openid,profile,email\"`\n",
+		"\tOIDCRequiredScopes string        `env:\"OIDC_REQUIRED_SCOPES\" envDefault:\"openid,profile,email\"`\n\tDatabaseURL        string        `env:\"DATABASE_URL\"`\n",
+		1,
+	)
+	source = strings.Replace(source, "type Readiness struct {", apiDatabaseRuntimeCode+"\ntype Readiness struct {", 1)
+	runStart := strings.Index(source, "func Run(ctx context.Context) error {")
+	if runStart < 0 {
+		panic("generated API server template is missing Run")
+	}
+	return source[:runStart] + apiDatabaseRunCode
+}
+
+const apiDatabaseRuntimeCode = `const (
+	databasePingInterval = time.Second
+	databasePingTimeout  = 2 * time.Second
+)
+
+type databasePinger interface {
+	Ping(context.Context) error
+	Close()
+}
+
+type databaseReadinessMonitor struct {
+	readiness *Readiness
+	pinger    databasePinger
+	logger    *slog.Logger
+	interval  time.Duration
+	timeout   time.Duration
+	done      chan struct{}
+}
+
+func newDatabaseReadinessMonitor(readiness *Readiness, pinger databasePinger, logger *slog.Logger, interval, timeout time.Duration) *databaseReadinessMonitor {
+	if interval <= 0 {
+		interval = databasePingInterval
+	}
+	if timeout <= 0 {
+		timeout = databasePingTimeout
+	}
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	}
+	return &databaseReadinessMonitor{
+		readiness: readiness,
+		pinger:    pinger,
+		logger:    logger,
+		interval:  interval,
+		timeout:   timeout,
+		done:      make(chan struct{}),
+	}
+}
+
+func (m *databaseReadinessMonitor) run(ctx context.Context) {
+	defer close(m.done)
+	m.readiness.MarkNotReady()
+	ticker := time.NewTicker(m.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			m.readiness.MarkNotReady()
+			return
+		case <-ticker.C:
+			m.check(ctx)
+		}
+	}
+}
+
+func (m *databaseReadinessMonitor) wait() {
+	<-m.done
+}
+
+func (m *databaseReadinessMonitor) check(ctx context.Context) {
+	pingContext, cancel := context.WithTimeout(ctx, m.timeout)
+	err := m.pinger.Ping(pingContext)
+	cancel()
+	if err != nil {
+		m.readiness.MarkNotReady()
+		m.logger.Warn("database readiness check failed", "status", "not_ready")
+		return
+	}
+	m.readiness.MarkReady()
+}
+
+func openDatabasePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	databaseURL = strings.TrimSpace(databaseURL)
+	if databaseURL == "" {
+		return nil, errors.New("DATABASE_URL is required for API+Database runtime")
+	}
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, errors.New("DATABASE_URL is invalid; use a PostgreSQL connection URL")
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, errors.New("database pool could not be created")
+	}
+	return pool, nil
+}
+`
+
+const apiDatabaseRunCode = `func Run(ctx context.Context) error {
+	startupLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	cfg, err := LoadConfig()
+	if err != nil {
+		startupLogger.Error("configuration load failed", "error", err)
+		return err
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	pool, err := openDatabasePool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("database configuration failed", "error", err)
+		return err
+	}
+	defer pool.Close()
+	application := New(logger)
+	router, readiness := application.Router, application.Readiness
+	httpServer := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           router,
+		ReadTimeout:       cfg.ReadTimeout,
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		MaxHeaderBytes:    cfg.MaxHeaderBytes,
+	}
+	signalContext, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	monitorContext, stopMonitor := context.WithCancel(signalContext)
+	defer stopMonitor()
+	monitor := newDatabaseReadinessMonitor(readiness, pool, logger, databasePingInterval, databasePingTimeout)
+	serverErrors := make(chan error, 1)
+	go monitor.run(monitorContext)
+	go func() {
+		serverErrors <- httpServer.ListenAndServe()
+	}()
+	select {
+	case err := <-serverErrors:
+		readiness.MarkNotReady()
+		stopMonitor()
+		monitor.wait()
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return fmt.Errorf("serve API: %w", err)
+	case <-signalContext.Done():
+		readiness.MarkNotReady()
+		stopMonitor()
+		monitor.wait()
+		shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownContext); err != nil {
+			return fmt.Errorf("shutdown API: %w", err)
+		}
+		if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve API: %w", err)
+		}
+		return nil
+	}
+}
+`
+
 const apiOpenAPICommandGo = `package main
 
 import (
@@ -631,7 +808,7 @@ func apiSourceFiles(databaseSelected bool) map[string]string {
 	goMod, goSum := apiManifests(databaseSelected)
 	files := map[string]string{
 		"main.go":                             apiMainGo,
-		"internal/server/server.go":           apiServerGo,
+		"internal/server/server.go":           apiServerGoForSelection(databaseSelected),
 		"internal/server/server_test.go":      apiServerTestGo,
 		"internal/server/config_test.go":      apiConfigTestGo,
 		"internal/server/server_fuzz_test.go": apiServerFuzzTestGo,
@@ -648,6 +825,7 @@ func apiSourceFiles(databaseSelected bool) map[string]string {
 			files[relative] = contents
 		}
 		files["internal/server/database_integration_test.go"] = apiDatabaseIntegrationTestGo
+		files["internal/server/database_readiness_test.go"] = apiDatabaseReadinessTestGo
 	}
 	return files
 }

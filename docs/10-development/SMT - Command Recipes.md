@@ -8,7 +8,7 @@ tags:
   - development
   - release
 created: 2026-07-16
-updated: 2026-08-23
+updated: 2026-08-25
 ---
 # SMT — Command Recipes
 
@@ -340,13 +340,22 @@ cat ../platform/apis/openapi.yaml
 ```
 
 The committed `openapi.yaml` is byte-identical to regeneration across fresh
-Apply destinations. `/healthz` returns 200 `ok`; `/readyz` returns 503
+Apply destinations. `/healthz` returns 200 `ok`; API-only `/readyz` returns 503
 `not_ready` before bootstrap or during shutdown and 200 `ready` after
 bootstrap; `/metrics` shares the listener and exposes Go/process plus bounded
 request metrics. Safe `X-Request-ID` values are accepted or generated and
 returned. Panic recovery logs panic/stack/route/method/request ID via JSON
 `slog` and returns generic 500; SIGINT/SIGTERM performs timed graceful
 shutdown.
+
+For the approved API+Database `.3.4.3` lane, readiness is narrower and more
+strict. Startup requires a valid `DATABASE_URL`; an empty or malformed value is
+an actionable configuration error. `/healthz` remains 200 `ok`, while
+`/readyz` starts at 503 `not_ready`, a continuous database health loop pings
+PostgreSQL every 1 second with a 2 second timeout, readiness changes to 200
+`ready` once connectivity is confirmed, and it returns to 503 if connectivity
+is later lost. This readiness check proves connectivity only. Startup does not
+run migrations.
 
 API-selected Apply only writes embedded assets. It performs no network,
 Go/package-manager command, tool installation, Task execution, Podman, listener,
@@ -376,16 +385,17 @@ mutate `.env`. Its task surface is:
 | `container:build` | Development image: caller-installed Podman builds the generated `Containerfile` with `--pull=missing`, fetching absent pinned base images. |
 | `container:build:production` | Production image: builds with `--pull=never` and `${SMT_API_PRODUCTION_IMAGE:-smt-api:production}`, requiring preloaded and verified base images. |
 | `container:verify` | Podman verifies non-root identity, `/healthz`, `/readyz`, and graceful stop with a bounded wait. |
-| `migrate:create NAME=...` | API+Database only: runs `go tool migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"` with `GOFLAGS=-tags=postgres`; it requires an explicit migration name. |
-| `migrate:up` | API+Database only: applies pending migrations with `GOFLAGS=-tags=postgres go tool migrate -path migrations -database "$DATABASE_URL" up`. |
-| `migrate:version` | API+Database only: reports the current version with `GOFLAGS=-tags=postgres` and explicit `DATABASE_URL`. |
+| `migrate:create NAME=...` | API+Database only: runs the pinned PostgreSQL-tagged `go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"`; it requires an explicit migration name. |
+| `migrate:up` | API+Database only: applies pending migrations with the pinned PostgreSQL-tagged migrate command and explicit `DATABASE_URL`. |
+| `migrate:version` | API+Database only: reports the current version with the pinned PostgreSQL-tagged migrate command and explicit `DATABASE_URL`. |
 | `migrate:validate` | API+Database only: runs `up` and then `version` with the PostgreSQL-tagged tool, preserving native failures without rollback. |
-| `verify` | Depends on static quality, Go tests, OpenAPI, and container tasks; it does not start data services. |
+| `verify` | API-only depends on static quality, Go tests, OpenAPI, and container tasks; API+Database omits DB-dependent `container:verify`, leaving live lifecycle proof to the `.3.4.3` runbook. |
 
 API+Database receives the migration tasks above, the blank operator-provided
 `DATABASE_URL=` example, and a deterministic no-op baseline pair. API-only and
-Database-only outputs contain none of these migration assets or commands.
-Database readiness and live lifecycle tasks remain later. Task v3.52.0
+Database-only outputs contain none of these migration assets or commands. The
+operator remains responsible for `migrate:up`, `migrate:version`, and
+`migrate:validate`; `.3.4.3` does not move them into startup. Task v3.52.0
 verified the generated-child harness, including dotenv-driven `/healthz` and
 bounded process cleanup. `smt apply` writes the child Taskfile and
 `Containerfile` but never runs Task, builds an image, or starts a runtime; there
@@ -406,6 +416,40 @@ not install prerequisites, build an image, start a container, or run a task.
 The command above is a local regeneration recipe. It is not evidence of
 `go mod tidy` or human E2E completion; `go mod verify` evidence is limited to
 the generated child Task harness.
+
+### Manual `.3.4.3` lifecycle runbook
+
+Use this runbook only on a host that can run disposable Podman workloads. As
+of Tuesday, August 25, 2026, these docs do not claim that the `.3.4.3` live
+runtime lane has already passed in this repository.
+
+Reserve unique disposable resources for each scenario and never reuse or clean
+up unrelated existing containers, volumes, or networks. Clean successful
+scenarios. Preserve failed resources and logs for diagnosis, and keep captured
+evidence secret-safe by redacting passwords, DSNs, and machine-specific paths.
+
+Prepare one Database-only workspace and one API+Database workspace from fresh
+blueprints, then copy each generated `.env.example` to `.env` and replace only
+the disposable local values required for that scenario. The Database-only lane
+verifies container build/start, `pg_isready`, fail-fast `psql`, stop, rerun
+with no config drift, and cleanup. The API+Database lane verifies:
+
+- startup fails closed when `DATABASE_URL` is empty or malformed
+- `/healthz` stays 200 while `/readyz` remains 503 until PostgreSQL
+  connectivity is confirmed
+- `/readyz` becomes 200 after connectivity, returns to 503 on connectivity
+  loss, and recovers to 200 after restart/recovery
+- readiness reflects connectivity only and does not imply migration success
+- operator-owned `migrate:up`, `migrate:version`, and `migrate:validate`
+  behavior for the baseline no-change rerun, a failing migration, a dirty
+  migration state, and concurrent migration lock contention
+
+Record the exact disposable resource names used per scenario, the commands
+run, the observed readiness transitions, whether cleanup completed, and the
+location of any preserved logs. If Podman is installed but the local runtime is
+unavailable, record that environment limitation explicitly instead of marking
+the lane verified. The broader root Compose matrix remains tracked by
+`smt-4xf.3.6`, so this runbook stays at the child-service level.
 
 ### Inspect module declarations
 
