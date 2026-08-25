@@ -16,8 +16,13 @@ func TestApplyGeneratesAPIRuntimeArtifacts(t *testing.T) {
 	containerfile := readGeneratedAPIFile(t, apiRoot, "Containerfile")
 	for _, marker := range []string{
 		"FROM golang:1.26.5-alpine AS builder",
+		"ARG TARGETOS=linux",
+		"ARG TARGETARCH",
+		"target_arch=\"${TARGETARCH:-$(go env GOARCH)}\"",
 		"FROM alpine:3.22",
 		"CGO_ENABLED=0",
+		"GOOS=\"${TARGETOS}\" GOARCH=\"${target_arch}\"",
+		"go build -p=1",
 		"-trimpath",
 		"-ldflags=\"-s -w\"",
 		"USER 10001:10001",
@@ -30,6 +35,9 @@ func TestApplyGeneratesAPIRuntimeArtifacts(t *testing.T) {
 		if !strings.Contains(containerfile, marker) {
 			t.Fatalf("Containerfile missing %q:\n%s", marker, containerfile)
 		}
+	}
+	if strings.Contains(containerfile, "GOARCH=amd64") {
+		t.Fatalf("Containerfile must not force an amd64 cross-build on every host:\n%s", containerfile)
 	}
 
 	taskfile := readGeneratedAPIFile(t, apiRoot, "Taskfile.yml")
@@ -85,17 +93,19 @@ func TestApplyGeneratesAPIRuntimeArtifacts(t *testing.T) {
 		"8080",
 		"unavailable",
 		"smt-4xf.3.3.4",
+		"native Linux architecture",
+		"SMT_API_TARGETARCH",
 	} {
 		if !strings.Contains(readme, marker) {
 			t.Fatalf("API README missing runtime guidance %q:\n%s", marker, readme)
 		}
 	}
 	devBuild := taskfileTaskBlock(taskfile, "container:build")
-	if !strings.Contains(devBuild, "podman build --pull=missing --format=oci --file Containerfile --tag smt-api:local .") {
+	if !strings.Contains(devBuild, "podman build --pull=missing --format=oci --build-arg TARGETOS=\"${SMT_API_TARGETOS:-linux}\" --build-arg TARGETARCH=\"${SMT_API_TARGETARCH:-}\" --file Containerfile --tag smt-api:local .") {
 		t.Fatalf("development container build does not allow missing pinned images:\n%s", devBuild)
 	}
 	productionBuild := taskfileTaskBlock(taskfile, "container:build:production")
-	if !strings.Contains(productionBuild, "podman build --pull=never --format=oci --file Containerfile --tag \"${SMT_API_PRODUCTION_IMAGE:-smt-api:production}\" .") {
+	if !strings.Contains(productionBuild, "podman build --pull=never --format=oci --build-arg TARGETOS=\"${SMT_API_TARGETOS:-linux}\" --build-arg TARGETARCH=\"${SMT_API_TARGETARCH:-}\" --file Containerfile --tag \"${SMT_API_PRODUCTION_IMAGE:-smt-api:production}\" .") {
 		t.Fatalf("production container build does not require preloaded pinned images:\n%s", productionBuild)
 	}
 }
@@ -188,7 +198,7 @@ esac
 		t.Fatalf("fake Podman was not invoked: %v\nTask output:\n%s\nTaskfile:\n%s", err, output, readGeneratedAPIFile(t, apiRoot, "Taskfile.yml"))
 	}
 	for _, marker := range []string{
-		"build --pull=missing --format=oci --file Containerfile --tag smt-api:local .",
+		"build --pull=missing --format=oci --build-arg TARGETOS=linux --build-arg TARGETARCH= --file Containerfile --tag smt-api:local .",
 		"run --detach --name smt-api-verify --publish 127.0.0.1:18080:8080 smt-api:local",
 		"exec smt-api-verify id -u",
 		"exec smt-api-verify wget -q -O - http://127.0.0.1:8080/healthz",

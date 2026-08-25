@@ -65,6 +65,8 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 		"./apis",
 		"./database",
 		"dockerfile: Containerfile",
+		"TARGETOS: \"${SMT_API_TARGETOS:-linux}\"",
+		"TARGETARCH: \"${SMT_API_TARGETARCH:-}\"",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("compose missing %q:\n%s", want, compose)
@@ -73,7 +75,7 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 	if strings.Index(compose, "  web:") > strings.Index(compose, "  api:") || strings.Index(compose, "  api:") > strings.Index(compose, "  database:") {
 		t.Fatalf("compose services are not ordered web, api, database:\n%s", compose)
 	}
-	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_VOLUME=platform-workspace-postgres-data\n") || !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=smt-dev-password\n") {
+	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_VOLUME=platform-workspace-postgres-data\n") || !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=smt-dev-password\n") || !strings.Contains(string(artifacts.EnvExample), "SMT_API_TARGETARCH=\n") {
 		t.Fatalf("env example must contain the local development password example:\n%s", artifacts.EnvExample)
 	}
 	if strings.Contains(compose, "secret") || strings.Contains(compose, "token") || strings.Contains(compose, "password: ") {
@@ -167,6 +169,91 @@ func TestRenderIdentityAddsPinnedServicesAndOIDCContract(t *testing.T) {
 	}
 }
 
+func TestRenderIdentityEmitsFirstInstanceLoginBootstrapContract(t *testing.T) {
+	artifacts, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/identity-bootstrap",
+		Selection:     Selection{API: true, Database: true, Identity: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(artifacts.Compose)
+	env := string(artifacts.EnvExample)
+	for _, want := range []string{
+		`ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: "${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME:-zitadel-admin}"`,
+		`ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: "${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD:-}"`,
+		`ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: "${ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE:-}"`,
+	} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("identity Compose missing first-instance setting %q:\n%s", want, compose)
+		}
+	}
+	for _, want := range []string{
+		"ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=zitadel-admin\n",
+		"ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=Smt-Zitadel-Local-2026!\n",
+		"ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED=false\n",
+		"ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=2099-12-31T23:59:59Z\n",
+	} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("identity env example missing first-instance setting %q:\n%s", want, env)
+		}
+	}
+}
+
+func TestRenderIdentityPlacesTraefikLabelsOnRoutedServices(t *testing.T) {
+	artifacts, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/identity-routing",
+		Selection:     Selection{API: true, Database: true, Identity: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(artifacts.Compose, &document); err != nil {
+		t.Fatalf("identity Compose is invalid YAML: %v\n%s", err, artifacts.Compose)
+	}
+	services, ok := document["services"].(map[string]any)
+	if !ok {
+		t.Fatalf("services = %#v, want mapping", document["services"])
+	}
+	labels := func(serviceName string) []string {
+		service, ok := services[serviceName].(map[string]any)
+		if !ok {
+			t.Fatalf("service %q = %#v, want mapping", serviceName, services[serviceName])
+		}
+		values, ok := service["labels"].([]any)
+		if !ok {
+			return nil
+		}
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			result = append(result, value.(string))
+		}
+		return result
+	}
+	for serviceName, want := range map[string][]string{
+		"zitadel": {
+			"traefik.enable=true",
+			"traefik.http.services.zitadel-api.loadbalancer.server.port=8080",
+			"traefik.http.routers.zitadel-api.service=zitadel-api",
+		},
+		"zitadel-login": {
+			"traefik.http.services.zitadel-login.loadbalancer.server.port=3000",
+			"traefik.http.routers.zitadel-login.service=zitadel-login",
+		},
+	} {
+		got := labels(serviceName)
+		for _, marker := range want {
+			if !containsString(got, marker) {
+				t.Fatalf("service %q labels missing %q: %v", serviceName, marker, got)
+			}
+		}
+	}
+	if got := labels("proxy"); len(got) != 0 {
+		t.Fatalf("proxy must not own routed-service labels: %v", got)
+	}
+}
+
 func TestRenderScopesComposeDefaultsPerWorkspace(t *testing.T) {
 	selection := Selection{Web: true, API: true, Database: true, Identity: true}
 	first, err := Render(RenderOptions{WorkspacePath: "/tmp/ddp", Selection: selection})
@@ -219,6 +306,15 @@ func TestRenderScopesComposeDefaultsPerWorkspace(t *testing.T) {
 			t.Fatalf("ddp Compose missing scoped fallback %q:\n%s", want, compose)
 		}
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func envValue(env, key string) string {

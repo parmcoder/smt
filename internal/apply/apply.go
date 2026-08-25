@@ -833,7 +833,12 @@ task vuln
 The API listens on HTTP_ADDR, defaulting to :8080. It exposes /healthz and
 /readyz for health and readiness, and receives SIGTERM for graceful shutdown.
 The generated Containerfile builds a static API binary and runs it as a
-non-root UID/GID 10001 in the pinned Alpine 3.22 runtime. Podman is a
+non-root UID/GID 10001 in the pinned Alpine 3.22 runtime. The builder uses
+the native Linux architecture by default, which avoids unnecessary
+cross-compilation on ARM Podman machines, and serializes package compilation
+to keep peak memory bounded. Set SMT_API_TARGETOS and SMT_API_TARGETARCH when
+an explicit target is required; for example, use SMT_API_TARGETARCH=amd64 for
+an x86_64 production image. Podman is a
 caller-owned prerequisite;
 Apply does not install tools, build images, start containers, or execute tasks.
 

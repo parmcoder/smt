@@ -6,7 +6,11 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/apis .
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN target_arch="${TARGETARCH:-$(go env GOARCH)}" && \
+    CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${target_arch}" \
+    go build -p=1 -buildvcs=false -trimpath -ldflags="-s -w" -o /out/apis .
 
 FROM alpine:3.22
 

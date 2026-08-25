@@ -449,13 +449,13 @@ tasks:
       - sh: command -v podman
         msg: Podman is required; install and configure it before running task container:build
     cmds:
-      - podman build --pull=missing --format=oci --file Containerfile --tag smt-api:local .
+      - podman build --pull=missing --format=oci --build-arg TARGETOS="${SMT_API_TARGETOS:-linux}" --build-arg TARGETARCH="${SMT_API_TARGETARCH:-}" --file Containerfile --tag smt-api:local .
   container:build:production:
     preconditions:
       - sh: command -v podman
         msg: Podman is required; install and configure it before running task container:build:production
     cmds:
-      - podman build --pull=never --format=oci --file Containerfile --tag "${SMT_API_PRODUCTION_IMAGE:-smt-api:production}" .
+      - podman build --pull=never --format=oci --build-arg TARGETOS="${SMT_API_TARGETOS:-linux}" --build-arg TARGETARCH="${SMT_API_TARGETARCH:-}" --file Containerfile --tag "${SMT_API_PRODUCTION_IMAGE:-smt-api:production}" .
   container:verify:
     deps: [container:build]
     preconditions:
