@@ -254,6 +254,30 @@ func TestRenderIdentityPlacesTraefikLabelsOnRoutedServices(t *testing.T) {
 	}
 }
 
+func TestRenderIdentityUsesPodmanSocketForTraefik(t *testing.T) {
+	artifacts, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/identity-podman",
+		Selection:     Selection{API: true, Database: true, Identity: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(artifacts.Compose)
+	env := string(artifacts.EnvExample)
+	for _, want := range []string{
+		"--providers.docker.endpoint=unix:///var/run/podman/podman.sock",
+		"${PODMAN_SOCKET:-/run/user/1000/podman/podman.sock}:/var/run/podman/podman.sock:ro",
+		"PODMAN_SOCKET=/run/user/1000/podman/podman.sock\n",
+	} {
+		if !strings.Contains(compose+env, want) {
+			t.Fatalf("identity artifacts missing Podman marker %q:\ncompose=%s\nenv=%s", want, compose, env)
+		}
+	}
+	if strings.Contains(compose, "/var/run/docker.sock") {
+		t.Fatalf("identity Compose must not mount the Docker socket:\n%s", compose)
+	}
+}
+
 func TestRenderScopesComposeDefaultsPerWorkspace(t *testing.T) {
 	selection := Selection{Web: true, API: true, Database: true, Identity: true}
 	first, err := Render(RenderOptions{WorkspacePath: "/tmp/ddp", Selection: selection})
