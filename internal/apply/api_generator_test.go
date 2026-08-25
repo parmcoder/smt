@@ -234,8 +234,9 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				for _, want := range []string{
 					"test:integration:\n    preconditions:\n      - sh: test -n \"$DATABASE_URL\"",
 					"go test -tags=integration ./...",
-					"migrate:create:\n    preconditions:\n      - sh: test -n \"{{.NAME}}\"",
-					"go tool migrate create -ext sql -dir migrations -seq \"{{.NAME}}\"",
+					"migrate:create:\n    env:\n      GOFLAGS: -tags=postgres\n      MIGRATION_NAME: '{{.NAME}}'",
+					"go tool migrate create -ext sql -dir migrations -seq \"$MIGRATION_NAME\"",
+					"GOFLAGS: -tags=postgres",
 					"go tool migrate -path migrations -database \"$DATABASE_URL\" up",
 					"go tool migrate -path migrations -database \"$DATABASE_URL\" version",
 					"sh scripts/validate-migrations.sh",
@@ -668,6 +669,9 @@ func TestApplyAPIDatabaseManifestBuildsOffline(t *testing.T) {
 	}
 	if !bytes.Contains(manifest, []byte("github.com/golang-migrate/migrate/v4 v4.19.1")) {
 		t.Fatalf("API+Database manifest is missing migrate: %s", manifest)
+	}
+	if !bytes.Contains(manifest, []byte("github.com/lib/pq v1.10.9 // indirect")) {
+		t.Fatalf("API+Database manifest is missing the PostgreSQL migration driver: %s", manifest)
 	}
 	for _, module := range []string{
 		"github.com/jackc/pgpassfile",

@@ -445,7 +445,8 @@ static `go.mod` and `go.sum` files. The module is `example.com/smt/apis` and
 the language line is `go 1.26.5`. API-only requires Huma
 `github.com/danielgtaylor/huma/v2 v2.39.1`. API+Database additionally requires
 pgx `github.com/jackc/pgx/v5 v5.10.0` and golang-migrate
-`github.com/golang-migrate/migrate/v4 v4.19.1`. Without API selection, no API
+`github.com/golang-migrate/migrate/v4 v4.19.1`; API+Database also pins
+`github.com/lib/pq v1.10.9` for the PostgreSQL-tagged migration tool. Without API selection, no API
 child repository and no API manifests are emitted.
 
 The Go `tool` block pins govulncheck
@@ -541,7 +542,9 @@ When API and Database are both selected, Apply emits deterministic
 `SELECT 1;`, a `scripts/validate-migrations.sh` helper, and a blank
 operator-provided `DATABASE_URL=` entry in the API `.env.example`. The generated
 API Taskfile adds `migrate:create NAME=...` using the pinned
-`go tool migrate create -ext sql -dir migrations -seq NAME` shape,
+`go tool migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"` shape,
+with `NAME` transported through a task environment variable, and sets
+`GOFLAGS=-tags=postgres` for the migration tool,
 `migrate:up`, `migrate:version`, and `migrate:validate`; validation runs up and
 then version and preserves native failures without rollback. These tasks are
 explicit and are never dependencies of `verify`.

@@ -296,18 +296,25 @@ func apiTaskfileYAML(databaseSelected bool) string {
 
 `
 	migrationTasks := `  migrate:create:
+    env:
+      GOFLAGS: -tags=postgres
+      MIGRATION_NAME: '{{.NAME}}'
     preconditions:
-      - sh: test -n "{{.NAME}}"
+      - sh: test -n "$MIGRATION_NAME"
         msg: NAME is required; use task migrate:create NAME=add_example
     cmds:
-      - go tool migrate create -ext sql -dir migrations -seq "{{.NAME}}"
+      - go tool migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"
   migrate:up:
+    env:
+      GOFLAGS: -tags=postgres
     preconditions:
       - sh: test -n "$DATABASE_URL"
         msg: DATABASE_URL is required; set it in .env before running task migrate:up
     cmds:
       - go tool migrate -path migrations -database "$DATABASE_URL" up
   migrate:version:
+    env:
+      GOFLAGS: -tags=postgres
     preconditions:
       - sh: test -n "$DATABASE_URL"
         msg: DATABASE_URL is required; set it in .env before running task migrate:version

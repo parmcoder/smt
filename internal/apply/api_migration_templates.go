@@ -6,6 +6,7 @@ const apiValidateMigrationsSh = `#!/bin/sh
 set -eu
 
 : "${DATABASE_URL:?DATABASE_URL is required; set it in .env before validating migrations}"
+export GOFLAGS="${GOFLAGS:+$GOFLAGS }-tags=postgres"
 go tool migrate -path migrations -database "$DATABASE_URL" up
 go tool migrate -path migrations -database "$DATABASE_URL" version
 `

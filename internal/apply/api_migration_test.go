@@ -92,9 +92,11 @@ func TestApplyGeneratesConditionalAPIMigrationAssets(t *testing.T) {
 				t.Fatalf("API+Database Taskfile tasks=%v, want %v:\n%s", got, wantTasks, taskfile)
 			}
 			for _, want := range []string{
-				"go tool migrate create -ext sql -dir migrations -seq \"{{.NAME}}\"",
+				"MIGRATION_NAME: '{{.NAME}}'",
+				"go tool migrate create -ext sql -dir migrations -seq \"$MIGRATION_NAME\"",
 				"go tool migrate -path migrations -database \"$DATABASE_URL\" up",
 				"go tool migrate -path migrations -database \"$DATABASE_URL\" version",
+				"GOFLAGS: -tags=postgres",
 				"sh scripts/validate-migrations.sh",
 				"DATABASE_URL is required",
 			} {
@@ -150,6 +152,7 @@ func TestGeneratedAPIMigrationTasksUsePinnedGoToolAndPropagateFailures(t *testin
 	script := `#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$MIGRATE_LOG"
+printf 'GOFLAGS=%s\n' "${GOFLAGS:-}" >> "$MIGRATE_LOG"
 case "$*" in
   *" up")
     if [ "${MIGRATE_FAIL:-}" = "1" ]; then
@@ -195,6 +198,22 @@ exit 0
 		if !strings.Contains(logText, want) {
 			t.Fatalf("fake go log missing %q:\n%s", want, logText)
 		}
+	}
+	if !strings.Contains(logText, "GOFLAGS=-tags=postgres") {
+		t.Fatalf("fake go log did not receive the PostgreSQL build tag:\n%s", logText)
+	}
+
+	sentinel := filepath.Join(t.TempDir(), "name-injection")
+	maliciousName := "$(touch " + sentinel + ")"
+	maliciousCmd := exec.Command(taskPath, "migrate:create", "NAME="+maliciousName)
+	maliciousCmd.Dir = apiRoot
+	maliciousCmd.Env = env
+	maliciousOutput, maliciousErr := maliciousCmd.CombinedOutput()
+	if maliciousErr != nil {
+		t.Fatalf("migrate:create rejected a safely transported name: %v\n%s", maliciousErr, maliciousOutput)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatalf("migrate:create evaluated NAME as shell code; sentinel stat error=%v", err)
 	}
 
 	failingEnv := append([]string{}, env...)

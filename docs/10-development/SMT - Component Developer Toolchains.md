@@ -358,7 +358,8 @@ regression suites remain application-owned follow-up work.
 Baseline: PostgreSQL 18. The implemented `.3.4.1` child uses `pg_isready`,
 fail-fast `psql`, examples-only environment placeholders, and a named Podman
 volume. `.3.4.2` owns API-owned golang-migrate v4.19.1 create/up/version/validate
-tasks and migrations; `.3.4.3` owns disposable Podman-backed lifecycle
+tasks and migrations, using the PostgreSQL build tag and pinned `lib/pq`
+driver; `.3.4.3` owns disposable Podman-backed lifecycle
 verification. No
 automatic migration, down, drop, or force. Reuse Godex database guidance; no DB
 MCP is required for v0.1.0.
