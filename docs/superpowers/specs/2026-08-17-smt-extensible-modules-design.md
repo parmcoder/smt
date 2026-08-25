@@ -217,10 +217,14 @@ selections remain valid, with only selected OCI services emitted.
 
 Default host bindings are Web `3000:3000`, API `8080:8080`, and Database
 `5432:5432`, with canonical `WEB_PORT`, `API_PORT`, and `DATABASE_PORT`
-overrides. The Compose project name is the normalized destination basename in
-safe lowercase-hyphen form, capped at 63 characters, with
-`smt-workspace` fallback. `.env.example` contains examples only, including the
-`DATABASE_VOLUME` name and the local-development
+overrides. The generated `.env.example` derives deterministic workspace-scoped
+host ports when those overrides are unset, so fresh workspaces can run in
+parallel; explicit overrides remain authoritative. The Compose project name is
+the normalized destination basename in safe lowercase-hyphen form, capped at
+63 characters, with `smt-workspace` fallback. Generated local resource names
+are scoped as `<project>-postgres-data`, `<project>-zitadel`, and
+`<project>-zitadel-bootstrap`; explicit resource overrides remain supported.
+`.env.example` contains examples only, including the local-development
 `DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable local
 use; no `.env` file is generated.
 

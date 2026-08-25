@@ -56,7 +56,7 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 		"${API_PORT:-8181}:8080",
 		"${DATABASE_PORT:-55432}:5432",
 		"database-data:/var/lib/postgresql",
-		"name: \"${DATABASE_VOLUME:-smt-postgres-data}\"",
+		"name: \"${DATABASE_VOLUME:-platform-workspace-postgres-data}\"",
 		"/healthz",
 		"/readyz",
 		"pg_isready -h database",
@@ -73,7 +73,7 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 	if strings.Index(compose, "  web:") > strings.Index(compose, "  api:") || strings.Index(compose, "  api:") > strings.Index(compose, "  database:") {
 		t.Fatalf("compose services are not ordered web, api, database:\n%s", compose)
 	}
-	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_VOLUME=smt-postgres-data\n") || !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=smt-dev-password\n") {
+	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_VOLUME=platform-workspace-postgres-data\n") || !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=smt-dev-password\n") {
 		t.Fatalf("env example must contain the local development password example:\n%s", artifacts.EnvExample)
 	}
 	if strings.Contains(compose, "secret") || strings.Contains(compose, "token") || strings.Contains(compose, "password: ") {
@@ -165,6 +165,70 @@ func TestRenderIdentityAddsPinnedServicesAndOIDCContract(t *testing.T) {
 	if strings.Index(compose, "  database:") > strings.Index(compose, "  zitadel-db-init:") || strings.Index(compose, "  zitadel-db-init:") > strings.Index(compose, "  zitadel:\n") || strings.Index(compose, "  zitadel:\n") > strings.Index(compose, "  zitadel-login:") || strings.Index(compose, "  zitadel-login:") > strings.Index(compose, "  proxy:") {
 		t.Fatalf("identity services are not dependency ordered:\n%s", compose)
 	}
+}
+
+func TestRenderScopesComposeDefaultsPerWorkspace(t *testing.T) {
+	selection := Selection{Web: true, API: true, Database: true, Identity: true}
+	first, err := Render(RenderOptions{WorkspacePath: "/tmp/ddp", Selection: selection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Render(RenderOptions{WorkspacePath: "/tmp/ddp2", Selection: selection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstEnv := string(first.EnvExample)
+	secondEnv := string(second.EnvExample)
+	for _, want := range []string{
+		"DATABASE_VOLUME=ddp-postgres-data\n",
+		"ZITADEL_NETWORK=ddp-zitadel\n",
+		"ZITADEL_BOOTSTRAP_VOLUME=ddp-zitadel-bootstrap\n",
+	} {
+		if !strings.Contains(firstEnv, want) {
+			t.Fatalf("ddp env example missing %q:\n%s", want, firstEnv)
+		}
+	}
+	for _, want := range []string{
+		"DATABASE_VOLUME=ddp2-postgres-data\n",
+		"ZITADEL_NETWORK=ddp2-zitadel\n",
+		"ZITADEL_BOOTSTRAP_VOLUME=ddp2-zitadel-bootstrap\n",
+	} {
+		if !strings.Contains(secondEnv, want) {
+			t.Fatalf("ddp2 env example missing %q:\n%s", want, secondEnv)
+		}
+	}
+	for _, key := range []string{"WEB_PORT", "API_PORT", "DATABASE_PORT", "ZITADEL_PORT"} {
+		firstValue := envValue(firstEnv, key)
+		secondValue := envValue(secondEnv, key)
+		if firstValue == "" || secondValue == "" || firstValue == secondValue {
+			t.Fatalf("workspace port %s is not isolated: ddp=%q ddp2=%q", key, firstValue, secondValue)
+		}
+	}
+	if !strings.Contains(firstEnv, "OIDC_WEB_REDIRECT_URI=http://localhost:"+envValue(firstEnv, "WEB_PORT")+"/auth/callback\n") {
+		t.Fatalf("ddp OIDC web redirect does not use the scoped web port:\n%s", firstEnv)
+	}
+	compose := string(first.Compose)
+	for _, want := range []string{
+		"name: \"${DATABASE_VOLUME:-ddp-postgres-data}\"",
+		"name: \"${ZITADEL_NETWORK:-ddp-zitadel}\"",
+		"name: \"${ZITADEL_BOOTSTRAP_VOLUME:-ddp-zitadel-bootstrap}\"",
+		"--providers.docker.network=${ZITADEL_NETWORK:-ddp-zitadel}",
+		"traefik.docker.network=${ZITADEL_NETWORK:-ddp-zitadel}",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("ddp Compose missing scoped fallback %q:\n%s", want, compose)
+		}
+	}
+}
+
+func envValue(env, key string) string {
+	prefix := key + "="
+	for _, line := range strings.Split(env, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	return ""
 }
 
 func TestRenderIsByteStable(t *testing.T) {

@@ -385,12 +385,17 @@ empty or Mobile-only selection emits `services: {}`.
 The default host bindings are `3000:3000` for Web, `8080:8080` for API, and
 `5432:5432` for Database. The canonical overrides are `WEB_PORT`, `API_PORT`,
 and `DATABASE_PORT`; zero uses the reviewed default and a non-zero override
-must be a TCP port from 1 through 65535. The Compose project name is derived
-only from the destination basename: lowercase, safe hyphen form, capped at 63
-characters, with `smt-workspace` as the fallback. The same values appear in
-`.env.example`, which contains examples only and the local-development
-`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable local
-use. Its declarative examples include `COMPOSE_PROJECT_NAME`,
+must be a TCP port from 1 through 65535. When an override is unset, the
+generated `.env.example` derives a deterministic workspace-scoped host port so
+fresh workspaces can run in parallel; explicit overrides remain authoritative.
+The Compose project name is derived only from the destination basename:
+lowercase, safe hyphen form, capped at 63 characters, with `smt-workspace` as
+the fallback. Generated local resource names are scoped by that project as
+`<project>-postgres-data`, `<project>-zitadel`, and
+`<project>-zitadel-bootstrap`, while explicit resource overrides remain
+supported. The same values appear in `.env.example`, which contains examples
+only and the local-development `DATABASE_PASSWORD=smt-dev-password` value.
+Replace it outside disposable local use. Its declarative examples include `COMPOSE_PROJECT_NAME`,
 the three port overrides, `DATABASE_VOLUME`, `API_BASE_URL`, `DATABASE_HOST`,
 `DATABASE_NAME`, and `DATABASE_USER`; no production or secret credentials or
 `.env` file is generated.
