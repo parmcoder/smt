@@ -148,15 +148,24 @@ func TestApplyGeneratesAPIStarterOnlyForAPISelection(t *testing.T) {
 				}
 			}
 			allSource := main + server + openapiMain + openapi
-			for _, forbidden := range []string{"pgx", "migrate", "golang-migrate", "password", "secret", "token", "/users", "CRUD"} {
+			for _, forbidden := range []string{"password", "secret", "token", "/users", "CRUD"} {
 				if strings.Contains(strings.ToLower(allSource), strings.ToLower(forbidden)) {
 					t.Fatalf("generated API source contains forbidden %q", forbidden)
 				}
 			}
-			if tt.database {
+			if !tt.database {
 				for _, forbidden := range []string{"pgx", "migrate", "golang-migrate"} {
 					if strings.Contains(strings.ToLower(allSource), strings.ToLower(forbidden)) {
-						t.Fatalf("API+Database source contains manifest-only dependency %q", forbidden)
+						t.Fatalf("API-only source contains database dependency %q", forbidden)
+					}
+				}
+				if strings.Contains(server, "DATABASE_URL") {
+					t.Fatalf("API-only server source contains database configuration")
+				}
+			} else {
+				for _, marker := range []string{"github.com/jackc/pgx/v5/pgxpool", "DATABASE_URL", "newDatabaseReadinessMonitor", "databasePingInterval", "databasePingTimeout"} {
+					if !strings.Contains(server, marker) {
+						t.Fatalf("API+Database server source missing runtime marker %q", marker)
 					}
 				}
 			}
@@ -215,6 +224,10 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 			if got := taskfileTaskNames(taskfile); strings.Join(got, ",") != strings.Join(wantTasks, ",") {
 				t.Fatalf("Taskfile tasks=%v, want %v:\n%s", got, wantTasks, taskfile)
 			}
+			verifyWant := "verify:\n    deps: [format:check, lint, vuln, vet, build, test, mod, openapi, container:verify]\n"
+			if tt.database {
+				verifyWant = "verify:\n    deps: [format:check, lint, vuln, vet, build, test, mod, openapi]\n"
+			}
 			for _, want := range []string{
 				"dotenv: ['.env']",
 				"build:\n    cmds:\n      - mkdir -p bin && go build -trimpath -o bin/apis .",
@@ -224,7 +237,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				"mod:\n    cmds:\n      - go mod verify",
 				"go run ./cmd/openapi",
 				"cmp -s",
-				"verify:\n    deps: [format:check, lint, vuln, vet, build, test, mod, openapi, container:verify]\n",
+				verifyWant,
 			} {
 				if !strings.Contains(taskfile, want) {
 					t.Fatalf("Taskfile missing %q:\n%s", want, taskfile)
@@ -235,10 +248,10 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 					"test:integration:\n    preconditions:\n      - sh: test -n \"$DATABASE_URL\"",
 					"go test -tags=integration ./...",
 					"migrate:create:\n    env:\n      GOFLAGS: -tags=postgres\n      MIGRATION_NAME: '{{.NAME}}'",
-					"go tool migrate create -ext sql -dir migrations -seq \"$MIGRATION_NAME\"",
+					"go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations -seq \"$MIGRATION_NAME\"",
 					"GOFLAGS: -tags=postgres",
-					"go tool migrate -path migrations -database \"$DATABASE_URL\" up",
-					"go tool migrate -path migrations -database \"$DATABASE_URL\" version",
+					"go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database \"$DATABASE_URL\" up",
+					"go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database \"$DATABASE_URL\" version",
 					"sh scripts/validate-migrations.sh",
 				} {
 					if !strings.Contains(taskfile, want) {

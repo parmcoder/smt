@@ -7,8 +7,8 @@ set -eu
 
 : "${DATABASE_URL:?DATABASE_URL is required; set it in .env before validating migrations}"
 export GOFLAGS="${GOFLAGS:+$GOFLAGS }-tags=postgres"
-go tool migrate -path migrations -database "$DATABASE_URL" up
-go tool migrate -path migrations -database "$DATABASE_URL" version
+go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database "$DATABASE_URL" up
+go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database "$DATABASE_URL" version
 `
 
 func apiMigrationFiles() map[string]string {

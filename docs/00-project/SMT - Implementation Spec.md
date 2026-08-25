@@ -475,9 +475,10 @@ existing `.3.3.1` module manifests and bootstrap files. No API selection emits
 none of these API assets. The generated module remains
 `example.com/smt/apis` on Go `1.26.5`. Its runtime uses Huma v2.39.1 through
 the Gin adapter, Gin v1.12.0, Prometheus `github.com/prometheus/client_golang v1.24.1`, and the
-already-pinned Go tools. API-only generated source contains no pgx, migrate, or
-database code; API+Database retains pgx and golang-migrate as manifest-only
-dependencies and still emits the same API source without database behavior.
+	already-pinned Go tools. API-only generated source contains no pgx, migrate, or
+	database code. API+Database retains the pinned pgx and golang-migrate
+	dependencies and emits a conditional DB-aware server runtime; the API-only
+	server and offline OpenAPI command remain database-free.
 
 The generated `.env.example` records the runtime defaults: `HTTP_ADDR=:8080`,
 `APP_ENV=development`, `LOG_LEVEL=info`, `HTTP_READ_TIMEOUT=15s`,
@@ -490,14 +491,15 @@ title `SMT API` and version `v0.1.0`, with `/docs`, `/openapi.json`, and
 committed `openapi.yaml` is byte-identical to regeneration across fresh
 `Apply` destinations.
 
-The runtime returns HTTP 200 with `status: ok` from `/healthz`. `/readyz`
-returns `ready` after bootstrap and `not_ready` with HTTP 503 before bootstrap
-or during shutdown. `/metrics` uses the same listener and exposes Go/process
-metrics plus bounded request counters, duration, and in-flight metrics. Safe
-`X-Request-ID` values are accepted or generated and returned. Custom Gin panic
-recovery logs the panic, stack, route, method, and request ID through JSON
-`slog`, then returns a generic HTTP 500. SIGINT/SIGTERM marks the service not
-ready and performs graceful shutdown with the configured timeout.
+The runtime returns HTTP 200 with `status: ok` from `/healthz`. API-only
+`/readyz` returns `ready` after bootstrap and `not_ready` with HTTP 503 before
+bootstrap or during shutdown. API+Database readiness is defined by the
+`.3.4.3` section below. `/metrics` uses the same listener and exposes
+Go/process metrics plus bounded request counters, duration, and in-flight
+metrics. Safe `X-Request-ID` values are accepted or generated and returned.
+Custom Gin panic recovery logs the panic, stack, route, method, and request ID
+through JSON `slog`, then returns a generic HTTP 500. SIGINT/SIGTERM marks the
+service not ready and performs graceful shutdown with the configured timeout.
 
 The generated server `Config` carries direct `github.com/caarlos0/env/v11
 v11.4.1` `env`/`envDefault` tags on its typed fields, including `slog.Level`
@@ -506,9 +508,10 @@ plain `env.Parse(&cfg)`; native caarlos/TextUnmarshaler parsing controls
 malformed-value errors; no separate semantic conversion or post-parse
 validation is added. `Run` logs a structured `configuration load failed`
 event and panics with the native parse error before constructing the
-application. Normal Gin/Huma runtime and graceful-shutdown behavior is
-unchanged. The exact pin and direct checksums are present in the static
-API-only and API+Database manifests.
+application. API-only `Run` retains that behavior; API+Database validates and
+opens its configured PostgreSQL pool before starting the HTTP server. The exact
+pin and direct checksums are present in the static API-only and API+Database
+manifests.
 
 The API child also receives deterministic `Taskfile.yml` with top-level
 `dotenv: ['.env']`; Task does not copy or mutate `.env`. Its tasks are `build`
@@ -518,15 +521,16 @@ The API child also receives deterministic `Taskfile.yml` with top-level
 with `openapi.yaml`), and `verify` (depends on `build`, `test`, `mod`, and
 `openapi`, then runs `go vet ./...`). API+Database additionally receives
 conditional API-owned `migrate:create`, `migrate:up`, `migrate:version`, and
-`migrate:validate` tasks plus the neutral baseline assets; readiness and live
-database lifecycle tasks remain later. The generated Task CLI harness was verified
+`migrate:validate` tasks plus the neutral baseline assets. Its default `verify`
+does not invoke the DB-dependent `container:verify` task; live lifecycle proof
+is the manual `.3.4.3` lane below. The generated Task CLI harness was verified
 with Task v3.52.0, including dotenv-driven `/healthz` and bounded process
 cleanup.
 
 API-selected Apply writes embedded deterministic assets only: it performs no
 network, Go or package-manager command, tool installation, Task execution, Podman invocation,
 listener start, or runtime execution. This slice adds no credentials, domain
-CRUD, database connectivity/readiness, or root Taskfile changes,
+CRUD, or root Taskfile changes,
 Containerfiles, non-root packaging, or `smt extend`. Durable unit/race/fuzz/integration coverage is
 `.3.3.3`; non-root packaging and runtime verification are `.3.3.4`. Later
 human and Podman gates remain required. `go mod tidy` and human E2E remain
@@ -539,10 +543,10 @@ When API and Database are both selected, Apply emits deterministic
 `migrations/000001_baseline.up.sql` and `.down.sql` files containing only
 `SELECT 1;`, a `scripts/validate-migrations.sh` helper, and a blank
 operator-provided `DATABASE_URL=` entry in the API `.env.example`. The generated
-API Taskfile adds `migrate:create NAME=...` using the pinned
-`go tool migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"` shape,
+API Taskfile adds `migrate:create NAME=...` using the pinned PostgreSQL-tagged
+`go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"` shape,
 with `NAME` transported through a task environment variable, and sets
-`GOFLAGS=-tags=postgres` for the migration tool,
+`GOFLAGS=-tags=postgres` alongside the explicit build tag,
 `migrate:up`, `migrate:version`, and `migrate:validate`; validation runs up and
 then version and preserves native failures without rollback. These tasks are
 explicit and are never dependencies of `verify`.
@@ -553,6 +557,32 @@ PostgreSQL, Podman, or database provisioning. `DATABASE_URL` is an explicit
 operator contract; real PostgreSQL/Podman lifecycle verification belongs to
 `.3.4.3`. No automatic down, drop, force, startup migration, credentials, or
 root orchestration is generated.
+
+### Implemented `.3.4.3` API+Database runtime integration and lifecycle
+
+When API and Database are both selected, the generated server adds
+`DATABASE_URL` configuration, constructs a pgx pool, and starts the HTTP server
+without running migrations. Empty or malformed `DATABASE_URL` values are
+actionable startup configuration errors. A valid but unavailable PostgreSQL
+endpoint leaves `/healthz` at 200 and `/readyz` at 503 until connectivity is
+confirmed.
+
+The readiness monitor performs one serialized `Ping` every second with a
+two-second timeout. It starts not ready, changes to 200 `ready` after a
+successful ping, returns to 503 `not_ready` after a connectivity loss, and
+recovers after a later successful ping. Shutdown cancels and waits for the
+monitor before closing the pool. `cmd/openapi`, `New`, API-only generation, and
+DB-free handler/config tests remain offline and do not construct a pool.
+
+The generated unit seam covers missing/malformed configuration and readiness
+transitions with a fake pinger. Real child-level proof remains a manual Podman
+runbook in [[../10-development/SMT - Command Recipes]]. It covers the
+Database-only service, API+Database readiness/recovery, no-change migration
+reruns, failing and dirty migration states, concurrent migration lock
+contention, unique resource cleanup, and preserved diagnostics for failed
+scenarios. Successful resources are removed; pre-existing resources are never
+touched. The broader root Compose matrix remains tracked by
+`smt-4xf.3.6`.
 
 Legacy DevOps-shaped configurations are rejected by `smt apply` before any
 destination mutation. The migration-oriented error directs the operator to

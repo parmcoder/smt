@@ -102,6 +102,17 @@ func TestApplyGeneratesConditionalDatabaseIntegrationTest(t *testing.T) {
 			t.Fatalf("conditional integration test missing %q:\n%s", marker, integration)
 		}
 	}
+	readiness := readGeneratedAPIFile(t, filepath.Join(destination, "apis"), filepath.Join("internal", "server", "database_readiness_test.go"))
+	for _, marker := range []string{
+		"func TestOpenDatabasePoolRejectsMissingAndMalformedURLs",
+		"func TestRunRejectsMissingAndMalformedDatabaseURL",
+		"func TestDatabaseReadinessMonitorTracksConnectivity",
+		"newDatabaseReadinessMonitor",
+	} {
+		if !strings.Contains(readiness, marker) {
+			t.Fatalf("conditional database readiness test missing %q:\n%s", marker, readiness)
+		}
+	}
 }
 
 func TestApplyAPITestSuiteOutputIsByteStable(t *testing.T) {
@@ -158,5 +169,17 @@ func TestGeneratedAPITestSuiteRunsWithoutDatabase(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generated API test suite did not run without a database: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedDatabaseReadinessTestsRunWithoutDatabase(t *testing.T) {
+	destination := applyAPIWorkspace(t, fullMobileBlueprintBytes())
+	apiRoot := filepath.Join(destination, "apis")
+	cmd := exec.Command("go", "test", "./internal/server", "-count=1", "-run", "Test(OpenDatabasePool|DatabaseReadinessMonitor)")
+	cmd.Dir = apiRoot
+	cmd.Env = append(os.Environ(), "GOCACHE=/private/tmp/smt-gocache", "GOPROXY=off", "GOSUMDB=off")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated database readiness tests did not run offline: %v\n%s", err, output)
 	}
 }

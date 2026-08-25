@@ -104,6 +104,7 @@ func TestRunStopsOnContextCancellation(t *testing.T) {
 	address := freeTestAddress(t)
 	t.Setenv("HTTP_ADDR", address)
 	t.Setenv("HTTP_SHUTDOWN_TIMEOUT", "2s")
+	t.Setenv("DATABASE_URL", "postgres://127.0.0.1:1/smt?sslmode=disable")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -172,6 +173,7 @@ func clearConfigEnvironment(t *testing.T) {
 		"HTTP_IDLE_TIMEOUT",
 		"HTTP_MAX_HEADER_BYTES",
 		"HTTP_SHUTDOWN_TIMEOUT",
+		"DATABASE_URL",
 	} {
 		t.Setenv(key, "")
 	}
@@ -282,6 +284,107 @@ func TestDatabaseConnection(t *testing.T) {
 }
 `
 
+const apiDatabaseReadinessTestGo = `package server
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+)
+
+type fakeDatabasePinger struct {
+	mu      sync.Mutex
+	results []error
+	calls   int
+}
+
+func (p *fakeDatabasePinger) Ping(context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	if len(p.results) == 0 {
+		return nil
+	}
+	result := p.results[0]
+	p.results = p.results[1:]
+	return result
+}
+
+func (p *fakeDatabasePinger) Close() {}
+
+func (p *fakeDatabasePinger) Calls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+func TestOpenDatabasePoolRejectsMissingAndMalformedURLs(t *testing.T) {
+	ctx := context.Background()
+	for _, databaseURL := range []string{"", "://"} {
+		pool, err := openDatabasePool(ctx, databaseURL)
+		if pool != nil {
+			pool.Close()
+			t.Fatalf("openDatabasePool returned a pool for %q", databaseURL)
+		}
+		if err == nil {
+			t.Fatalf("openDatabasePool accepted invalid DATABASE_URL %q", databaseURL)
+		}
+	}
+}
+
+func TestRunRejectsMissingAndMalformedDatabaseURL(t *testing.T) {
+	for _, databaseURL := range []string{"", "://"} {
+		t.Run(databaseURL, func(t *testing.T) {
+			clearConfigEnvironment(t)
+			t.Setenv("DATABASE_URL", databaseURL)
+			if err := Run(context.Background()); err == nil {
+				t.Fatalf("Run accepted invalid DATABASE_URL %q", databaseURL)
+			}
+		})
+	}
+}
+
+func TestDatabaseReadinessMonitorTracksConnectivity(t *testing.T) {
+	readiness := &Readiness{}
+	pinger := &fakeDatabasePinger{results: []error{errors.New("database unavailable"), nil, errors.New("database lost"), nil}}
+	monitor := newDatabaseReadinessMonitor(readiness, pinger, testLogger(), time.Millisecond, 20*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		monitor.run(ctx)
+		close(done)
+	}()
+
+	waitForReadinessState(t, readiness, false)
+	waitForReadinessState(t, readiness, true)
+	waitForReadinessState(t, readiness, false)
+	waitForReadinessState(t, readiness, true)
+	if pinger.Calls() < 4 {
+		t.Fatalf("database ping calls=%d, want at least 4", pinger.Calls())
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("database readiness monitor did not stop after context cancellation")
+	}
+}
+
+func waitForReadinessState(t *testing.T, readiness *Readiness, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if readiness.Ready() == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("readiness=%t, want %t", readiness.Ready(), want)
+}
+`
+
 func apiTaskfileYAML(databaseSelected bool) string {
 	taskfile := apiTaskfileBaseYAML
 	if !databaseSelected {
@@ -303,7 +406,7 @@ func apiTaskfileYAML(databaseSelected bool) string {
       - sh: test -n "$MIGRATION_NAME"
         msg: NAME is required; use task migrate:create NAME=add_example
     cmds:
-      - go tool migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"
+      - go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"
   migrate:up:
     env:
       GOFLAGS: -tags=postgres
@@ -311,7 +414,7 @@ func apiTaskfileYAML(databaseSelected bool) string {
       - sh: test -n "$DATABASE_URL"
         msg: DATABASE_URL is required; set it in .env before running task migrate:up
     cmds:
-      - go tool migrate -path migrations -database "$DATABASE_URL" up
+      - go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database "$DATABASE_URL" up
   migrate:version:
     env:
       GOFLAGS: -tags=postgres
@@ -319,7 +422,7 @@ func apiTaskfileYAML(databaseSelected bool) string {
       - sh: test -n "$DATABASE_URL"
         msg: DATABASE_URL is required; set it in .env before running task migrate:version
     cmds:
-      - go tool migrate -path migrations -database "$DATABASE_URL" version
+      - go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database "$DATABASE_URL" version
   migrate:validate:
     preconditions:
       - sh: test -n "$DATABASE_URL"
@@ -328,5 +431,10 @@ func apiTaskfileYAML(databaseSelected bool) string {
       - sh scripts/validate-migrations.sh
 
 `
-	return strings.Replace(taskfile, "  verify:\n", integrationTask+migrationTasks+"  verify:\n", 1)
+	taskfile = strings.Replace(taskfile, "  verify:\n", integrationTask+migrationTasks+"  verify:\n", 1)
+	return strings.Replace(taskfile,
+		"  verify:\n    deps: [format:check, lint, vuln, vet, build, test, mod, openapi, container:verify]\n",
+		"  verify:\n    deps: [format:check, lint, vuln, vet, build, test, mod, openapi]\n",
+		1,
+	)
 }

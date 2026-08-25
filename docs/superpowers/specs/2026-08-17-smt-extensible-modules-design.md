@@ -9,7 +9,7 @@ tags:
   - blueprint
   - roadmap
 created: 2026-08-17
-updated: 2026-08-22
+updated: 2026-08-25
 ---
 # SMT Extensible Modules Design
 
@@ -270,7 +270,8 @@ When API and Database are selected together, Apply emits the API-owned
 the deterministic no-op `SELECT 1;`, plus `scripts/validate-migrations.sh`.
 The API `.env.example` adds a blank operator-provided `DATABASE_URL=` entry.
 The API Taskfile conditionally adds `migrate:create NAME=...`, `migrate:up`,
-`migrate:version`, and `migrate:validate` using the pinned `go tool migrate`
+`migrate:version`, and `migrate:validate` using the pinned PostgreSQL-tagged
+`go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate`
 command shape. Validation runs up and then version and preserves native
 failures without rollback. These tasks are explicit and are not dependencies
 of `verify`.
@@ -279,7 +280,49 @@ API-only and Database-only outputs contain no migration assets or commands.
 Apply remains offline and does not execute migrations, provision credentials or
 databases, start services, add startup migration behavior, emit destructive
 down/drop/force commands, or change root orchestration. `DATABASE_URL` is an
-operator contract; `.3.4.3` owns live PostgreSQL/Podman lifecycle verification.
+operator contract; API+Database startup must treat an empty or malformed
+`DATABASE_URL` as an actionable configuration error. `.3.4.3` owns live
+PostgreSQL/Podman lifecycle verification, while the root Compose matrix remains
+in `smt-4xf.3.6`.
+
+## Approved `.3.4.3` API+Database runtime integration and lifecycle verification
+
+`.3.4.3` now owns the API+Database runtime integration contract plus live
+child-level lifecycle verification. API-only behavior remains unchanged, and
+the broader root Compose matrix remains tracked separately by `smt-4xf.3.6`.
+
+For API+Database, startup requires a valid `DATABASE_URL`. Empty values and
+malformed URLs are startup configuration errors with actionable operator
+guidance; the service must fail closed rather than continue with a false-ready
+state. No migrations run during startup.
+
+The runtime keeps `/healthz` as a pure process health endpoint returning HTTP
+200 with `status: ok`. `/readyz` becomes a PostgreSQL connectivity signal for
+API+Database: it starts at HTTP 503 with `status: not_ready`, a continuous
+database health loop pings PostgreSQL every 1 second with a 2 second timeout,
+readiness changes to HTTP 200 with `status: ready` once connectivity is
+confirmed, and readiness returns to HTTP 503 if connectivity is later lost.
+This readiness signal proves connectivity only; it does not prove migrations,
+schema shape, or application-domain correctness.
+
+Migration ownership remains operator-driven through the explicit
+`migrate:up`, `migrate:version`, and `migrate:validate` commands introduced by
+`.3.4.2`. `.3.4.3` may exercise those commands during live verification, but
+it does not move migration execution into process startup or root Compose
+automation.
+
+The manual verification runbook for `.3.4.3` uses unique disposable Podman
+resources per scenario, cleans successful scenarios, preserves failed
+containers/volumes/logs for diagnosis, and never touches unrelated existing
+resources. It must cover Database-only plus API+Database, the no-change rerun,
+invalid `DATABASE_URL`, failing or dirty migration state, concurrent migration
+lock contention, restart/recovery after connectivity loss, and secret-safe
+evidence capture.
+
+Current documentation must remain truthful about evidence. A Podman client may
+be present on the host, but live runtime availability is environment-dependent;
+do not describe `.3.4.3` as already live-verified unless a real disposable run
+has succeeded and its evidence is recorded separately.
 
 ## Implemented `.3.3.1` API manifest contract
 
@@ -334,18 +377,19 @@ plain `env.Parse(&cfg)`; native caarlos/TextUnmarshaler parsing controls
 malformed-value errors; no separate semantic conversion or post-parse
 validation is added. `Run` logs a structured `configuration load failed`
 event and panics with the native parse error before constructing the
-application. Normal Gin/Huma runtime and graceful-shutdown behavior is
-unchanged. The exact pin and direct checksums are present in the API-only and
-API+Database manifests.
+application. API-only `Run` retains that behavior; API+Database adds the
+conditional PostgreSQL pool/readiness path described above. The exact pin and
+direct checksums are present in the API-only and API+Database manifests.
 API-selected Apply also emits a deterministic child `Taskfile.yml` with
 top-level `dotenv: ['.env']`; it does not copy or mutate `.env`. The tasks are
 `build` with trimpath output `bin/apis`, `run` of that built binary, `test`,
 `coverage`, `mod` (`go mod verify`), offline byte-comparing `openapi`, and
 `verify` depending on `build`, `test`, `mod`, and `openapi` before `go vet
 ./...`. API+Database gets conditional API-owned migration tasks and the
-neutral baseline; database readiness and live lifecycle remain later. The
-Task v3.52.0 child harness verified dotenv-driven `/healthz` and bounded
-process cleanup.
+neutral baseline. API+Database `verify` omits the DB-dependent
+`container:verify` dependency; live lifecycle proof remains the manual
+`.3.4.3` runbook. The Task v3.52.0 child harness verified dotenv-driven
+`/healthz` and bounded process cleanup.
 
 `/healthz` returns 200 `status: ok`; `/readyz` returns 503 `not_ready` before
 bootstrap or during shutdown and 200 `ready` after bootstrap. `/metrics` uses
@@ -357,10 +401,9 @@ graceful shutdown with the configured timeout.
 
 API-selected Apply writes embedded deterministic assets only: no network, Go or
 package-manager command, tool installation, Podman, listener, or runtime
-execution. No credentials, domain CRUD, DB connectivity/readiness, root
-Taskfile changes, Containerfiles, non-root packaging, or `smt extend` are
-added; Apply never executes the generated child Taskfile. No implicit installs
-or network work are performed.
+execution. No credentials, domain CRUD, root Taskfile changes, Containerfiles,
+non-root packaging, or `smt extend` are added; Apply never executes the
+generated child Taskfile. No implicit installs or network work are performed.
 Durable unit/race/fuzz/integration coverage is `.3.3.3`; non-root packaging and
 runtime verification are `.3.3.4`. Later human and Podman gates remain
 required. No `go mod tidy` or human E2E completion is claimed here; `go mod
@@ -444,11 +487,14 @@ adds the six non-selectable platform declarations plus catalog/config
 validation boundaries, `.3.1` adds the root runtime contract artifacts,
 `.3.2.1` adds the staged CLI-owned Web baseline, `.3.3.2` adds the generated
 API runtime/OpenAPI assets, `.3.4.1` adds the independent Database runtime
-and readiness assets, and `.3.4.2` adds conditional API-owned migrations.
-Remaining design scope records the completed P0 Mobile verification contract,
-followed by deferred Web `.3.2.2/.3`, Database/API lifecycle verification, packaging, and Podman-first
-runtime execution. Mobile integration/device/build lanes remain explicit
-unverified where the host lacks the required SDK or target. Out of scope for
+and readiness assets, `.3.4.2` adds conditional API-owned migrations, and
+`.3.4.3` now owns API+Database runtime integration plus child-level lifecycle
+verification without absorbing the broader root Compose matrix. Remaining
+design scope records the completed P0 Mobile verification contract, followed
+by deferred Web `.3.2.2/.3`, root Compose matrix work in `smt-4xf.3.6`,
+packaging, and Podman-first runtime execution. Mobile integration/device/build
+lanes remain explicit unverified where the host lacks the required SDK or
+target. Out of scope for
 the current CLI are Web/Mobile runtime execution, platform Containerfiles,
 platform repositories/scaffolds/runtime artifacts, Podman/Compose execution, Kubernetes
 or ArgoCD deployment, OpenTofu execution, a remote module registry,

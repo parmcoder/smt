@@ -53,7 +53,7 @@ func TestApplyGeneratesConditionalAPIMigrationAssets(t *testing.T) {
 			for relative, want := range map[string]string{
 				filepath.Join("migrations", "000001_baseline.up.sql"):   "SELECT 1;",
 				filepath.Join("migrations", "000001_baseline.down.sql"): "SELECT 1;",
-				filepath.Join("scripts", "validate-migrations.sh"):      "go tool migrate",
+				filepath.Join("scripts", "validate-migrations.sh"):      "go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate",
 			} {
 				contents := readGeneratedAPIFile(t, apiRoot, relative)
 				if strings.HasSuffix(relative, ".sql") && contents != "SELECT 1;\n" {
@@ -93,9 +93,9 @@ func TestApplyGeneratesConditionalAPIMigrationAssets(t *testing.T) {
 			}
 			for _, want := range []string{
 				"MIGRATION_NAME: '{{.NAME}}'",
-				"go tool migrate create -ext sql -dir migrations -seq \"$MIGRATION_NAME\"",
-				"go tool migrate -path migrations -database \"$DATABASE_URL\" up",
-				"go tool migrate -path migrations -database \"$DATABASE_URL\" version",
+				"go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations -seq \"$MIGRATION_NAME\"",
+				"go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database \"$DATABASE_URL\" up",
+				"go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database \"$DATABASE_URL\" version",
 				"GOFLAGS: -tags=postgres",
 				"sh scripts/validate-migrations.sh",
 				"DATABASE_URL is required",
@@ -143,7 +143,7 @@ func TestApplyGeneratesAPIMigrationAssetsByteIdentically(t *testing.T) {
 	}
 }
 
-func TestGeneratedAPIMigrationTasksUsePinnedGoToolAndPropagateFailures(t *testing.T) {
+func TestGeneratedAPIMigrationTasksUsePinnedPostgresCommandAndPropagateFailures(t *testing.T) {
 	destination := applyAPIWorkspace(t, fullMobileBlueprintBytes())
 	apiRoot := filepath.Join(destination, "apis")
 	fakeBin := t.TempDir()
@@ -191,9 +191,9 @@ exit 0
 	}
 	logText := string(log)
 	for _, want := range []string{
-		"tool migrate create -ext sql -dir migrations -seq add_widgets",
-		"tool migrate -path migrations -database postgres://smt@example.invalid/smt up",
-		"tool migrate -path migrations -database postgres://smt@example.invalid/smt version",
+		"run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations -seq add_widgets",
+		"run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database postgres://smt@example.invalid/smt up",
+		"run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate -path migrations -database postgres://smt@example.invalid/smt version",
 	} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("fake go log missing %q:\n%s", want, logText)
