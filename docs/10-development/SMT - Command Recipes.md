@@ -104,11 +104,11 @@ Web `.3.2.1` is implemented as a staged, CLI-owned Next.js baseline. The root
 this exact argument-array command before publishing the child:
 
 ```sh
-asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
 Apply preserves the CLI files, merges its `.gitignore`, publishes no
-`package-lock.json`, and performs no `npm install` or dependency resolution.
+package-manager lockfiles, and performs no `pnpm install` or dependency resolution.
 The staged operation is atomic; on failure the destination is not published
 and the error gives `asdf install nodejs 24.18.0`, `asdf current nodejs`, and
 `asdf exec npx --yes create-next-app@16.2.9 --help` guidance. A selected Web
@@ -124,13 +124,13 @@ resolution.
 After Apply, work from `web-app/` with:
 
 ```sh
-asdf exec npm install
-asdf exec npm run dev
+pnpm install
+pnpm run dev
 ```
 
-The later Web worker lanes `.3.2.2/.3` own npm lockfile creation, quality,
+The later Web worker lanes `.3.2.2/.3` own pnpm lockfile creation, quality,
 browser, and runtime verification. Do not treat this initializer as evidence
-that those real npm, browser, or runtime lanes have run.
+that those real pnpm, browser, or runtime lanes have run.
 
 ### Plan the Mobile-first starter lane
 
@@ -171,9 +171,9 @@ The planned milestones are:
   The opted-in lane passes format, analyze, and unit/widget tests; this host
   has no Android SDK or supported Android/iOS target, so integration and debug
   builds are explicit unverified results, never silently skipped.
-- `.6.1.3`: after the Mobile rollup closes, activate the Mobile Taskfile with
-  dependency, format, analyze, test, integration, Android debug, iOS debug,
-  and aggregate `verify` tasks.
+- `.6.1.3`: after the Mobile rollup closes, expose the native Flutter
+  verification interface and fast Lefthook profile. Do not generate a Mobile
+  Taskfile; root aggregation invokes direct `asdf exec flutter` commands.
 
 Apply runs only the staged Flutter create plus static Mobile verification-file
 writes; it does not run `pub get` or these verification commands. Current
@@ -495,11 +495,9 @@ remain deferred.
 Each created repository receives a scaffold-only `lefthook.yml` with top-level
 `no_auto_install: true` and `assert_lefthook_installed: true`. Its `commit-msg`
 entry calls bare `smt validate-message --config FILE {1}`, where `FILE` is the
-correct relative path to the root `smt.yaml`. `no_auto_install` prevents
-Lefthook from automatically installing or updating hooks when configuration
-changes; the assertion makes Git fail if Lefthook cannot be found, rather than
-silently skipping validation. Applying a blueprint does not execute Lefthook or
-install a Git hook.
+correct relative path to the root `smt.yaml`. Root, Web, API, and Mobile also
+receive fast `pre-push` checks; Database remains commit-msg-only. Applying a
+blueprint does not execute Lefthook or install a Git hook.
 
 ### Beads bootstrap files
 
@@ -846,12 +844,12 @@ uses argument-array `git config --get core.hooksPath` in every initialized
 configured repository before any installer mutation. Any nonempty effective
 setting, including a relative one, blocks all installation as a custom hook-path
 policy; resolve it manually rather than forcing or resetting it. It then
-requires a regular eligible `commit-msg` target and a top-level `commit-msg`
-mapping in `lefthook.yml`, and runs `lefthook validate` in every repository
-using argument arrays. A symlink, directory, or other nonregular `commit-msg`
-target is unmanaged and blocks the plan. It completes all root-and-child
-preflight before installing anything, then runs argument-array
-`lefthook install commit-msg` root-first. `--dry-run` performs that preflight
+requires the declared hook mappings in `lefthook.yml`, and runs `lefthook
+validate` in every repository using argument arrays. A symlink, directory, or
+other nonregular declared hook target is unmanaged and blocks the plan. It
+completes all root-and-child preflight before installing anything, then runs
+argument-array `lefthook install` root-first so every declared hook is installed.
+`--dry-run` performs that preflight
 and prints the configured repository plan without changing hooks. A successful
 real install prints installed repository IDs. If a later real install fails,
 use its installed and pending IDs for manual recovery; SMT does not force,

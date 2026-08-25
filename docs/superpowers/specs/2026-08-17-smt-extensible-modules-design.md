@@ -131,29 +131,29 @@ Web is selected, Apply stages the child and invokes this exact argument-array
 command:
 
 ```sh
-asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
 The Next.js CLI owns the generated `package.json`, App Router, Tailwind,
 `AGENTS.md`, and other baseline files. Apply preserves those files, merges the
-CLI `.gitignore`, publishes no `package-lock.json`, and performs no `npm
-install` or dependency resolution. The CLI output is staged before
+CLI `.gitignore`, publishes no package-manager lockfile, and performs no
+`pnpm install` or dependency resolution. The CLI output is staged before
 publication; a failure retains its output in the error, reports
 `asdf install nodejs 24.18.0`, `asdf current nodejs`, and the pinned CLI
 `--help` path, and leaves no published partial destination.
 
 This pinned `npx create-next-app` call is the sole Apply exception that may
 access the npm registry. Non-Web and static Apply paths remain offline; Web
-still performs no `npm install`, lockfile publication, or dependency
+still performs no `pnpm install`, lockfile publication, or dependency
 resolution.
 
 Web selection also generates `web_worker` routing and skills metadata. The
 worker owns assigned Next.js/TypeScript production code and focused tests and
 uses `build-web-apps:react-best-practices` and
 `build-web-apps:frontend-testing-debugging`. After Apply, the local workflow is
-`asdf exec npm install` followed by `asdf exec npm run dev` from `web-app/`.
-The later `.3.2.2/.3` lanes own npm lockfile creation, quality, browser, and
-runtime verification; `.3.2.1` claims no real Web npm, browser, or runtime
+`pnpm install` followed by `pnpm run dev` from `web-app/`. The later
+`.3.2.2/.3` lanes own pnpm lockfile creation, quality, browser, and runtime
+verification; `.3.2.1` claims no real Web pnpm, browser, or runtime
 evidence.
 
 ## Approved mobile-first roadmap
@@ -201,9 +201,10 @@ iOS lanes explicitly.
   `flutter analyze`, and unit/widget tests. The host has no Android SDK or
   supported Android/iOS target, so integration and debug-build lanes are
   explicit unverified results, never silently skipped.
-- **`.6.1.3` Mobile Taskfile** — activates only after the Mobile rollup closes,
-  with dependency, format, analyze, test, integration, Android debug, iOS
-  debug, and aggregate `verify` tasks.
+- **`.6.1.3` Mobile native verification** — activates after the Mobile rollup
+  closes with direct `asdf exec flutter` format, analyze, test, integration,
+  and debug-build lanes plus a fast format/analyze Lefthook profile. It does
+  not generate a Mobile Taskfile.
 
 `.3.5.1`, `.3.5.2`, and `.3.5.3` are implemented; unavailable Mobile device
 and debug-build lanes remain explicit gaps. Mobile remains outside OCI Compose.

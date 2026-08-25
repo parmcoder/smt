@@ -194,12 +194,12 @@ Web `.3.2.1` is implemented as a CLI-owned Next.js baseline: the root pins
 argument-array command:
 
 ```sh
-asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
 The CLI owns the generated `package.json`, App Router, Tailwind, `AGENTS.md`,
 and related baseline files. Apply preserves that output, merges the CLI
-`.gitignore`, publishes no `package-lock.json`, and performs no `npm install` or
+`.gitignore`, publishes no package-manager lockfile, and performs no `pnpm install` or
 dependency resolution. Staging is atomic: a failed initializer leaves the
 destination unpublished and reports `asdf install nodejs 24.18.0`,
 `asdf current nodejs`, and the pinned CLI `--help` recovery path. Apply also
@@ -210,10 +210,10 @@ access the npm registry. Non-Web and static Apply paths remain offline; Web
 still performs no installation, lockfile publication, or dependency
 resolution.
 
-After Apply, the local Web workflow is `asdf exec npm install` followed by
-`asdf exec npm run dev` from `web-app/`. The later `.3.2.2/.3` Web worker lanes
-own npm lockfile creation, quality, browser, and runtime checks; `.3.2.1`
-does not claim real npm or runtime evidence. Future Web build contexts and
+After Apply, the local Web workflow is `pnpm install` followed by
+`pnpm run dev` from `web-app/`. The later `.3.2.2/.3` Web worker lanes
+own pnpm lockfile creation, quality, browser, and runtime checks; `.3.2.1`
+does not claim real pnpm or runtime evidence. Future Web build contexts and
 Containerfiles, Database lifecycle tasks, broader Mobile API integration,
 platform runtime work, a remote module registry, and `smt extend` remain
 deferred. Database `.3.4.1` now provides its independent PostgreSQL runtime

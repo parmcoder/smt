@@ -116,11 +116,11 @@ workflow. After the root `.tool-versions` pin `nodejs 24.18.0` is staged, Web
 Apply runs this exact argument-array command and preserves the CLI-owned files:
 
 ```sh
-asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
-Apply merges the CLI `.gitignore`, publishes no `package-lock.json`, and does
-not run `npm install` or resolve dependencies. A failed initializer leaves the
+Apply merges the CLI `.gitignore`, publishes no package-manager lockfile, and
+does not run `pnpm install` or resolve dependencies. A failed initializer leaves the
 published destination absent and retains actionable recovery guidance:
 `asdf install nodejs 24.18.0`, `asdf current nodejs`, and
 `asdf exec npx --yes create-next-app@16.2.9 --help`. The CLI output is staged
@@ -128,7 +128,7 @@ before publication, so the failure is atomic.
 
 The pinned `npx create-next-app` call is the sole Apply exception that may
 access the npm registry. Non-Web and static Apply paths remain offline; Web
-still performs no `npm install`, lockfile publication, or dependency
+still performs no `pnpm install`, lockfile publication, or dependency
 resolution.
 
 When Web is selected, Apply also generates Web-specific `web_worker` routing
@@ -136,8 +136,8 @@ and the worker manifest. `web_worker` owns only assigned Next.js/TypeScript
 production code and focused tests, uses the required
 `build-web-apps:react-best-practices` and
 `build-web-apps:frontend-testing-debugging` skills, does not delegate, and
-reports unavailable Node, npm, browser, or platform lanes explicitly. The
-later `.3.2.2/.3` work owns npm installation and lockfile creation, quality,
+reports unavailable Node, pnpm, browser, or platform lanes explicitly. The
+later `.3.2.2/.3` work owns pnpm installation and lockfile creation, quality,
 browser, and runtime verification; no such real-lane evidence is claimed by
 `.3.2.1`.
 

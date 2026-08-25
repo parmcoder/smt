@@ -18,14 +18,17 @@ updated: 2026-08-23
 
 This is a researched planned contract for generated component repositories; its
 component toolchain sections remain planned unless marked implemented. It
-refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it; `.3.2.1` adds the staged CLI-owned Web baseline; `.3.3.2` adds deterministic API source and OpenAPI assets; and `.3.3.4` adds API packaging and non-root runtime verification tasks. Current `smt apply` remains deterministic: non-Web and static paths are offline and do not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration. Selected Web `.3.2.1` is the sole pinned `npx` initializer exception that may access the npm registry, while still skipping `npm install`, lockfile publication, and dependency resolution. Apply rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
+refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it; `.3.2.1` adds the staged CLI-owned Web baseline; `.3.3.2` adds deterministic API source and OpenAPI assets; and `.3.3.4` adds API packaging and non-root runtime verification tasks. Current `smt apply` remains deterministic: non-Web and static paths are offline and do not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration. Selected Web `.3.2.1` is the sole pinned `npx` initializer exception that may access the npm registry, while still skipping `pnpm install`, lockfile publication, and dependency resolution. Apply rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
 
-Each component has four layers: native CLI/toolchain; repeatable Taskfile
-gates; agent skills; and optional MCP/live-runtime integration. Taskfiles use
-`format:check`, `lint`, `test`, and `verify` conventions. Outputs are
-deterministic. Skills teach workflows; MCP provides explicitly opted-in live
-context/actions. Required and conditional dependencies are declared at the
-component boundary, and MCP configuration must never contain secrets.
+Each component has four layers: native CLI/toolchain; a repeatable local
+verification interface; agent skills; and optional MCP/live-runtime
+integration. API and Database use Taskfiles, Web uses package.json scripts,
+and Mobile uses direct Flutter commands. The root Taskfile aggregates selected
+interfaces. Lefthook provides commit-message validation everywhere and fast
+pre-push checks for root, Web, API, and Mobile. Outputs are deterministic.
+Skills teach workflows; MCP provides explicitly opted-in live context/actions.
+Required and conditional dependencies are declared at the component boundary,
+and MCP configuration must never contain secrets.
 
 ## Implemented module declarations
 
@@ -117,7 +120,7 @@ API `go.mod`/`go.sum`
 exception is implemented in `.3.3.1`, and the API source/OpenAPI assets are
 implemented in `.3.3.2`; future static generator work may copy remaining
 reviewed manifests deterministically and offline. Web lockfile creation belongs
-to the later `npm install` lane, not Apply.
+to the later explicit `pnpm install` lane, not Apply.
 `smt apply` never runs a package manager.
 
 - **Web `.3.2.1` (implemented)** — root `.tool-versions` pins Node.js
@@ -126,14 +129,14 @@ to the later `npm install` lane, not Apply.
   generated files, and merges `.gitignore` entries:
 
   ```sh
-  asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+  asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
   ```
 
-  Apply publishes no `package-lock.json`, runs no `npm install`, and performs
-  no dependency resolution. A failure is atomic and reports
+  Apply publishes no package-manager lockfile, runs no `pnpm install`, and
+  performs no dependency resolution. A failure is atomic and reports
   `asdf install nodejs 24.18.0`, `asdf current nodejs`, and the pinned CLI
-  `--help` path. After Apply, `web_worker` uses `asdf exec npm install` and
-  `asdf exec npm run dev` from `web-app/`; `.3.2.2/.3` own lockfile, quality,
+  `--help` path. After Apply, `web_worker` uses `pnpm install` and
+  `pnpm run dev` from `web-app/`; `.3.2.2/.3` own the `pnpm-lock.yaml`, quality,
   browser, and runtime verification. The pinned `npx create-next-app` call may
   access the npm registry; no real Web lane is claimed here.
 - **API** is the implemented `.3.3.1` manifest exception: when API is selected,
@@ -212,7 +215,7 @@ The API child also receives deterministic `Taskfile.yml` with top-level
 `format:check`, `lint`, `vuln`, `vet`, `mod` (`go mod verify`), offline
 byte-comparing `openapi`, development `container:build`, production
 `container:build:production`, `container:verify`, and aggregate
-`verify`. API+Database receives conditional API-owned migration tasks and a
+`verify:fast`, and aggregate `verify`. API+Database receives conditional API-owned migration tasks and a
 neutral baseline; data-service readiness and live lifecycle tasks remain later.
 Task
 v3.52.0 verified dotenv-driven `/healthz` and bounded process cleanup in the
@@ -273,17 +276,18 @@ Baseline: Next.js `16.2.9` on Node.js `24.18.0`. The implemented `.3.2.1`
 initializer is CLI-owned and runs in staging:
 
 ```sh
-asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
-Apply preserves CLI files, merges `.gitignore`, publishes no
-`package-lock.json`, and does not run `npm install` or resolve dependencies.
+Apply preserves CLI files, merges `.gitignore`, publishes no package-manager
+lockfile, and does not run `pnpm install` or resolve dependencies.
 The pinned `npx create-next-app` call is the sole Apply exception that may
 access the npm registry; non-Web and static Apply paths remain offline.
 The generated `web_worker` manifest owns Next.js/TypeScript production code
 and focused tests and requires `build-web-apps:react-best-practices` plus
 `build-web-apps:frontend-testing-debugging`. After Apply, use
-`asdf exec npm install` and `asdf exec npm run dev` locally. `.3.2.2/.3`
+`asdf exec pnpm install` and `asdf exec pnpm run dev` locally; that explicit
+install creates or refreshes `pnpm-lock.yaml`. `.3.2.2/.3`
 remain deferred and own lockfile creation, `eslint . --max-warnings=0`,
 Prettier, `tsc --noEmit`, Vitest/React Testing Library, `next build`,
 and related Web app quality evidence. Root `.14.4` owns Playwright/browser
@@ -315,9 +319,8 @@ package resolution. If the pinned toolchain is unavailable, the failure guidance
 the Apply remains atomic. Current `.3.5.3` evidence is asdf Flutter create,
 pub get, Dart format, analyze, and unit/widget tests passing. Android SDK
 absence and the lack of a supported Android/iOS target leave integration and
-debug-build lanes unverified. `.6.1.3` activates only after the Mobile rollup
-closes and adds dependency, format, analyze, test, integration, Android debug,
-iOS debug, and aggregate `verify` tasks.
+debug-build lanes unverified. `.6.1.3` provides the native Flutter verification
+interface and Lefthook profile; it does not generate a Mobile Taskfile.
 
 The required official source is `flutter/agent-plugins`; a minimal core is
 `flutter-apply-architecture-best-practices`,
@@ -349,7 +352,7 @@ optional API reachability, Mobile launch, and `mobile-home`/`api-status`.
 
 The E2E worker uses `$build-web-apps:frontend-testing-debugging` and
 `$flutter-add-integration-test`. It delegates startup/shutdown to existing
-component Taskfiles, never installs packages or browsers during Apply, and
+component verification interfaces, never installs packages or browsers during Apply, and
 reports missing browsers, SDKs, simulators, emulators, or devices explicitly.
 Auth, domain fixtures, signing, cloud device farms, remote CI, and production
 regression suites remain application-owned follow-up work.
@@ -368,14 +371,17 @@ MCP is required for v0.1.0.
 ## Container / root workspace
 
 The generated API child Taskfile and API `Containerfile` are implemented above.
-For any Web, API, or Database selection, Apply now emits a root Taskfile with
+For every workspace selection, Apply emits a root Taskfile with aggregate
+`verify:fast` and `verify` tasks. Web dispatches through pnpm package scripts,
+Mobile through direct `asdf exec flutter` commands, and API/Database through
+their child Taskfiles. For OCI selections it also emits
 `compose:config`, `compose:build`, `compose:up`, `compose:down`, and
-`compose:ps`. Each command passes the operator-managed root `.env` explicitly
-with `podman compose --env-file .env -f compose.yaml ...`; missing `.env` and,
-for Database, an empty `DATABASE_PASSWORD` fail before Compose starts. The
-broader root taskfile will later orchestrate component gates, data-service
-migration/readiness tasks, and Beads-aware aggregate verification; root task
-aggregation is `.6.1.2` and later.
+`compose:ps`. Each Compose command passes the operator-managed root `.env`
+explicitly with `podman compose --env-file .env -f compose.yaml ...`; missing
+`.env` and, for Database, an empty `DATABASE_PASSWORD` fail before Compose
+starts. Root aggregation is `.6.1.4`; it never installs dependencies or host
+tools. Lefthook pre-push invokes only `verify:fast`; full tests, migrations,
+runtime, browser, device, and security lanes remain explicit.
 Podman/Compose smoke tests cover build, start, health/readiness, shutdown, and
 non-root identity. Gitleaks/security tasks are required before a production
 candidate. SBOM, signing, and remote CI are deferred.
@@ -385,11 +391,11 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Component | Generated manifest/lockfile | Required local tools | Task gates | Required skills | Optional MCP/runtime |
 | --- | --- | --- | --- | --- | --- |
 | Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `.3.3.4` `Containerfile` and `Taskfile.yml`; `.3.4.2` conditional migration assets | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, govulncheck, Task, Podman | child `build`, `run`, `test`, `coverage`, `format:check`, `lint`, `vet`, `race`, `fuzz`, `vuln`, `mod`, `openapi`, `container:build`, `container:verify`, `verify`; API+Database adds `migrate:create`, `migrate:up`, `migrate:version`, `migrate:validate` | `$godex:godex-go-backend` | gopls local; no Go MCP |
-| Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `package-lock.json` after later `npm install` | Node.js 24.18.0, Next.js 16.2.9, npm | `.3.2.2/.3` deferred: lockfile, Prettier, ESLint, TypeScript, Vitest/RTL, build, and Web app quality checks | React best practices; frontend testing/debugging | Browser for rendered/E2E |
-| Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` implemented: format, analyze, unit/widget; integration/debug builds explicit unverified when targets/SDKs are unavailable; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
+| Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `pnpm-lock.yaml` after explicit `pnpm install` | Node.js 24.18.0, Next.js 16.2.9, pnpm | package scripts `format:check`, `lint`, `typecheck`, `test`, `build`, `verify:fast`, `verify`; no Web Taskfile | React best practices; frontend testing/debugging | Browser for rendered/E2E |
+| Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | direct `asdf exec flutter` format/analyze/test/integration/build commands; fast pre-push format/analyze; no Mobile Taskfile | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
 | PostgreSQL | None; `.3.4.1` `Containerfile`, `.env.example`, and `Taskfile.yml` | PostgreSQL, psql, pg_isready, Podman | `.3.4.1` build/run/readiness/diagnose/verify; API+Database `.3.4.2` migration create/up/version/validate; `.3.4.3` disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
-| Root/container | `compose.yaml`, `.env.example`, conditional identity `traefik/dynamic.yaml`, root `Taskfile.yml` for OCI selections | none for Apply; Podman/Compose for local lifecycle | explicit root `.env` Compose config/build/up/down/ps; broader smoke, non-root, security, and aggregate verify remain later | project workflow guidance | Podman/Compose runtime is operator-run |
+| Root/container | `compose.yaml`, `.env.example`, conditional identity `traefik/dynamic.yaml`, root `Taskfile.yml` | none for Apply; Podman/Compose for local lifecycle | root `verify:fast`/`verify`, explicit root `.env` Compose config/build/up/down/ps; Lefthook fast pre-push; broader smoke, non-root, security, and E2E remain explicit | project workflow guidance | Podman/Compose runtime is operator-run |
 
 ## Research sources
 

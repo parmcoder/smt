@@ -57,7 +57,7 @@ Beads lifecycle commands. Implemented commands are:
   MCP integrations, mutate host configuration, or create module repositories.
 - When Web is selected, apply stages the root `nodejs 24.18.0` pin and runs the
   accepted local Next.js initializer described below. It publishes the
-  CLI-owned baseline without `package-lock.json`, `npm install`, or dependency
+  CLI-owned baseline without a package-manager lockfile, `pnpm install`, or dependency
   resolution; a failed staged initializer is atomic and leaves no published
   destination.
 - `smt push [--dry-run]` — preflight every configured repository, then push
@@ -85,9 +85,9 @@ Beads lifecycle commands. Implemented commands are:
   using each repository's effective default branch.
 - `smt hooks install [--dry-run]` — require bare `smt` and `lefthook` on
   `PATH`, then preflight every configured initialized worktree, valid
-  `lefthook.yml` `commit-msg` mapping, `lefthook validate` result, and eligible
-  `commit-msg` hook before installing Lefthook dispatchers root-first. Dry-run
-  prints the complete plan without mutation.
+  `lefthook.yml` mappings, `lefthook validate` result, and every declared hook
+  target before installing all Lefthook dispatchers root-first. Dry-run prints
+  the complete plan without mutation.
 - `smt validate-message [--config FILE] FILE` — validate one complete
   conventional commit message. On a non-default active Beads branch it also
   requires the exact branch ID in `type(scope): [BEAD-ID] summary`; default
@@ -125,13 +125,13 @@ The Web stack value is `nextjs`, with Next.js `16.2.9` on root-pinned Node.js
 published destination and invokes this exact argument-array command:
 
 ```sh
-asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
 Apply preserves the CLI-owned `package.json`, App Router, Tailwind, `AGENTS.md`,
 and other generated files, merges the CLI `.gitignore` with SMT-required
-entries, and publishes no `package-lock.json`. `--skip-install` means Apply
-does not run `npm install` or resolve dependencies. The staged CLI output is
+entries, and publishes no package-manager lockfile. `--skip-install` means
+Apply does not run `pnpm install` or resolve dependencies. The staged CLI output is
 published only after initialization succeeds; failures preserve CLI output in
 the error, report `asdf install nodejs 24.18.0`, `asdf current nodejs`, and
 `asdf exec npx --yes create-next-app@16.2.9 --help`, and leave the destination
@@ -139,16 +139,18 @@ unpublished.
 
 The pinned `npx create-next-app` invocation is the sole Apply exception that
 may access the npm registry. Non-Web and static Apply paths remain offline;
-Web still performs no `npm install`, lockfile publication, or dependency
-resolution.
+Web still performs no `pnpm install`, lockfile publication, or dependency
+resolution. After Apply, the operator explicitly runs `pnpm install` in
+`web-app/` to create or refresh the committed `pnpm-lock.yaml` before runtime
+or E2E verification.
 
 Selecting Web also generates Web-specific `web_worker` routing and a worker
 manifest requiring `build-web-apps:react-best-practices` and
 `build-web-apps:frontend-testing-debugging`. After Apply, the local workflow
-is `asdf exec npm install` followed by `asdf exec npm run dev` from
-`web-app/`; the later `.3.2.2/.3` Web worker lanes own dependency lockfile,
-quality, browser, and runtime verification. `.3.2.1` claims no real npm,
-browser, or runtime evidence.
+is `pnpm install` followed by `pnpm run dev` from `web-app/`; the later
+`.3.2.2/.3` Web worker lanes own dependency lockfile, quality, browser, and
+runtime verification. `.3.2.1` claims no real pnpm, browser, or runtime
+evidence.
 
 ## Flutter Mobile component
 
@@ -427,7 +429,7 @@ report missing Podman or Podman Compose through injected prerequisite checks.
  the staged pinned `npx create-next-app` initializer, which is the one allowed
  registry-access exception; for selected Mobile, it invokes only the staged
  local Flutter `create --empty --no-pub` command above. It does not invoke
- Preflight, Podman, Compose, socket probing, runtime health checks, `npm
+  Preflight, Podman, Compose, socket probing, runtime health checks, `pnpm
 install`, `flutter pub get`, or package resolution. OCI-selected workspaces also
 receive root Compose Taskfile entrypoints that pass the operator-managed root
 `.env` explicitly and fail early when it is missing (or when a selected
@@ -519,8 +521,9 @@ The API child also receives deterministic `Taskfile.yml` with top-level
 (`mkdir -p bin && go build -trimpath -o bin/apis .`), `run` (depends on
 `build`, then runs `./bin/apis`), `test`, `coverage`, `mod` (`go mod verify`),
 `openapi` (offline `GOPROXY=off GOSUMDB=off` generation compared byte-for-byte
-with `openapi.yaml`), and `verify` (depends on `build`, `test`, `mod`, and
-`openapi`, then runs `go vet ./...`). API+Database additionally receives
+with `openapi.yaml`), `verify:fast` (format check and vet), and `verify`
+(depends on `build`, `test`, `mod`, and `openapi`, then runs `go vet ./...`).
+API+Database additionally receives
 conditional API-owned `migrate:create`, `migrate:up`, `migrate:version`, and
 `migrate:validate` tasks plus the neutral baseline assets. Its default `verify`
 does not invoke the DB-dependent `container:verify` task; live lifecycle proof
@@ -530,8 +533,9 @@ cleanup.
 
 API-selected Apply writes embedded deterministic assets only: it performs no
 network, Go or package-manager command, tool installation, Task execution, Podman invocation,
-listener start, or runtime execution. This slice adds no credentials, domain
-CRUD, or root Taskfile changes,
+listener start, or runtime execution. The generated root Taskfile is an
+operator-run aggregate and is never executed by Apply. This slice adds no
+credentials or domain CRUD,
 Containerfiles, non-root packaging, or `smt extend`. Durable unit/race/fuzz/integration coverage is
 `.3.3.3`; non-root packaging and runtime verification are `.3.3.4`. Later
 human and Podman gates remain required. `go mod tidy` and human E2E remain
@@ -716,11 +720,12 @@ preflight, so a failing child prevents all installation. It resolves `smt` and
 argument-array `git config --get core.hooksPath` in every initialized configured
 repository; any nonempty effective setting, including a relative path, blocks
 the entire plan as a manually resolved custom hook-path policy. It then checks
-each repository is an initialized Git worktree with a top-level `commit-msg`
-mapping in `lefthook.yml`, and treats symlink, directory, and other nonregular
-`commit-msg` targets as unmanaged blockers. It uses argument-array execution
-for `lefthook validate` in every repository and, only after successful
-preflight, for root-first `lefthook install commit-msg`.
+each repository is an initialized Git worktree with the required top-level
+hook mappings in `lefthook.yml`, and treats symlink, directory, and other
+nonregular declared hook targets as unmanaged blockers. It uses argument-array
+execution for `lefthook validate` in every repository and, only after
+successful preflight, for root-first `lefthook install` so every declared hook
+is installed.
 
 Unmanaged custom, lookalike, modified, and nonregular hooks are never followed
 or overwritten. For every exact legacy SMT `commit-msg` hook, SMT also
@@ -738,13 +743,14 @@ unexpected later install fails, SMT reports installed and pending IDs for manual
 recovery.
 
 Generated workspaces include root and child `lefthook.yml` files with
-top-level `no_auto_install: true` and `assert_lefthook_installed: true`, plus a
-`commit-msg` command that invokes bare
+top-level `no_auto_install: true` and `assert_lefthook_installed: true`. Every
+repository gets a `commit-msg` command that invokes bare
 `smt validate-message --config FILE {1}` using the correct relative path to
-the root configuration. `no_auto_install` prevents Lefthook from automatically
-installing or updating hooks when configuration changes. The Lefthook assertion
-makes Git fail the hook if Lefthook cannot be found, preventing a silent skip
-of `smt validate-message`. In the SMT source checkout, `task build` creates
+the root configuration. Root, Web, API, and Mobile additionally get fast
+`pre-push` checks; Database remains commit-msg-only. `no_auto_install` prevents
+Lefthook from automatically installing or updating hooks when configuration
+changes. The Lefthook assertion makes Git fail the hook if Lefthook cannot be
+found, preventing a silent skip of validation. In the SMT source checkout, `task build` creates
 `bin/smt` but does not put it on `PATH`; use `export PATH="$PWD/bin:$PATH"`
 there, then return to the target workspace for `smt doctor` or hook
 installation. Both `smt` and Lefthook must remain durably available on PATH for
