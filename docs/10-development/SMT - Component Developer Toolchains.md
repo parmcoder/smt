@@ -62,7 +62,8 @@ runtime. Runnable starters and `smt extend` remain deferred.
 
 ## Implemented `.3.1` runtime boundary
 
-`smt apply` now emits deterministic root `compose.yaml` and `.env.example`,
+`smt apply` now emits deterministic root `compose.yaml` and `.env.example`
+and, for identity selection, `traefik/dynamic.yaml`,
 and root `.gitignore` ignores `.env`. Compose contains only selected `web`,
 `api`, and `database` services; Mobile remains outside OCI Compose. API-only,
 Database-only, Web-only, API+Database, all-OCI, empty, and Mobile-only
@@ -388,7 +389,7 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `.3.5.3` implemented: format, analyze, unit/widget; integration/debug builds explicit unverified when targets/SDKs are unavailable; `.6.1.3`: child Taskfile and aggregate verify | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
 | Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
 | PostgreSQL | None; `.3.4.1` `Containerfile`, `.env.example`, and `Taskfile.yml` | PostgreSQL, psql, pg_isready, Podman | `.3.4.1` build/run/readiness/diagnose/verify; API+Database `.3.4.2` migration create/up/version/validate; `.3.4.3` disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
-| Root/container | `compose.yaml`, `.env.example`, root `Taskfile.yml` for OCI selections | none for Apply; Podman/Compose for local lifecycle | explicit root `.env` Compose config/build/up/down/ps; broader smoke, non-root, security, and aggregate verify remain later | project workflow guidance | Podman/Compose runtime is operator-run |
+| Root/container | `compose.yaml`, `.env.example`, conditional identity `traefik/dynamic.yaml`, root `Taskfile.yml` for OCI selections | none for Apply; Podman/Compose for local lifecycle | explicit root `.env` Compose config/build/up/down/ps; broader smoke, non-root, security, and aggregate verify remain later | project workflow guidance | Podman/Compose runtime is operator-run |
 
 ## Research sources
 

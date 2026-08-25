@@ -400,15 +400,13 @@ the three port overrides, `DATABASE_VOLUME`, `API_BASE_URL`, `DATABASE_HOST`,
 `DATABASE_NAME`, and `DATABASE_USER`; no production or secret credentials or
 `.env` file is generated.
 
-When the optional identity module is selected, the generated proxy always uses
-Podman. Traefik retains its Docker-compatible provider because that provider
-speaks the Podman API, but its endpoint is explicitly
-`unix:///var/run/podman/podman.sock`; the host socket is supplied through
-`PODMAN_SOCKET` and never falls back to `/var/run/docker.sock`. The generated
-example assumes the rootless Linux socket
-`/run/user/1000/podman/podman.sock`; operators must change it for another UID,
-rootful Podman (`/run/podman/podman.sock`), or their local Podman machine and
-enable the Podman API socket before `task compose:up`.
+When the optional identity module is selected, the generated proxy uses
+Traefik's file provider with a generated dynamic configuration file. It routes
+the configured `ZITADEL_DOMAIN` and sends `/ui/v2/login` traffic to the
+`zitadel-login:3000` service while sending other identity traffic to the
+`zitadel:8080` service over `h2c`. The proxy uses the generated Compose network
+and does not inspect or mount the container engine API; startup therefore does
+not require machine-specific socket configuration.
 
 Web's contract probes `/healthz`. API health/readiness are `/healthz` and
 `/readyz`, and Database health uses `pg_isready`. When both services are
@@ -615,8 +613,10 @@ contract plus the local verification lane. Platform SDK/device execution,
 signing, API integration, and store publication remain outside Apply; the
 host's unavailable Android/iOS targets and debug-build prerequisites are
 reported as explicit unverified lanes. The
-`.3.1` `compose.yaml` and `.env.example` are contract-only root artifacts,
-while the `.3.3.2` API source/OpenAPI assets are deterministic offline starter
+`.3.1` `compose.yaml` and `.env.example` are contract-only root artifacts;
+identity selection additionally emits the deterministic
+`traefik/dynamic.yaml` file, while the `.3.3.2` API source/OpenAPI assets are
+deterministic offline starter
 assets without packaging or lifecycle tasks. The static module catalog and
 repository annotations above are implemented metadata; no platform runtime
 artifact or E2E/module repository is generated. AWS + Apptainer + OpenTofu

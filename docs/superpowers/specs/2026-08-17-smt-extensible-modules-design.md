@@ -107,7 +107,8 @@ static, and non-Web paths are offline. Selected Web `.3.2.1` uses the pinned
 `npx create-next-app` exception and may access the npm registry, but it still
 performs no installation or dependency resolution. Runtime tools are used only
 by later verification. `.3.1` emits the root `compose.yaml`, `.env.example`,
-and, when an OCI service is selected, a root Taskfile whose Compose commands
+and, for identity selection, `traefik/dynamic.yaml`; when an OCI service is
+selected, it also emits a root Taskfile whose Compose commands
 pass the operator-managed `.env` explicitly; `.3.2.1` uses the local
 Next.js CLI for the Web baseline; `.3.3.2` emits the API source/OpenAPI starter
 assets; `.3.4.1` emits the independent Database runtime/readiness assets; and
@@ -210,7 +211,8 @@ and debug-build lanes remain explicit gaps. Mobile remains outside OCI Compose.
 ## Implemented `.3.1` root runtime contract
 
 The generated root contains deterministic `compose.yaml` and `.env.example`
-files, and root `.gitignore` ignores `.env`. Compose service IDs are only
+files and, for identity selection, `traefik/dynamic.yaml`; root `.gitignore`
+ignores `.env`. Compose service IDs are only
 `web`, `api`, and `database`; Mobile remains outside OCI Compose. API-only,
 Database-only, Web-only, API+Database, all-OCI, empty, and Mobile-only
 selections remain valid, with only selected OCI services emitted.
