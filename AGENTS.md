@@ -101,6 +101,71 @@ Every agent handoff must list changed paths, checks run and results,
 assumptions, unresolved risks, and unverified behavior. The parent task owns
 the final integration check.
 
+## Human-in-the-loop delivery loop
+
+Use this loop for repository work that changes code, tests, documentation, or
+Beads state. The human review checkpoint is mandatory; a review handoff is not
+permission to commit, push, close a task, or create a pull request.
+
+### Orient and scope
+
+- Run `bd prime`, inspect the relevant issue with `bd show`, and inspect the
+  current branch and worktree before editing.
+- Work one bounded Beads task at a time. Update its description, design, or
+  acceptance criteria when implementation decisions change.
+- Stop and return the precise missing decision when the assignment is
+  ambiguous; do not widen scope by assumption.
+- Preserve unrelated user changes and never stage, revert, or rewrite them.
+
+### Implement and align
+
+- Keep implementation, focused tests, relevant documentation, and Beads
+  acceptance criteria synchronized.
+- Report unavailable toolchains, device lanes, runtime dependencies, and
+  other unverified behavior explicitly.
+- When the repository commit hook is active, use the exact active Beads ID as
+  the non-default branch name. The commit subject must be
+  `type(scope): [BEAD-ID] summary`, with the bracketed ID matching the branch
+  exactly. Keep the task `open` or `in_progress` through the implementation
+  commit.
+
+### Human review checkpoint
+
+Before delivery, stop and provide a review handoff containing:
+
+- changed paths;
+- checks and results;
+- assumptions;
+- unresolved risks;
+- unverified behavior; and
+- a proposed conventional commit or pull-request title and description.
+
+Do not commit, push, close the task, or create a pull request until the user
+explicitly authorizes that action. “Review” or “looks good” is not permission
+to perform a broader delivery action unless the authorization is clear.
+
+### Approved delivery
+
+- Re-run the final checks after approval.
+- Use ordinary Conventional Commit syntax on `main`; use the exact Beads
+  reference format above on an active task branch.
+- Push only the explicitly authorized target branch. Direct pushes to `main`
+  require explicit user authorization.
+- After pushing, report the commit hash, remote branch, clean-worktree state,
+  and local/remote hash match.
+- Provide a copy-ready conventional pull-request title, Markdown description,
+  and pull-request creation link. Never claim that a pull request was opened
+  unless it was actually created.
+
+### Beads closure
+
+- Close completed work only after its implementation commit is recorded.
+- Run `bd lint` and `bd orphans` before the final handoff.
+- If a tracker-only closure commit is rejected because the repository hook
+  requires the active task to remain open, stop and obtain explicit approval
+  before using any hook bypass. Never use `--no-verify` silently.
+- Keep parent tasks open unless their own acceptance criteria are complete.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
 ## Beads Issue Tracker
 
