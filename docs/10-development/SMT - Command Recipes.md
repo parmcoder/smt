@@ -239,7 +239,7 @@ before starting a Database workspace:
 
 ```sh
 cp .env.example .env
-# review or replace DATABASE_PASSWORD, then run
+# review or replace DATABASE_PASSWORD and DATABASE_URL, then run
 task compose:config
 task compose:build
 task compose:up

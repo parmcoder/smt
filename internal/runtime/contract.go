@@ -246,7 +246,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 		if selection.Database || selection.Identity {
 			b.WriteString("    environment:\n")
 			if selection.Database {
-				b.WriteString("      DATABASE_HOST: database\n      DATABASE_PORT: \"5432\"\n      DATABASE_NAME: smt\n      DATABASE_USER: smt\n      DATABASE_PASSWORD: \"${DATABASE_PASSWORD:-}\"\n")
+				b.WriteString("      DATABASE_HOST: database\n      DATABASE_PORT: \"5432\"\n      DATABASE_NAME: smt\n      DATABASE_USER: smt\n      DATABASE_PASSWORD: \"${DATABASE_PASSWORD:-}\"\n      DATABASE_URL: \"${DATABASE_URL:-}\"\n")
 			}
 			if selection.Identity {
 				b.WriteString("      OIDC_ISSUER_URL: \"${OIDC_ISSUER_URL:-}\"\n      OIDC_DISCOVERY_URL: \"${OIDC_DISCOVERY_URL:-}\"\n      OIDC_JWKS_URL: \"${OIDC_JWKS_URL:-}\"\n      OIDC_AUDIENCE: \"${OIDC_AUDIENCE:-}\"\n      OIDC_REQUIRED_SCOPES: \"${OIDC_REQUIRED_SCOPES:-openid,profile,email}\"\n")
@@ -338,7 +338,7 @@ func renderTraefikDynamic(identitySelected bool) string {
 }
 
 func renderEnvExample(project string, ports resolvedPorts, identitySelected bool) string {
-	env := fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nDATABASE_VOLUME=%s-postgres-data\nAPI_BASE_URL=http://api:8080\nSMT_API_TARGETOS=linux\nSMT_API_TARGETARCH=\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=%s\n", project, ports.web, ports.api, ports.database, project, defaultDatabasePassword)
+	env := fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nDATABASE_VOLUME=%s-postgres-data\nAPI_BASE_URL=http://api:8080\nSMT_API_TARGETOS=linux\nSMT_API_TARGETARCH=\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=%s\nDATABASE_URL=postgresql://smt:%s@database:5432/smt?sslmode=disable\n", project, ports.web, ports.api, ports.database, project, defaultDatabasePassword, defaultDatabasePassword)
 	if identitySelected {
 		env += "# Production deployments must replace the pinned tags below with immutable @sha256 image references.\n"
 		env += fmt.Sprintf("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=%s\nZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=%s\nZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED=false\nZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=%s\n", defaultIdentityHumanUser, defaultIdentityHumanPass, defaultIdentityPATExpiry)
