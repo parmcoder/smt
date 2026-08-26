@@ -962,8 +962,8 @@ repositories:
 		t.Fatal(err)
 	}
 	for path, want := range map[string]string{
-		filepath.Join(destination, "lefthook.yml"):            "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config smt.yaml {1}\n",
-		filepath.Join(destination, "web-app", "lefthook.yml"): "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config ../smt.yaml {1}\n",
+		filepath.Join(destination, "lefthook.yml"):            "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config smt.yaml {1}\npre-push:\n  commands:\n    web-verify-fast:\n      run: cd web-app && asdf exec pnpm run verify:fast\n",
+		filepath.Join(destination, "web-app", "lefthook.yml"): "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config ../smt.yaml {1}\npre-push:\n  commands:\n    web-verify-fast:\n      run: asdf exec pnpm run verify:fast\n",
 	} {
 		got, err := os.ReadFile(path)
 		if err != nil || string(got) != want {

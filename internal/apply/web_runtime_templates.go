@@ -1,14 +1,9 @@
 package apply
 
 import (
-	_ "embed"
 	"fmt"
-	"os"
 	"path/filepath"
 )
-
-//go:embed web-package-lock.json
-var webPackageLock []byte
 
 const webRuntimePage = `import { getAPIConfiguration } from "@/lib/runtime-config";
 
@@ -81,18 +76,21 @@ export default nextConfig;
 
 const webRuntimeContainerfile = `FROM node:24.18.0-alpine AS dependencies
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts --no-audit --no-fund
+RUN corepack enable pnpm
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 FROM node:24.18.0-alpine AS builder
 WORKDIR /app
+RUN corepack enable pnpm
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN pnpm run build
 
 FROM node:24.18.0-alpine AS runner
 WORKDIR /app
+RUN corepack enable pnpm
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
@@ -106,7 +104,7 @@ COPY --from=builder --chown=nextjs:nextjs /app/package.json ./package.json
 USER nextjs
 EXPOSE 3000
 STOPSIGNAL SIGTERM
-CMD ["node", "node_modules/next/dist/bin/next", "start"]
+CMD ["pnpm", "start"]
 `
 
 func webRuntimeFiles() map[string]string {
@@ -125,9 +123,6 @@ func writeWebRuntimeFiles(directory string) error {
 		if err := writeFile(filepath.Join(directory, relative), contents); err != nil {
 			return fmt.Errorf("write %s: %w", relative, err)
 		}
-	}
-	if err := os.WriteFile(filepath.Join(directory, "package-lock.json"), webPackageLock, 0o644); err != nil {
-		return fmt.Errorf("write package-lock.json: %w", err)
 	}
 	return nil
 }

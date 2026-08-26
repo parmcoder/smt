@@ -57,6 +57,41 @@ func TestApplyGeneratesRootComposeTaskfileWithExplicitEnvFile(t *testing.T) {
 	}
 }
 
+func TestGeneratedWebVerificationDispatchesThroughPnpmPackageScripts(t *testing.T) {
+	installFakeNextASDF(t, false)
+	destination := filepath.Join(t.TempDir(), "workspace")
+	applyWorkspace(t, destination, blueprintBytes())
+
+	taskfile, err := os.ReadFile(filepath.Join(destination, "Taskfile.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(taskfile)
+	for _, marker := range []string{
+		"verify:fast:",
+		"verify:",
+		`cd "{{.ROOT_DIR}}/web-app" && asdf exec pnpm run verify:fast`,
+		`cd "{{.ROOT_DIR}}/web-app" && asdf exec pnpm run verify`,
+	} {
+		if !strings.Contains(text, marker) {
+			t.Errorf("root Taskfile missing %q:\n%s", marker, text)
+		}
+	}
+	if containsStandaloneNpmCommand(text) || strings.Contains(text, "package-lock.json") {
+		t.Errorf("root Taskfile contains stale npm lockfile guidance:\n%s", text)
+	}
+}
+
+func containsStandaloneNpmCommand(contents string) bool {
+	for _, line := range strings.Split(contents, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "npm ") || strings.HasPrefix(line, "asdf exec npm ") {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRootComposeTasksMergeWithE2ECoordinator(t *testing.T) {
 	e2eTaskfile := e2eOrchestrationFiles(true, true)["Taskfile.yml"]
 	merged := addRootComposeTasks(e2eTaskfile, true)
