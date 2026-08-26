@@ -673,6 +673,8 @@ tasks:
         fi
         cleanup
         exit "$status"
+  verify:fast:
+    deps: [format:check, vet]
   verify:
     deps: [format:check, lint, vuln, vet, build, test, mod, openapi, container:verify]
 `

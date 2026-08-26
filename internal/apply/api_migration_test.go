@@ -85,7 +85,7 @@ func TestApplyGeneratesConditionalAPIMigrationAssets(t *testing.T) {
 			wantTasks := []string{
 				"build", "run", "test", "coverage", "test:race", "test:fuzz", "format:check",
 				"lint", "vuln", "vet", "mod", "openapi", "container:build",
-				"container:build:production", "container:verify", "test:integration",
+				"container:build:production", "container:verify", "verify:fast", "test:integration",
 				"migrate:create", "migrate:up", "migrate:version", "migrate:validate", "verify",
 			}
 			if got := taskfileTaskNames(taskfile); strings.Join(got, ",") != strings.Join(wantTasks, ",") {

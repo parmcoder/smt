@@ -272,11 +272,15 @@ sed -n '1,260p' ../platform/database/Taskfile.yml
 ```
 
 The child uses PostgreSQL `18-alpine`, a named volume, `pg_isready` health and
-readiness checks, and fail-fast `psql` diagnostics. Copy `.env.example` to a
-local `.env`, review or replace the `POSTGRES_PASSWORD=smt-dev-password`
-example before `task run`; no `.env` is generated or committed. The child contains no application schema or migration
+readiness checks, and fail-fast `psql` diagnostics. Its Taskfile surface is
+`build`, `run`, `ready`, `psql`, `diagnose`, `stop`, and `verify`; the final
+task runs the runtime checks and stops the container afterward. Copy
+`.env.example` to a local `.env`, review or replace the
+`POSTGRES_PASSWORD=smt-dev-password` example before `task run`; no `.env` is
+generated or committed. The child contains no application schema or migration
 commands. Apply writes these files only; Podman, PostgreSQL, and Task remain
-operator-run checks owned by the later Database lifecycle task.
+operator-run checks owned by the later Database lifecycle task. Database
+remains commit-msg-only and receives no fast pre-push quality gate.
 
 ### Inspect generated API manifests
 
@@ -386,6 +390,7 @@ mutate `.env`. Its task surface is:
 | `container:build` | Development image: caller-installed Podman builds the generated `Containerfile` with `--pull=missing`, fetching absent pinned base images. |
 | `container:build:production` | Production image: builds with `--pull=never` and `${SMT_API_PRODUCTION_IMAGE:-smt-api:production}`, requiring preloaded and verified base images. |
 | `container:verify` | Podman verifies non-root identity, `/healthz`, `/readyz`, and graceful stop with a bounded wait. |
+| `verify:fast` | Runs only `format:check` and `vet`; it is the API child’s fast pre-push interface and does not run tests, lint, vulnerability, OpenAPI, container, or migration lanes. |
 | `migrate:create NAME=...` | API+Database only: runs the pinned PostgreSQL-tagged `go run -tags=postgres github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations -seq "$MIGRATION_NAME"`; it requires an explicit migration name. |
 | `migrate:up` | API+Database only: applies pending migrations with the pinned PostgreSQL-tagged migrate command and explicit `DATABASE_URL`. |
 | `migrate:version` | API+Database only: reports the current version with the pinned PostgreSQL-tagged migrate command and explicit `DATABASE_URL`. |
