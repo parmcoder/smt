@@ -24,7 +24,7 @@ Implement and verify the local workspace diagnostics and hook slice:
   `status --json` retains `profiles: []`;
 - `hooks install [--dry-run]` with all-repository preflight, per-repository
   argument-array `git config --get core.hooksPath` and `lefthook validate`,
-  plus root-first `lefthook install commit-msg` installation;
+  plus root-first `lefthook install` installation of every declared hook;
 - generated root and child `lefthook.yml` with top-level
   `no_auto_install: true` and `assert_lefthook_installed: true`, delegating to
   bare `smt validate-message --config FILE {1}`;
@@ -77,7 +77,7 @@ From the SMT source checkout, the supported setup is `task build`, then
 for `smt doctor` and hook installation. `doctor` must check Git, smt, and
 Lefthook and guide missing-tool remediation before hook installation. Resolve
 both tool names with `exec.LookPath`; use argument-array execution for Git
-config plus `lefthook validate` and `lefthook install commit-msg`. The generated assertion
+config plus `lefthook validate` and `lefthook install`. The generated assertion
 must make a missing Lefthook binary fail the Git hook instead of silently
 skipping validation. Both tools need durable PATH availability in shell, IDE,
 and GUI hook-launch environments. `apply` may generate this bare-`smt`

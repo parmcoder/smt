@@ -63,15 +63,11 @@ func rootReadme(ociSelected bool, identitySelected ...bool) string {
 }
 
 func rootComposeTaskfile(databaseSelected bool, identitySelected ...bool) string {
-	return rootComposeTaskfileForSelection(databaseSelected, false, identitySelected...)
+	return rootTaskfileForSelection(false, false, false, databaseSelected, identitySelected...)
 }
 
 func rootComposeTaskfileForSelection(databaseSelected, webSelected bool, identitySelected ...bool) string {
-	taskfile := rootComposeTaskfileBase + rootComposeTaskfileTasksForDatabase(databaseSelected, identitySelected...)
-	if webSelected {
-		taskfile += rootWebVerificationTaskfile
-	}
-	return taskfile
+	return rootTaskfileForSelection(webSelected, false, false, databaseSelected, identitySelected...)
 }
 
 func rootComposeTaskfileTasksForDatabase(databaseSelected bool, identitySelected ...bool) string {
@@ -92,31 +88,5 @@ func rootComposeTaskfileTasksForDatabase(databaseSelected bool, identitySelected
 }
 
 func addRootComposeTasks(taskfile string, databaseSelected bool, identitySelected ...bool) string {
-	return strings.Replace(taskfile, "\ntasks:\n", "\ntasks:\n"+rootComposeTaskfileTasksForDatabase(databaseSelected, identitySelected...), 1)
+	return appendTaskfileTasks(taskfile, rootComposeTaskfileTasksForDatabase(databaseSelected, identitySelected...))
 }
-
-const rootWebVerificationTaskfile = `  verify:fast:
-    preconditions:
-      - sh: test -f "{{.ROOT_DIR}}/web-app/package.json"
-        msg: Web package.json is required before running the fast verification lane
-      - sh: test -f "{{.ROOT_DIR}}/web-app/pnpm-lock.yaml"
-        msg: Web pnpm-lock.yaml is required; run (cd web-app && asdf exec pnpm install)
-      - sh: test -d "{{.ROOT_DIR}}/web-app/node_modules"
-        msg: Web dependencies are missing; run (cd web-app && asdf exec pnpm install)
-      - sh: asdf exec pnpm --version
-        msg: pnpm is required through asdf; install or activate Node.js 24.18.0 before verification
-    cmds:
-      - cd "{{.ROOT_DIR}}/web-app" && asdf exec pnpm run verify:fast
-  verify:
-    preconditions:
-      - sh: test -f "{{.ROOT_DIR}}/web-app/package.json"
-        msg: Web package.json is required before running full verification
-      - sh: test -f "{{.ROOT_DIR}}/web-app/pnpm-lock.yaml"
-        msg: Web pnpm-lock.yaml is required; run (cd web-app && asdf exec pnpm install)
-      - sh: test -d "{{.ROOT_DIR}}/web-app/node_modules"
-        msg: Web dependencies are missing; run (cd web-app && asdf exec pnpm install)
-      - sh: asdf exec pnpm --version
-        msg: pnpm is required through asdf; install or activate Node.js 24.18.0 before verification
-    cmds:
-      - cd "{{.ROOT_DIR}}/web-app" && asdf exec pnpm run verify
-`

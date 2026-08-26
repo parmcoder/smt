@@ -600,8 +600,8 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 	if len(runtimeArtifacts.TraefikDynamic) > 0 {
 		files["traefik/dynamic.yaml"] = string(runtimeArtifacts.TraefikDynamic)
 	}
-	if len(selection.ServiceIDs()) > 0 {
-		files["Taskfile.yml"] = rootComposeTaskfileForSelection(selection.Database, selection.Web, selection.Identity)
+	if len(cs) > 0 {
+		files["Taskfile.yml"] = rootTaskfileForSelection(selection.Web, componentSelected(cs, "mobile"), selection.API, selection.Database, selection.Identity)
 	}
 	webSelected := webE2ESelected(cfg, cs)
 	mobileSelected := mobileE2ESelected(cfg, cs)
@@ -617,8 +617,9 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 	}
 	if webSelected || mobileSelected {
 		e2eFiles := e2eOrchestrationFiles(webSelected, mobileSelected)
-		if _, ok := files["Taskfile.yml"]; ok {
-			e2eFiles["Taskfile.yml"] = addRootComposeTasks(e2eFiles["Taskfile.yml"], selection.Database, selection.Identity)
+		if base, ok := files["Taskfile.yml"]; ok {
+			files["Taskfile.yml"] = mergeTaskfile(base, e2eFiles["Taskfile.yml"])
+			delete(e2eFiles, "Taskfile.yml")
 		}
 		for relative, contents := range e2eFiles {
 			files[relative] = contents
@@ -648,6 +649,15 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		}
 	}
 	return writeLefthookConfig(root, root, root, profiles...)
+}
+
+func componentSelected(cs []component, id string) bool {
+	for _, c := range cs {
+		if c.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 func mobileE2ESelected(cfg config.Config, cs []component) bool {

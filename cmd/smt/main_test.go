@@ -746,7 +746,7 @@ func TestCobraHooksGroupHelpAndSyntax(t *testing.T) {
 		code int
 		want string
 	}{
-		{args: []string{"hooks"}, code: exitOK, want: "Install commit-msg hooks safely"},
+		{args: []string{"hooks"}, code: exitOK, want: "Install declared Lefthook hooks safely"},
 		{args: []string{"hooks", "--help"}, code: exitOK, want: "Available Commands:\n  install"},
 		{args: []string{"hooks", "install", "--help"}, code: exitOK, want: "--dry-run"},
 		{args: []string{"hooks", "install", "extra"}, code: exitUsage, want: "Usage:\n  smt hooks install"},

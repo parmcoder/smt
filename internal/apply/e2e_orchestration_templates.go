@@ -13,7 +13,7 @@ vars:
   MOBILE_SELECTED: __MOBILE_SELECTED__
 
 tasks:
-  web:
+  e2e:web:
     cmds:
       - |
           if [ "{{.WEB_SELECTED}}" != "true" ]; then
@@ -22,7 +22,7 @@ tasks:
           fi
           sh e2e/web/run.sh --browser "{{.BROWSER}}"
 
-  mobile:
+  e2e:mobile:
     cmds:
       - |
           if [ "{{.MOBILE_SELECTED}}" != "true" ]; then
@@ -39,7 +39,7 @@ tasks:
             SMT_API_BASE_URL= sh e2e/mobile/run.sh --platform "{{.PLATFORM}}" --device "{{.DEVICE}}"
           fi
 
-  verify:
+  e2e:verify:
     cmds:
       - |
           set +e
@@ -108,7 +108,7 @@ const e2eOrchestrationReadme = `# End-to-end verification
 This root coordinator runs the selected Web and Mobile contract lanes. It is
 generated only when the root blueprint declares the e2e module and selects at
 least one of Web or Mobile. An e2e-only root remains metadata-only.
-The task names are task web, task mobile, and task verify.
+The task names are task e2e:web, task e2e:mobile, and task e2e:verify.
 
 ## Pinned setup
 
@@ -124,33 +124,33 @@ setup or dependency resolution.
 Web defaults to Chromium; select another supported browser explicitly:
 
 ~~~sh
-task web
-BROWSER=firefox task web
+task e2e:web
+BROWSER=firefox task e2e:web
 ~~~
 
 Mobile always requires both a platform and a device ID:
 
 ~~~sh
-PLATFORM=android DEVICE=<device-id> task mobile
-PLATFORM=ios DEVICE=<device-id> task mobile
+PLATFORM=android DEVICE=<device-id> task e2e:mobile
+PLATFORM=ios DEVICE=<device-id> task e2e:mobile
 ~~~
 
 The optional API value is caller-owned and is forwarded to the native Mobile
 runner:
 
 ~~~sh
-PLATFORM=android DEVICE=<device-id> API_BASE_URL=http://127.0.0.1:8080 task mobile
+PLATFORM=android DEVICE=<device-id> API_BASE_URL=http://127.0.0.1:8080 task e2e:mobile
 ~~~
 
 ## Verify selected lanes
 
-The verify task runs every selected target, keeps going after a failed or
+The e2e:verify task runs every selected target, keeps going after a failed or
 unavailable lane, and returns a non-zero result when any selected lane is not
 passed:
 
 ~~~sh
-BROWSER=chromium PLATFORM=android DEVICE=<device-id> task verify
-BROWSER=chromium PLATFORM=android DEVICE=<device-id> API_BASE_URL=http://127.0.0.1:8080 task verify
+BROWSER=chromium PLATFORM=android DEVICE=<device-id> task e2e:verify
+BROWSER=chromium PLATFORM=android DEVICE=<device-id> API_BASE_URL=http://127.0.0.1:8080 task e2e:verify
 ~~~
 
 For a Web-only workspace, omit the Mobile variables. For a Mobile-only

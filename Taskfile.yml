@@ -60,7 +60,7 @@ tasks:
       - go test ./...
 
   hooks:install:
-    desc: Install the Lefthook commit-msg hook
+    desc: Install all declared Lefthook hooks
     preconditions:
       - sh: command -v lefthook
         msg: lefthook is required; install it before running task setup

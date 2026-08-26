@@ -336,7 +336,7 @@ func ExecuteInstall(ctx context.Context, plan InstallPlan, runner CommandRunner,
 		return report, fmt.Errorf("execute hook install: runner is required")
 	}
 	for i, repository := range plan.Repositories {
-		if err := runner.Run(ctx, repository.Dir, "lefthook", "install", "commit-msg"); err != nil {
+		if err := runner.Run(ctx, repository.Dir, "lefthook", "install"); err != nil {
 			report.Pending = append([]string(nil), report.Pending[i:]...)
 			return report, fmt.Errorf("install repository %s: %w", repository.ID, err)
 		}
