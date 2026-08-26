@@ -103,7 +103,7 @@ func TestE2EOrchestrationGeneratedContractIsExplicitAndCredentialFree(t *testing
 		combined.Write(contents)
 	}
 	text := strings.ToLower(combined.String())
-	for _, forbidden := range []string{"password", "authorization", "credential", "signing", "cloud device farm", "remote ci", "crud", "domain fixture", "process manager", "device manager", "npm install", "flutter pub get", "playwright install"} {
+	for _, forbidden := range []string{"password", "authorization", "credential", "signing", "cloud device farm", "remote ci", "crud", "domain fixture", "process manager", "device manager", "npm install", "package-lock.json", "flutter pub get"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("coordinator output contains forbidden marker %q", forbidden)
 		}

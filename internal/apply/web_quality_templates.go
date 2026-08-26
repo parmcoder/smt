@@ -80,6 +80,8 @@ var webQualityScripts = map[string]string{
 	"test":         "vitest run",
 	"build":        "next build",
 	"start":        "next start",
+	"verify:fast":  "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
+	"verify":       "pnpm run verify:fast && pnpm run build",
 }
 
 var webQualityDevDependencies = map[string]string{

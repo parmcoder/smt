@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,13 +33,9 @@ func TestWebApplyGeneratesRuntimeSlice(t *testing.T) {
 		},
 		"Containerfile": {
 			"FROM node:24.18.0-alpine",
-			"npm ci --ignore-scripts --no-audit --no-fund",
+			"pnpm install --frozen-lockfile --ignore-scripts",
 			"USER nextjs",
-			`CMD ["node", "node_modules/next/dist/bin/next", "start"]`,
-		},
-		"package-lock.json": {
-			`"lockfileVersion": 3`,
-			`"packages"`,
+			`CMD ["pnpm", "start"]`,
 		},
 		"public/.gitkeep": nil,
 	}
@@ -56,19 +51,53 @@ func TestWebApplyGeneratesRuntimeSlice(t *testing.T) {
 		}
 	}
 
-	var lockfile struct {
-		LockfileVersion int                        `json:"lockfileVersion"`
-		Packages        map[string]json.RawMessage `json:"packages"`
+	for _, relative := range []string{"package-lock.json", "pnpm-lock.yaml"} {
+		if _, err := os.Stat(filepath.Join(web, relative)); !os.IsNotExist(err) {
+			t.Fatalf("Apply emitted %s before explicit installation: %v", relative, err)
+		}
 	}
-	contents, err := os.ReadFile(filepath.Join(web, "package-lock.json"))
+}
+
+func TestWebApplyRuntimeUsesPnpmAndLeavesLockfileCreationToTheOperator(t *testing.T) {
+	destination := applyWebQualityWorkspace(t)
+	web := filepath.Join(destination, "web-app")
+
+	containerfile, err := os.ReadFile(filepath.Join(web, "Containerfile"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(contents, &lockfile); err != nil {
-		t.Fatalf("decode generated package-lock.json: %v", err)
+	containerText := string(containerfile)
+	for _, marker := range []string{
+		"corepack enable pnpm",
+		"COPY package.json pnpm-lock.yaml ./",
+		"pnpm install --frozen-lockfile --ignore-scripts",
+		"pnpm run build",
+		`CMD ["pnpm", "start"]`,
+	} {
+		if !strings.Contains(containerText, marker) {
+			t.Errorf("Containerfile missing %q:\n%s", marker, containerText)
+		}
 	}
-	if lockfile.LockfileVersion != 3 || len(lockfile.Packages) == 0 {
-		t.Fatalf("generated package-lock.json=%s, want lockfileVersion 3 with package entries", contents)
+	if containsStandaloneNpmCommand(containerText) || strings.Contains(containerText, "package-lock.json") {
+		t.Errorf("Containerfile contains stale npm lockfile contract:\n%s", containerText)
+	}
+
+	readme, err := os.ReadFile(filepath.Join(web, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readmeText := string(readme)
+	for _, marker := range []string{
+		"asdf exec pnpm install",
+		"asdf exec pnpm run build",
+		"asdf exec pnpm start",
+	} {
+		if !strings.Contains(readmeText, marker) {
+			t.Errorf("README missing %q:\n%s", marker, readmeText)
+		}
+	}
+	if containsStandaloneNpmCommand(readmeText) || strings.Contains(readmeText, "package-lock.json") {
+		t.Errorf("README contains stale npm lockfile contract:\n%s", readmeText)
 	}
 }
 
@@ -79,10 +108,9 @@ func TestWebApplyRuntimeReadmeDocumentsOperationalContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"package-lock.json",
-		"asdf exec npm ci",
-		"asdf exec npm run build",
-		"asdf exec npm start",
+		"asdf exec pnpm install",
+		"asdf exec pnpm run build",
+		"asdf exec pnpm start",
 		"Containerfile",
 		"/healthz",
 		"API_BASE_URL",
@@ -144,7 +172,6 @@ func webRuntimeGeneratedFiles() []string {
 		"lib/runtime-config.ts",
 		"next.config.ts",
 		"Containerfile",
-		"package-lock.json",
 		"public/.gitkeep",
 	}
 }

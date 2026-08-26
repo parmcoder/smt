@@ -83,11 +83,9 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"asdf exec npm ci",
-		"asdf exec npm run format:check",
-		"asdf exec npm run lint",
-		"asdf exec npm run typecheck",
-		"asdf exec npm run test",
+		"asdf exec pnpm install",
+		"asdf exec pnpm run verify:fast",
+		"asdf exec pnpm run verify",
 	} {
 		if !strings.Contains(string(readme), want) {
 			t.Errorf("README missing %q:\n%s", want, readme)
@@ -104,33 +102,9 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		t.Fatalf("Web package still declares @playwright/test: %#v", packageJSON.DevDependencies)
 	}
 
-	lockfilePath := filepath.Join(destination, "web-app", "package-lock.json")
-	lockContents, err := os.ReadFile(lockfilePath)
-	if err != nil {
-		t.Fatalf("Apply did not emit package-lock.json: %v", err)
-	}
-	var lockfile struct {
-		Packages map[string]json.RawMessage `json:"packages"`
-	}
-	if err := json.Unmarshal(lockContents, &lockfile); err != nil {
-		t.Fatalf("decode generated package-lock.json: %v", err)
-	}
-	var rootPackage struct {
-		DevDependencies map[string]string `json:"devDependencies"`
-	}
-	if err := json.Unmarshal(lockfile.Packages[""], &rootPackage); err != nil {
-		t.Fatalf("decode generated package-lock root package: %v", err)
-	}
-	if _, ok := rootPackage.DevDependencies["@playwright/test"]; ok {
-		t.Fatalf("package-lock root still declares @playwright/test: %#v", rootPackage.DevDependencies)
-	}
-	for _, packagePath := range []string{
-		"node_modules/@playwright/test",
-		"node_modules/playwright",
-		"node_modules/playwright-core",
-	} {
-		if _, ok := lockfile.Packages[packagePath]; ok {
-			t.Fatalf("package-lock still contains removed package %q", packagePath)
+	for _, relative := range []string{"package-lock.json", "pnpm-lock.yaml"} {
+		if _, err := os.Stat(filepath.Join(destination, "web-app", relative)); !os.IsNotExist(err) {
+			t.Fatalf("Apply emitted %s before explicit installation: %v", relative, err)
 		}
 	}
 	for _, relative := range []string{"playwright.config.ts", "e2e"} {
@@ -146,6 +120,28 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		if strings.Contains(string(contents), "playwright-report") || strings.Contains(string(contents), "test-results") {
 			t.Fatalf("Web quality file %s still ignores package-local Playwright output:\n%s", relative, contents)
 		}
+	}
+}
+
+func TestWebApplyUsesPnpmVerificationScriptsWithoutPublishingANpmLockfile(t *testing.T) {
+	destination := applyWebQualityWorkspace(t)
+	packageJSON := readWebQualityPackageJSON(t, destination)
+
+	for name, want := range map[string]string{
+		"verify:fast": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
+		"verify":      "pnpm run verify:fast && pnpm run build",
+	} {
+		if packageJSON.Scripts[name] != want {
+			t.Errorf("script %q=%q, want %q", name, packageJSON.Scripts[name], want)
+		}
+	}
+
+	web := filepath.Join(destination, "web-app")
+	if _, err := os.Stat(filepath.Join(web, "package-lock.json")); !os.IsNotExist(err) {
+		t.Fatalf("Apply emitted package-lock.json: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(web, "pnpm-lock.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("Apply emitted pnpm-lock.yaml before explicit installation: %v", err)
 	}
 }
 

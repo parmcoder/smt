@@ -258,7 +258,7 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 			"--app",
 			"--empty",
 			"--tailwind",
-			"--use-npm",
+			"--use-pnpm",
 			"--skip-install",
 			"--disable-git",
 			"--agents-md",
@@ -328,7 +328,7 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		if err := appendWebReadme(filepath.Join(bootstrap, "README.md")); err != nil {
 			return plumbing.ZeroHash, err
 		}
-		if err := writeLefthookConfigIfAbsent(bootstrap, filepath.Join(root, c.path), root); err != nil {
+		if err := writeLefthookConfigIfAbsent(bootstrap, filepath.Join(root, c.path), root, "web"); err != nil {
 			return plumbing.ZeroHash, err
 		}
 	} else {
@@ -601,7 +601,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 		files["traefik/dynamic.yaml"] = string(runtimeArtifacts.TraefikDynamic)
 	}
 	if len(selection.ServiceIDs()) > 0 {
-		files["Taskfile.yml"] = rootComposeTaskfile(selection.Database, selection.Identity)
+		files["Taskfile.yml"] = rootComposeTaskfileForSelection(selection.Database, selection.Web, selection.Identity)
 	}
 	webSelected := webE2ESelected(cfg, cs)
 	mobileSelected := mobileE2ESelected(cfg, cs)
@@ -643,7 +643,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 	}
 	profiles := []string(nil)
 	for _, c := range cs {
-		if c.id == "mobile" || c.id == "api" {
+		if c.id == "web" || c.id == "mobile" || c.id == "api" {
 			profiles = append(profiles, c.id)
 		}
 	}
@@ -732,6 +732,15 @@ func lefthookConfig(repositoryRoot, workspaceRoot string, profiles ...string) (s
 			"    api-verify-fast:\n      run: "+prefix+"task verify:fast",
 		)
 	}
+	if hasLefthookProfile(profiles, "web") {
+		prefix := ""
+		if filepath.Clean(repositoryRoot) == filepath.Clean(workspaceRoot) {
+			prefix = "cd web-app && "
+		}
+		prePushCommands = append(prePushCommands,
+			"    web-verify-fast:\n      run: "+prefix+"asdf exec pnpm run verify:fast",
+		)
+	}
 	if len(prePushCommands) > 0 {
 		config += "pre-push:\n  commands:\n" + strings.Join(prePushCommands, "\n") + "\n"
 	}
@@ -786,8 +795,8 @@ func appendWebReadme(path string) error {
 Install dependencies and start the development server after Apply:
 
 ~~~sh
-asdf exec npm ci
-asdf exec npm run dev
+asdf exec pnpm install
+asdf exec pnpm run dev
 ~~~
 `
 	}
@@ -799,16 +808,13 @@ asdf exec npm run dev
 ## SMT Web quality
 
 Run these explicit quality checks from this repository after installing
-dependencies. Apply does not run a package manager; the committed lockfile is
-the source of truth for installation.
+dependencies. Apply does not run a package manager; the operator-created
+pnpm-lock.yaml is the source of truth for repeatable installation.
 
 ~~~sh
-asdf exec npm ci
-asdf exec npm run format:check
-asdf exec npm run lint
-asdf exec npm run typecheck
-asdf exec npm run test
-asdf exec npm run build
+asdf exec pnpm install
+asdf exec pnpm run verify:fast
+asdf exec pnpm run verify
 ~~~
 `
 	}
@@ -820,20 +826,20 @@ asdf exec npm run build
 ## SMT Web runtime
 
 The generated Web runtime uses the pinned Node.js 24.18.0 toolchain and can
-run directly or through the checked-in non-root Containerfile. The committed
-package-lock.json is used for repeatable dependency installation:
+run directly or through the checked-in non-root Containerfile. The generated
+Containerfile requires an operator-created pnpm-lock.yaml:
 
 ~~~sh
-asdf exec npm ci
-asdf exec npm run build
-asdf exec npm start
+asdf exec pnpm install
+asdf exec pnpm run build
+asdf exec pnpm start
 ~~~
 
 The production process uses the Next.js production server, listens on port
 3000, and receives SIGTERM through the container's exec-form command so it
 can shut down cleanly. The health contract is GET /healthz, which returns
 HTTP 200 with status: ok. Set the optional server-only API_BASE_URL value
-before npm start; it is validated without exposing its value to the browser.
+before pnpm start; it is validated without exposing its value to the browser.
 The stable contract marker is data-smt-web-smoke="home".
 
 Mobile is an Android/iOS workload and remains outside Compose; this Web child

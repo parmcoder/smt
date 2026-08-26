@@ -36,6 +36,41 @@ func TestWebE2EApplyEmitsContractPackageAndPreservesWebRuntime(t *testing.T) {
 	}
 }
 
+func TestWebE2EGeneratedAssetsUsePnpmGuidance(t *testing.T) {
+	installFakeNextASDF(t, false)
+	destination := filepath.Join(t.TempDir(), "workspace")
+	applyWorkspace(t, destination, e2eWebBlueprintBytes())
+
+	for relative, markers := range map[string][]string{
+		"README.md": {
+			"asdf exec pnpm install",
+			"asdf exec pnpm run build",
+			"asdf exec pnpm exec playwright install chromium",
+		},
+		"playwright.config.ts": {"asdf exec pnpm run start"},
+		"run.sh": {
+			"pnpm-lock.yaml",
+			"asdf exec pnpm --version",
+			"asdf exec pnpm run test",
+			"pnpm exec playwright install",
+		},
+	} {
+		contents, err := os.ReadFile(filepath.Join(destination, "e2e", "web", relative))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(contents)
+		for _, marker := range markers {
+			if !strings.Contains(text, marker) {
+				t.Errorf("generated e2e/web/%s missing %q:\n%s", relative, marker, text)
+			}
+		}
+		if containsStandaloneNpmCommand(text) || strings.Contains(text, "package-lock.json") {
+			t.Errorf("generated e2e/web/%s contains stale npm lockfile guidance:\n%s", relative, text)
+		}
+	}
+}
+
 func TestWebE2EApplyEmitsNoPackageWithoutMatchingWebAndDeclaration(t *testing.T) {
 	tests := []struct {
 		name string
@@ -138,7 +173,7 @@ func TestWebE2EGeneratedPackageIsCredentialFreeAndContractOnly(t *testing.T) {
 		"playwright.config.ts": {
 			"http://127.0.0.1:3000",
 			"../../web-app",
-			"npm run start",
+			"pnpm run start",
 			`trace: "on-first-retry"`,
 			"Desktop Chrome",
 			"Desktop Firefox",
@@ -153,15 +188,15 @@ func TestWebE2EGeneratedPackageIsCredentialFreeAndContractOnly(t *testing.T) {
 		},
 		"run.sh": {
 			"--browser",
-			"asdf exec npm test",
+			"asdf exec pnpm run test",
 			"status=unavailable",
 			"status=failed",
 			"reports/",
 			"playwright install",
 		},
 		"README.md": {
-			"asdf exec npm install",
-			"asdf exec npx playwright install chromium",
+			"asdf exec pnpm install",
+			"asdf exec pnpm exec playwright install chromium",
 			"/healthz",
 			"data-smt-web-smoke=\"home\"",
 			"reports/",
@@ -200,7 +235,8 @@ func TestWebE2ERunnerUsesSelectedBrowserAndWritesPassedReport(t *testing.T) {
 	for _, marker := range []string{
 		"arg=exec",
 		"arg=node",
-		"arg=npm",
+		"arg=pnpm",
+		"arg=run",
 		"arg=test",
 		"arg=--project=firefox",
 	} {
@@ -329,6 +365,14 @@ func prepareFakeWebE2EPrerequisites(t *testing.T, destination string, missingBro
 	if err := os.WriteFile(filepath.Join(web, "node_modules", ".bin", "next"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	for _, lockfile := range []string{
+		filepath.Join(web, "pnpm-lock.yaml"),
+		filepath.Join(e2e, "pnpm-lock.yaml"),
+	} {
+		if err := os.WriteFile(lockfile, []byte("lockfileVersion: '9.0'\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	browserPath := filepath.Join(t.TempDir(), "browser")
 	if !missingBrowser {
 		if err := os.WriteFile(browserPath, []byte("fake browser\n"), 0o755); err != nil {
@@ -356,14 +400,17 @@ case "${2:-}" in
     fi
     printf '%s\n' "$SMT_FAKE_WEB_BROWSER_PATH"
     ;;
-  npm)
-    case "${3:-}" in
-      --version)
-        printf '11.0.0\n'
-        ;;
-      test)
-        printf 'FAKE_PLAYWRIGHT_OUTPUT\n'
-        exit "${SMT_FAKE_WEB_NPM_TEST_STATUS:-0}"
+	  pnpm)
+	    case "${3:-}" in
+	      --version)
+	        printf '10.0.0\n'
+	        ;;
+	      run)
+	        if [ "${4:-}" != "test" ]; then
+	          exit 127
+	        fi
+	        printf 'FAKE_PLAYWRIGHT_OUTPUT\n'
+	        exit "${SMT_FAKE_WEB_PNPM_TEST_STATUS:-0}"
         ;;
     esac
     ;;
@@ -377,7 +424,7 @@ esac
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+"/usr/bin:/bin")
 	t.Setenv("SMT_FAKE_WEB_E2E_LOG", logPath)
-	t.Setenv("SMT_FAKE_WEB_NPM_TEST_STATUS", fmt.Sprint(testStatus))
+	t.Setenv("SMT_FAKE_WEB_PNPM_TEST_STATUS", fmt.Sprint(testStatus))
 	if nodeFailure {
 		t.Setenv("SMT_FAKE_WEB_NODE_FAILURE", "1")
 	} else {

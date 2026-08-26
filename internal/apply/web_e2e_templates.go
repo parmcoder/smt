@@ -8,16 +8,17 @@ flows or application fixtures.
 
 ## Prerequisites
 
-Apply only writes this package. Install the pinned Web dependencies, build the
-Web runtime, install the required Playwright browser, and then run the lane:
+Apply only writes this package. Install the pinned Web and E2E dependencies,
+build the Web runtime, install the required Playwright browser, and then run
+the lane:
 
 ~~~sh
 cd web-app
-asdf exec npm ci
-asdf exec npm run build
+asdf exec pnpm install
+asdf exec pnpm run build
 cd ../e2e/web
-asdf exec npm install
-asdf exec npx playwright install chromium
+asdf exec pnpm install
+asdf exec pnpm exec playwright install chromium
 cd ../..
 ~~~
 
@@ -25,8 +26,8 @@ Firefox and WebKit are optional explicit lanes:
 
 ~~~sh
 cd e2e/web
-asdf exec npx playwright install firefox
-asdf exec npx playwright install webkit
+asdf exec pnpm exec playwright install firefox
+asdf exec pnpm exec playwright install webkit
 cd ../..
 ~~~
 
@@ -117,7 +118,7 @@ export default defineConfig({
   },
   projects: [selectedProject],
   webServer: {
-    command: "cd ../../web-app && asdf exec npm run start",
+    command: "cd ../../web-app && asdf exec pnpm run start",
     reuseExistingServer: false,
     stderr: "pipe",
     stdout: "pipe",
@@ -200,17 +201,17 @@ if ! command -v asdf >/dev/null 2>&1; then
   write_unavailable "asdf is unavailable; install Node.js 24.18.0 with asdf"
 fi
 
-if [ ! -f "$web_dir/package.json" ] || [ ! -f "$web_dir/package-lock.json" ] || \
+if [ ! -f "$web_dir/package.json" ] || [ ! -f "$web_dir/pnpm-lock.yaml" ] || \
    [ ! -x "$web_dir/node_modules/.bin/next" ] || [ ! -f "$web_dir/.next/BUILD_ID" ]; then
-  write_unavailable "Web runtime is not installed and built; run (cd web-app && asdf exec npm ci && asdf exec npm run build)"
+  write_unavailable "Web runtime is not installed and built; run (cd web-app && asdf exec pnpm install && asdf exec pnpm run build)"
 fi
 
-if [ ! -f "$script_dir/package.json" ] || [ ! -d "$script_dir/node_modules/@playwright/test" ]; then
-  write_unavailable "E2E dependencies are missing; run (cd e2e/web && asdf exec npm install)"
+if [ ! -f "$script_dir/package.json" ] || [ ! -f "$script_dir/pnpm-lock.yaml" ] || [ ! -d "$script_dir/node_modules/@playwright/test" ]; then
+  write_unavailable "E2E dependencies are missing; run (cd e2e/web && asdf exec pnpm install)"
 fi
 
-if ! (cd "$script_dir" && asdf exec npm --version) >> "$log_file" 2>&1; then
-  write_unavailable "npm is unavailable through asdf; install Node.js 24.18.0 with asdf"
+if ! (cd "$script_dir" && asdf exec pnpm --version) >> "$log_file" 2>&1; then
+  write_unavailable "pnpm is unavailable through asdf; install or activate Node.js 24.18.0 with asdf"
 fi
 
 browser_path=
@@ -225,14 +226,14 @@ const browsers = {
 if (!browsers[browser]) process.exit(2);
 process.stdout.write(browsers[browser].executablePath());
 ' "$browser" 2>> "$log_file"); then
-  write_unavailable "Playwright browser support is unavailable; run (cd e2e/web && asdf exec npm install)"
+  write_unavailable "Playwright browser support is unavailable; run (cd e2e/web && asdf exec pnpm install)"
 fi
 if [ ! -x "$browser_path" ]; then
-  write_unavailable "browser $browser is not installed; run (cd e2e/web && asdf exec npx playwright install $browser)"
+  write_unavailable "browser $browser is not installed; run (cd e2e/web && asdf exec pnpm exec playwright install $browser)"
 fi
 
-printf '$ SMT_E2E_BROWSER=%s asdf exec npm test -- --project=%s\n' "$browser" "$browser" >> "$log_file"
-if (cd "$script_dir" && SMT_E2E_BROWSER="$browser" asdf exec npm test -- --project="$browser") >> "$log_file" 2>&1; then
+printf '$ SMT_E2E_BROWSER=%s asdf exec pnpm run test -- --project=%s\n' "$browser" "$browser" >> "$log_file"
+if (cd "$script_dir" && SMT_E2E_BROWSER="$browser" asdf exec pnpm run test -- --project="$browser") >> "$log_file" 2>&1; then
   printf 'status=passed\nbrowser=%s\n' "$browser" > "$status_file"
   printf 'Web %s contract smoke passed; report: %s\n' "$browser" "$log_file"
   exit 0

@@ -40,7 +40,7 @@ func TestWebApplyInvokesNextInitializerInStagedOrder(t *testing.T) {
 	wantArgs := []string{
 		"exec", "npx", "--yes", "create-next-app@16.2.9", stagedWeb,
 		"--typescript", "--eslint", "--app", "--empty", "--tailwind",
-		"--use-npm", "--skip-install", "--disable-git", "--agents-md",
+		"--use-pnpm", "--skip-install", "--disable-git", "--agents-md",
 		"--import-alias=@/*",
 	}
 	if !reflect.DeepEqual(args, wantArgs) {
@@ -57,7 +57,7 @@ func TestWebApplyInvokesNextInitializerInStagedOrder(t *testing.T) {
 	}
 }
 
-func TestWebApplyPreservesCLIOutputMergesIgnoreAndPublishesRuntimeLockfile(t *testing.T) {
+func TestWebApplyPreservesCLIOutputMergesIgnoreAndLeavesLockfileCreationToTheOperator(t *testing.T) {
 	logPath := installFakeNextASDF(t, false)
 	parent := t.TempDir()
 	destination := filepath.Join(parent, "workspace")
@@ -80,7 +80,7 @@ func TestWebApplyPreservesCLIOutputMergesIgnoreAndPublishesRuntimeLockfile(t *te
 	if err != nil || !strings.Contains(string(readme), "CLI Web output") {
 		t.Fatalf("CLI README was not preserved: %q, err=%v", readme, err)
 	}
-	for _, want := range []string{"asdf exec npm ci", "asdf exec npm run dev"} {
+	for _, want := range []string{"asdf exec pnpm install", "asdf exec pnpm run dev"} {
 		if !strings.Contains(string(readme), want) {
 			t.Fatalf("preserved CLI README missing SMT guidance %q: %q", want, readme)
 		}
@@ -98,9 +98,10 @@ func TestWebApplyPreservesCLIOutputMergesIgnoreAndPublishesRuntimeLockfile(t *te
 			t.Fatalf("Web .gitignore missing %q: %q", want, ignore)
 		}
 	}
-	lockfile, err := os.ReadFile(filepath.Join(web, "package-lock.json"))
-	if err != nil || !strings.Contains(string(lockfile), `"lockfileVersion": 3`) {
-		t.Fatalf("Apply did not publish the committed package-lock.json: %q, err=%v", lockfile, err)
+	for _, relative := range []string{"package-lock.json", "pnpm-lock.yaml"} {
+		if _, err := os.Stat(filepath.Join(web, relative)); !os.IsNotExist(err) {
+			t.Fatalf("Apply emitted %s before explicit installation: %v", relative, err)
+		}
 	}
 	if _, err := os.Lstat(filepath.Join(web, ".git", "nested")); !os.IsNotExist(err) {
 		t.Fatalf("nested CLI .git repository survived: %v", err)
@@ -281,7 +282,6 @@ mkdir -p "$destination/.git/nested" "$destination/generated/.git" "$destination/
 printf 'CLI Web output\n' > "$destination/README.md"
 printf '# CLI ignore\ncli-only.txt\n' > "$destination/.gitignore"
 printf '{"name":"CLI package","dependencies":{"next":"16.2.9"},"scripts":{"dev":"next dev"}}\n' > "$destination/package.json"
-printf '{"name":"should not survive Apply"}\n' > "$destination/package-lock.json"
 printf 'created by Next.js CLI\n' > "$destination/generated/cli-owned.txt"
 printf 'CLI App Router output\n' > "$destination/app/page.tsx"
 printf 'CLI Tailwind output\n' > "$destination/tailwind.config.ts"
