@@ -347,7 +347,7 @@ func TestPlanInstallRejectsChildCoreHooksPathBeforeAnyInstall(t *testing.T) {
 		}
 	}
 	for _, call := range lefthookRunner.calls {
-		if strings.Join(call.args, " ") == "lefthook install commit-msg" {
+		if strings.Join(call.args, " ") == "lefthook install" {
 			t.Fatalf("unexpected install call=%#v", call)
 		}
 	}
@@ -450,7 +450,7 @@ func TestExecuteInstallUsesRootFirstArgumentArraysAndReportsPartialFailure(t *te
 	if got, want := strings.Join(report.Pending, ","), "api,web"; got != want {
 		t.Fatalf("pending=%q want=%q", got, want)
 	}
-	if len(runner.calls) != 2 || strings.Join(runner.calls[0].args, " ") != "lefthook install commit-msg" || strings.Join(runner.calls[1].args, " ") != "lefthook install commit-msg" {
+	if len(runner.calls) != 2 || strings.Join(runner.calls[0].args, " ") != "lefthook install" || strings.Join(runner.calls[1].args, " ") != "lefthook install" {
 		t.Fatalf("calls=%#v", runner.calls)
 	}
 	dryRunner := &installRunner{}

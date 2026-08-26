@@ -95,7 +95,7 @@ func containsStandaloneNpmCommand(contents string) bool {
 func TestRootComposeTasksMergeWithE2ECoordinator(t *testing.T) {
 	e2eTaskfile := e2eOrchestrationFiles(true, true)["Taskfile.yml"]
 	merged := addRootComposeTasks(e2eTaskfile, true)
-	for _, marker := range []string{"compose:up:", "web:", "mobile:", "verify:", "--env-file \"{{.ROOT_DIR}}/.env\""} {
+	for _, marker := range []string{"compose:up:", "e2e:web:", "e2e:mobile:", "e2e:verify:", "--env-file \"{{.ROOT_DIR}}/.env\""} {
 		if !strings.Contains(merged, marker) {
 			t.Fatalf("merged root Taskfile missing %q:\n%s", marker, merged)
 		}

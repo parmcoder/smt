@@ -103,7 +103,7 @@ func TestE2EOrchestrationGeneratedContractIsExplicitAndCredentialFree(t *testing
 		combined.Write(contents)
 	}
 	text := strings.ToLower(combined.String())
-	for _, forbidden := range []string{"password", "authorization", "credential", "signing", "cloud device farm", "remote ci", "crud", "domain fixture", "process manager", "device manager", "npm install", "package-lock.json", "flutter pub get"} {
+	for _, forbidden := range []string{"password", "authorization", "credential", "signing", "cloud device farm", "remote ci", "crud", "domain fixture", "process manager", "device manager", "package-lock.json", "flutter pub get"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("coordinator output contains forbidden marker %q", forbidden)
 		}
@@ -112,7 +112,10 @@ func TestE2EOrchestrationGeneratedContractIsExplicitAndCredentialFree(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"web:", "mobile:", "verify:", "e2e/web/run.sh", "e2e/mobile/run.sh", "PLATFORM", "DEVICE", "SMT_API_BASE_URL", "status=unavailable", "status=failed", "status=passed"} {
+	if containsStandaloneNpmCommand(string(taskfile)) {
+		t.Fatalf("coordinator Taskfile contains a standalone npm command:\n%s", taskfile)
+	}
+	for _, required := range []string{"e2e:web:", "e2e:mobile:", "e2e:verify:", "e2e/web/run.sh", "e2e/mobile/run.sh", "PLATFORM", "DEVICE", "SMT_API_BASE_URL", "status=unavailable", "status=failed", "status=passed"} {
 		if !strings.Contains(string(taskfile), required) {
 			t.Fatalf("Taskfile missing %q:\n%s", required, taskfile)
 		}
@@ -128,10 +131,10 @@ func TestE2EOrchestrationTaskForwardsLaneVariables(t *testing.T) {
 	writeFakeE2ERunner(t, filepath.Join(destination, "e2e", "mobile", "run.sh"), "mobile", 0, "MOBILE_RUNNER_OUTPUT")
 	t.Setenv("FAKE_E2E_LOG", logPath)
 
-	if output, err := runGeneratedE2ETask(t, destination, "BROWSER=firefox", "web"); err != nil {
+	if output, err := runGeneratedE2ETask(t, destination, "BROWSER=firefox", "e2e:web"); err != nil {
 		t.Fatalf("web task output=%q err=%v", output, err)
 	}
-	if output, err := runGeneratedE2ETask(t, destination, "PLATFORM=android", "DEVICE=emulator-1", "API_BASE_URL=http://127.0.0.1:8080", "mobile"); err != nil {
+	if output, err := runGeneratedE2ETask(t, destination, "PLATFORM=android", "DEVICE=emulator-1", "API_BASE_URL=http://127.0.0.1:8080", "e2e:mobile"); err != nil {
 		t.Fatalf("mobile task output=%q err=%v", output, err)
 	}
 	log, err := os.ReadFile(logPath)
@@ -152,12 +155,12 @@ func TestE2EOrchestrationManualUnselectedLanesAreUnavailable(t *testing.T) {
 		raw  []byte
 		task string
 	}{
-		{name: "mobile from web workspace", raw: e2eWebBlueprintBytes(), task: "mobile"},
-		{name: "web from mobile workspace", raw: mobileE2EBlueprintBytes(), task: "web"},
+		{name: "mobile from web workspace", raw: e2eWebBlueprintBytes(), task: "e2e:mobile"},
+		{name: "web from mobile workspace", raw: mobileE2EBlueprintBytes(), task: "e2e:web"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.task == "web" {
+			if tt.task == "e2e:web" {
 				installFakeASDF(t, false)
 			} else {
 				installFakeNextASDF(t, false)
@@ -179,7 +182,7 @@ func TestE2EOrchestrationVerifyRunsOnlySelectedTargets(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "coordinator.log")
 	writeFakeE2ERunner(t, filepath.Join(destination, "e2e", "web", "run.sh"), "web", 0, "WEB_RUNNER_OUTPUT")
 	t.Setenv("FAKE_E2E_LOG", logPath)
-	if output, err := runGeneratedE2ETask(t, destination, "verify"); err != nil {
+	if output, err := runGeneratedE2ETask(t, destination, "e2e:verify"); err != nil {
 		t.Fatalf("verify output=%q err=%v", output, err)
 	}
 	status, err := os.ReadFile(filepath.Join(destination, "e2e", "reports", "verify.status"))
@@ -202,7 +205,7 @@ func TestE2EOrchestrationMobileTaskRequiresExplicitInputs(t *testing.T) {
 	installFakeASDF(t, false)
 	destination := filepath.Join(t.TempDir(), "workspace")
 	applyWorkspace(t, destination, mobileE2EBlueprintBytes())
-	for _, args := range [][]string{{"mobile"}, {"PLATFORM=android", "mobile"}, {"DEVICE=emulator-1", "mobile"}} {
+	for _, args := range [][]string{{"e2e:mobile"}, {"PLATFORM=android", "e2e:mobile"}, {"DEVICE=emulator-1", "e2e:mobile"}} {
 		output, err := runGeneratedE2ETask(t, destination, args...)
 		if err == nil || !strings.Contains(strings.ToLower(string(output)), "platform") || !strings.Contains(strings.ToLower(string(output)), "device") {
 			t.Fatalf("task args=%v output=%q err=%v, want explicit platform/device failure", args, output, err)
@@ -231,7 +234,7 @@ func TestE2EOrchestrationVerifyAggregatesAllLaneResults(t *testing.T) {
 			t.Setenv("FAKE_E2E_LOG", logPath)
 			writeFakeE2ERunner(t, filepath.Join(destination, "e2e", "web", "run.sh"), "web", tt.webStatus, "WEB_RUNNER_OUTPUT")
 			writeFakeE2ERunner(t, filepath.Join(destination, "e2e", "mobile", "run.sh"), "mobile", tt.mobileStatus, "MOBILE_RUNNER_OUTPUT")
-			output, err := runGeneratedE2ETask(t, destination, "BROWSER=chromium", "PLATFORM=android", "DEVICE=emulator-1", "API_BASE_URL=http://127.0.0.1:8080", "verify")
+			output, err := runGeneratedE2ETask(t, destination, "BROWSER=chromium", "PLATFORM=android", "DEVICE=emulator-1", "API_BASE_URL=http://127.0.0.1:8080", "e2e:verify")
 			if (err != nil) != tt.wantError {
 				t.Fatalf("verify output=%q err=%v, wantError=%v", output, err, tt.wantError)
 			}
@@ -275,7 +278,7 @@ func assertE2EOrchestrationFiles(t *testing.T, destination string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"task web", "task mobile", "task verify", "PLATFORM", "DEVICE", "e2e/reports/"} {
+	for _, marker := range []string{"task e2e:web", "task e2e:mobile", "task e2e:verify", "PLATFORM", "DEVICE", "e2e/reports/"} {
 		if !strings.Contains(string(readme), marker) {
 			t.Fatalf("e2e README missing %q:\n%s", marker, readme)
 		}

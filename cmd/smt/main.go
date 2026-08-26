@@ -261,14 +261,14 @@ origins are changed. --dry-run performs no provider creation or local wiring.`
 		Use:     "hooks",
 		Short:   "Manage workspace Git hooks",
 		GroupID: "local-ci",
-		Long:    "Install commit-msg hooks safely across the configured root and submodules. smt and lefthook must both be on PATH; from the SMT source checkout, run task build then export PATH=\"$PWD/bin:$PATH\". Return to the target workspace before installation.",
+		Long:    "Install declared Lefthook hooks safely across the configured root and submodules. smt and lefthook must both be on PATH; from the SMT source checkout, run task build then export PATH=\"$PWD/bin:$PATH\". Return to the target workspace before installation.",
 		Args:    cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return command.Help()
 		},
 	}
 	var hooksDryRun bool
-	hooksInstallCommand := nativeLeaf("install", "Install commit-msg hooks safely", "", "hooks install", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
+	hooksInstallCommand := nativeLeaf("install", "Install declared Lefthook hooks safely", "", "hooks install", cobra.NoArgs, func(_ []string, _ *logrus.Logger) int {
 		cfg, root, code := loadConfig(errOut)
 		if code != exitOK {
 			return code
