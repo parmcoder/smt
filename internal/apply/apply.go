@@ -342,6 +342,10 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 			if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root, "mobile"); err != nil {
 				return plumbing.ZeroHash, err
 			}
+		} else if c.id == "api" {
+			if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root, "api"); err != nil {
+				return plumbing.ZeroHash, err
+			}
 		} else if err := writeLefthookConfig(bootstrap, filepath.Join(root, c.path), root); err != nil {
 			return plumbing.ZeroHash, err
 		}
@@ -639,8 +643,8 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 	}
 	profiles := []string(nil)
 	for _, c := range cs {
-		if c.id == "mobile" {
-			profiles = append(profiles, "mobile")
+		if c.id == "mobile" || c.id == "api" {
+			profiles = append(profiles, c.id)
 		}
 	}
 	return writeLefthookConfig(root, root, root, profiles...)
@@ -708,12 +712,28 @@ func lefthookConfig(repositoryRoot, workspaceRoot string, profiles ...string) (s
 		return "", fmt.Errorf("resolve root config path: %w", err)
 	}
 	config := "no_auto_install: true\nassert_lefthook_installed: true\ncommit-msg:\n  commands:\n    validate-message:\n      run: smt validate-message --config " + filepath.ToSlash(configPath) + " {1}\n"
+	prePushCommands := make([]string, 0, 3)
 	if hasLefthookProfile(profiles, "mobile") {
 		prefix := ""
 		if filepath.Clean(repositoryRoot) == filepath.Clean(workspaceRoot) {
 			prefix = "cd mobile-app && "
 		}
-		config += "pre-push:\n  commands:\n    mobile-format:\n      run: " + prefix + "asdf exec dart format --output=none --set-exit-if-changed lib test integration_test\n    mobile-analyze:\n      run: " + prefix + "asdf exec flutter analyze\n"
+		prePushCommands = append(prePushCommands,
+			"    mobile-format:\n      run: "+prefix+"asdf exec dart format --output=none --set-exit-if-changed lib test integration_test",
+			"    mobile-analyze:\n      run: "+prefix+"asdf exec flutter analyze",
+		)
+	}
+	if hasLefthookProfile(profiles, "api") {
+		prefix := ""
+		if filepath.Clean(repositoryRoot) == filepath.Clean(workspaceRoot) {
+			prefix = "cd apis && "
+		}
+		prePushCommands = append(prePushCommands,
+			"    api-verify-fast:\n      run: "+prefix+"task verify:fast",
+		)
+	}
+	if len(prePushCommands) > 0 {
+		config += "pre-push:\n  commands:\n" + strings.Join(prePushCommands, "\n") + "\n"
 	}
 	return config, nil
 }

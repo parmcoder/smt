@@ -217,6 +217,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 			}
 			taskfile := readGeneratedAPIFile(t, filepath.Join(destination, "apis"), "Taskfile.yml")
 			wantTasks := []string{"build", "run", "test", "coverage", "test:race", "test:fuzz", "format:check", "lint", "vuln", "vet", "mod", "openapi", "container:build", "container:build:production", "container:verify"}
+			wantTasks = append(wantTasks, "verify:fast")
 			if tt.database {
 				wantTasks = append(wantTasks, "test:integration", "migrate:create", "migrate:up", "migrate:version", "migrate:validate")
 			}
@@ -237,6 +238,7 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 				"mod:\n    cmds:\n      - go mod verify",
 				"go run ./cmd/openapi",
 				"cmp -s",
+				"verify:fast:\n    deps: [format:check, vet]\n",
 				verifyWant,
 			} {
 				if !strings.Contains(taskfile, want) {
@@ -300,6 +302,48 @@ func TestApplyGeneratesAPITaskfileAndEnvManifest(t *testing.T) {
 	}
 }
 
+func TestApplyGeneratesAPIFastVerificationLefthookProfile(t *testing.T) {
+	destination := applyAPIWorkspace(t, apiBlueprintBytes())
+	rootHook, err := os.ReadFile(filepath.Join(destination, "lefthook.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiHook, err := os.ReadFile(filepath.Join(destination, "apis", "lefthook.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(rootHook), "cd apis && task verify:fast") {
+		t.Fatalf("root Lefthook does not dispatch API fast verification:\n%s", rootHook)
+	}
+	if strings.Contains(string(apiHook), "cd apis &&") || !strings.Contains(string(apiHook), "task verify:fast") {
+		t.Fatalf("API child Lefthook has the wrong fast verification command:\n%s", apiHook)
+	}
+	for name, hook := range map[string]string{"root": string(rootHook), "api": string(apiHook)} {
+		if !strings.Contains(hook, "pre-push:") {
+			t.Fatalf("%s Lefthook is missing the API fast pre-push profile:\n%s", name, hook)
+		}
+		if strings.Contains(hook, "task verify\n") || strings.Contains(hook, "migrate:") {
+			t.Fatalf("%s Lefthook contains a full or migration lane:\n%s", name, hook)
+		}
+	}
+
+	databaseDestination := applyAPIWorkspace(t, fullMobileBlueprintBytes())
+	databaseHook, err := os.ReadFile(filepath.Join(databaseDestination, "database", "lefthook.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(databaseHook), "pre-push:") || strings.Contains(string(databaseHook), "verify:fast") {
+		t.Fatalf("Database Lefthook must remain commit-msg-only:\n%s", databaseHook)
+	}
+}
+
+func TestGeneratedAPIFastVerificationTaskRunsWithoutFullRuntimeLanes(t *testing.T) {
+	taskPath := generatedTaskBinary(t)
+	destination := applyAPIWorkspace(t, apiBlueprintBytes())
+	runGeneratedTask(t, taskPath, filepath.Join(destination, "apis"), "verify:fast", generatedTaskEnvironment())
+}
+
 func TestApplyGeneratedAPIIgnoresCoverageArtifacts(t *testing.T) {
 	destination := applyAPIWorkspace(t, apiBlueprintBytes())
 	ignore := readGeneratedAPIFile(t, filepath.Join(destination, "apis"), ".gitignore")
@@ -315,7 +359,7 @@ func TestGeneratedAPITaskfileCommandsAndDotenvRuntime(t *testing.T) {
 	destination := applyAPIWorkspace(t, apiBlueprintBytes())
 	apiRoot := filepath.Join(destination, "apis")
 	taskEnv := generatedTaskEnvironment()
-	for _, taskName := range []string{"build", "mod", "format:check", "test", "coverage", "openapi"} {
+	for _, taskName := range []string{"build", "mod", "format:check", "test", "coverage", "openapi", "verify:fast"} {
 		runGeneratedTask(t, taskPath, apiRoot, taskName, taskEnv)
 	}
 	for _, relative := range []string{"bin/apis", "coverage.out"} {
