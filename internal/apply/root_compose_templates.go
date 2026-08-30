@@ -2,7 +2,7 @@ package apply
 
 import "strings"
 
-const rootReadmeBase = "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n\nBeads configuration is tracked with the workspace; its embedded Dolt database and local runtime files stay on this machine and are ignored by Git.\n"
+const rootReadmeBase = "# Platform workspace\n\nStart with [the documentation workspace](docs/README.md). Agents also read `AGENTS.md`.\n\nBeads configuration is tracked with the workspace; its embedded Dolt database and local runtime files stay on this machine and are ignored by Git.\n\nApply bootstraps dependencies for every selected project component before publication. E2E package dependencies, browsers, devices, Podman images, and services remain explicit runtime setup.\n"
 
 const rootComposeTaskfileBase = `version: '3'
 
@@ -55,7 +55,7 @@ func rootReadme(ociSelected bool, identitySelected ...bool) string {
 	if !ociSelected {
 		return rootReadmeBase
 	}
-	readme := rootReadmeBase + "\n## Local Compose\n\nThe root Compose workflow uses the operator-managed `.env` explicitly. Apply\ndoes not generate `.env`; initialize it from the examples. The example password\n`smt-dev-password` is for disposable local development only and must be replaced\nfor any shared or non-local environment:\n\n~~~sh\ncp .env.example .env\n# review or replace DATABASE_PASSWORD and DATABASE_URL, then run:\ntask compose:config\ntask compose:build\ntask compose:up\n~~~\n\nUse `task compose:down` to stop and remove the Compose application. The root\n`.env` remains ignored and local-only.\n"
+	readme := rootReadmeBase + "\n## Local Compose\n\nThe root Compose workflow uses the operator-managed `.env` explicitly. Apply\ndoes not generate `.env`; initialize it from the examples. When Web is selected,\nits project dependencies and lockfile are already staged by Apply; after setting\n`.env` the build can run immediately. The example password `smt-dev-password` is\nfor disposable local development only and must be replaced for any shared or\nnon-local environment:\n\n~~~sh\ncp .env.example .env\n# review or replace DATABASE_PASSWORD and DATABASE_URL, then run:\ntask compose:config\ntask compose:build\ntask compose:up\n~~~\n\nUse `task compose:down` to stop and remove the Compose application. The root\n`.env` remains ignored and local-only.\n"
 	if len(identitySelected) > 0 && identitySelected[0] {
 		readme += "\nWhen the ZITADEL identity module is selected, `.env.example` also contains\ndisposable local ZITADEL database, master-key, issuer, and OIDC contract values.\nReplace all of them before using a shared or production environment; client\nsecrets are never generated. The local proxy publishes ZITADEL on ZITADEL_PORT\nand forwards HTTP/2 traffic to the API. Traefik uses a generated file-provider\nconfiguration with explicit routes to the ZITADEL API and login services, so no\nmachine-specific container-engine socket setup is required.\n"
 	}

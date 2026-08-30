@@ -66,8 +66,8 @@ func writeVerificationPreconditions(builder *strings.Builder, webSelected, mobil
 	if webSelected {
 		preconditions = append(preconditions,
 			`      - sh: test -f "{{.ROOT_DIR}}/web-app/package.json"`+"\n"+"        msg: Web package.json is required before running verification\n",
-			`      - sh: test -f "{{.ROOT_DIR}}/web-app/pnpm-lock.yaml"`+"\n"+"        msg: Web pnpm-lock.yaml is required; run (cd web-app && asdf exec pnpm install)\n",
-			`      - sh: test -d "{{.ROOT_DIR}}/web-app/node_modules"`+"\n"+"        msg: Web dependencies are missing; run (cd web-app && asdf exec pnpm install)\n",
+			`      - sh: test -f "{{.ROOT_DIR}}/web-app/pnpm-lock.yaml"`+"\n"+"        msg: Web pnpm-lock.yaml is required; rerun smt apply or run (cd web-app && asdf exec pnpm install)\n",
+			`      - sh: test -d "{{.ROOT_DIR}}/web-app/node_modules"`+"\n"+"        msg: Web dependencies are missing; rerun smt apply or run (cd web-app && asdf exec pnpm install)\n",
 			"      - sh: asdf exec pnpm --version\n"+"        msg: pnpm is required through asdf; install or activate Node.js 24.18.0 before verification\n",
 		)
 	}

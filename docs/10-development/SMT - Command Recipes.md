@@ -72,8 +72,9 @@ asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=andro
 ```
 
 There are no static Android/iOS templates and no Go post-create app/source/
-test/analysis writes. Apply invokes no `flutter pub get`, package resolution,
-network access, Podman, Compose, signing, or publication. If the pinned asdf
+test/analysis writes. After the CLI step, Apply runs `asdf exec flutter pub get`
+in the staged Mobile child. E2E package resolution, network-dependent browser
+or device setup, Podman, Compose, signing, and publication remain explicit. If the pinned asdf
 toolchain is unavailable, it reports `asdf install flutter 3.44.9-stable` and
 `asdf current flutter` guidance and fails atomically before destination
 publication. It does not create remote repositories.
@@ -100,37 +101,49 @@ mutate host configuration, or create module repositories.
 ### Accepted Web CLI initializer
 
 Web `.3.2.1` is implemented as a staged, CLI-owned Next.js baseline. The root
-`.tool-versions` pins `nodejs 24.18.0`. When Web is selected, Apply invokes
+`.tool-versions` pins `nodejs 24.18.0` and `pnpm 11.24.0`. Before Apply, install
+the pnpm asdf plugin with `asdf plugin add pnpm`, then install and reshim
+pnpm `11.24.0`:
+
+```sh
+asdf plugin add pnpm
+asdf install pnpm 11.24.0
+asdf reshim pnpm 11.24.0
+```
+When Web is selected, Apply invokes
 this exact argument-array command before publishing the child:
 
 ```sh
 asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
-Apply preserves the CLI files, merges its `.gitignore`, publishes no
-package-manager lockfiles, and performs no `pnpm install` or dependency resolution.
-The staged operation is atomic; on failure the destination is not published
+Apply preserves the CLI files, merges its `.gitignore`, and runs
+`asdf exec pnpm install` in the staged Web child after SMT files are written.
+If pnpm blocks dependency build scripts, Apply runs `asdf exec pnpm
+approve-builds --all` and retries. The staged operation is atomic; on failure the destination is not published
 and the error gives `asdf install nodejs 24.18.0`, `asdf current nodejs`, and
 `asdf exec npx --yes create-next-app@16.2.9 --help` guidance. A selected Web
 Apply also emits Web-specific `web_worker` routing and the required
 `build-web-apps:react-best-practices` and
 `build-web-apps:frontend-testing-debugging` skill references.
 
-The pinned `npx create-next-app` call is the sole Apply exception that may
-access the npm registry. Non-Web and static Apply paths remain offline; Web
-still performs no installation, lockfile publication, or dependency
-resolution.
+The pinned `npx create-next-app` call is the sole initializer exception that
+may access the npm registry. Web dependency setup also runs in the staged
+child; non-Web and static paths remain provider-neutral and atomic. During
+publication, internal pnpm relative symlinks are retained. Absolute, dangling,
+or out-of-tree links are rejected with the staged source, published
+destination, link target, and rejection reason.
 
-After Apply, work from `web-app/` with:
+After Apply, work from `web-app/` with the generated lockfile and dependencies:
 
 ```sh
 pnpm install
 pnpm run dev
 ```
 
-The later Web worker lanes `.3.2.2/.3` own pnpm lockfile creation, quality,
-browser, and runtime verification. Do not treat this initializer as evidence
-that those real pnpm, browser, or runtime lanes have run.
+The later Web worker lanes `.3.2.2/.3` own quality, browser, and runtime
+verification. Do not treat Apply as evidence that those browser or runtime
+lanes have run.
 
 ### Plan the Mobile-first starter lane
 
@@ -149,9 +162,8 @@ The planned milestones are:
 - `.3.5.1` (implemented): Flutter owns the Mobile base `pubspec.yaml`,
   `analysis_options.yaml`, and project baseline for Flutter `>=3.44.9` with
   Dart `>=3.12.0 <4.0.0`. The `pubspec.lock` and pinned `flutter_lints 6.0.0`
-  policy are produced and verified later by `mobile_worker` after
-  `asdf exec flutter pub get`; Apply's `--no-pub` emits no lockfile and never
-  performs package resolution. The README gives the pinned
+  policy are produced during Apply by `asdf exec flutter pub get` after the
+  CLI's `--no-pub` creation step. The README gives the pinned
   `asdf install flutter 3.44.9-stable` and `asdf current flutter` recovery path.
 - `.3.5.2` (implemented): after staging root `.tool-versions`, Mobile Apply
   runs the exact `asdf exec flutter --suppress-analytics create --empty
@@ -302,8 +314,8 @@ contains pgx `github.com/jackc/pgx/v5 v5.10.0`, golang-migrate
 API-only excludes pgx/migrate; no API selection emits no API manifests.
 
 Direct pinned sums are present in `go.sum`, but this slice does not prove the
-full transitive closure. Apply writes static templates only: it does not invoke
-`go`, `go mod`, a package manager, the network, or tool installation. `gofmt`,
+full transitive closure. Apply runs `asdf exec go mod download` in the staged
+API child, but does not install Go tools or execute verification. `gofmt`,
 vet, test, race, coverage, fuzzing, Godex, and gopls remain SDK/editor/agent
 tools rather than module dependencies. `go mod tidy` remains a later check
 against the eventual source closure; the generated child `mod` task exercises
@@ -362,9 +374,9 @@ PostgreSQL every 1 second with a 2 second timeout, readiness changes to 200
 is later lost. This readiness check proves connectivity only. Startup does not
 run migrations.
 
-API-selected Apply only writes embedded assets. It performs no network,
-Go/package-manager command, tool installation, Task execution, Podman, listener,
-or runtime execution. It adds no credentials, domain CRUD, data-service
+API-selected Apply writes embedded assets, then runs `asdf exec go mod download`
+in the staged API child before publication. It does not install tools, execute
+Task, invoke Podman, start listeners, or run runtime verification. It adds no credentials, domain CRUD, data-service
 connectivity/readiness, or root Taskfile changes.
 
 ### Use the generated API child Taskfile

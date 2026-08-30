@@ -42,8 +42,10 @@ func TestApplyGeneratesRootComposeTaskfileWithExplicitEnvFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(readme), "task compose:up") {
-		t.Fatalf("root README is missing the Compose entrypoint:\n%s", readme)
+	for _, marker := range []string{"Apply bootstraps dependencies", "task compose:build", "task compose:up"} {
+		if !strings.Contains(string(readme), marker) {
+			t.Fatalf("root README is missing %q:\n%s", marker, readme)
+		}
 	}
 	envExample, err := os.ReadFile(filepath.Join(destination, ".env.example"))
 	if err != nil {

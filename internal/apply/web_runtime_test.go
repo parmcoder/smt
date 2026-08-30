@@ -51,14 +51,17 @@ func TestWebApplyGeneratesRuntimeSlice(t *testing.T) {
 		}
 	}
 
-	for _, relative := range []string{"package-lock.json", "pnpm-lock.yaml"} {
-		if _, err := os.Stat(filepath.Join(web, relative)); !os.IsNotExist(err) {
-			t.Fatalf("Apply emitted %s before explicit installation: %v", relative, err)
+	if _, err := os.Stat(filepath.Join(web, "package-lock.json")); !os.IsNotExist(err) {
+		t.Fatalf("Apply emitted package-lock.json instead of using pnpm: %v", err)
+	}
+	for _, relative := range []string{"pnpm-lock.yaml", "node_modules"} {
+		if _, err := os.Stat(filepath.Join(web, relative)); err != nil {
+			t.Fatalf("Apply did not publish Web dependency output %s: %v", relative, err)
 		}
 	}
 }
 
-func TestWebApplyRuntimeUsesPnpmAndLeavesLockfileCreationToTheOperator(t *testing.T) {
+func TestWebApplyRuntimeUsesPnpmAndPublishesDependencyInputs(t *testing.T) {
 	destination := applyWebQualityWorkspace(t)
 	web := filepath.Join(destination, "web-app")
 

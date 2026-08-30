@@ -703,7 +703,7 @@ func TestMobileAbsentLeavesExistingArtifactOutputUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := toolVersions(components(*cfg)), "task 3.52.0\nlefthook 2.1.10\nnodejs 24.18.0\n"; got != want {
+	if got, want := toolVersions(components(*cfg)), "task 3.52.0\nlefthook 2.1.10\nnodejs 24.18.0\npnpm 11.24.0\n"; got != want {
 		t.Fatalf("toolVersions()=%q, want %q", got, want)
 	}
 	parent := t.TempDir()

@@ -155,9 +155,10 @@ examples only with the generated local resource names and the
 `DATABASE_PASSWORD=smt-dev-password` value; replace it outside disposable
 local use. No `.env` file is generated. The pure preflight API reports invalid or occupied ports
 and missing Podman/Podman Compose prerequisites through injectable checks, but
-the static root Apply path remains offline and does not invoke Preflight,
-Podman, Compose, socket probing, or health checks. Selected Web Apply is the
-documented pinned `npx` registry-access exception.
+the root Apply path does not invoke Preflight, Podman, Compose, socket probing,
+or health checks. Selected project dependency setup is limited to the staged
+Web, Mobile, and API child commands; selected Web Apply also uses the pinned
+`npx` registry-access initializer.
 
 Mobile-selected Apply stages the child and root `.tool-versions` with
 `flutter 3.44.9-stable`, then runs the exact Flutter-owned project creation
@@ -169,13 +170,14 @@ asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=andro
 
 The `.3.5.1` base-manifest policy remains Flutter-owned: Apply creates the
 Flutter CLI `pubspec.yaml`, `analysis_options.yaml`, and project baseline; the
-`pubspec.lock` and pinned `flutter_lints 6.0.0` policy are produced and
-verified later by `mobile_worker` after `asdf exec flutter pub get`. Apply uses
-`--no-pub`, so it emits no lockfile and performs no package resolution. Apply
-preserves the CLI platform output; the Mobile verification worker then adds
+`pubspec.lock` and pinned `flutter_lints 6.0.0` policy are produced during
+Apply by `asdf exec flutter pub get` after the CLI's `--no-pub` creation step.
+Apply preserves the CLI platform output; the Mobile verification worker then
+adds
 the stable app, optional API config, unit/widget tests, native integration
 test, and SDK dependency declaration. It does not use static Android/iOS
-templates. `--no-pub` keeps Apply offline and package-resolution-free. If the
+templates. `--no-pub` keeps CLI creation offline; Apply then runs `asdf exec
+flutter pub get` after the generated Mobile files are complete. If the
 pinned toolchain is unavailable,
 Apply fails atomically with `asdf install flutter 3.44.9-stable` and `asdf
 current flutter` guidance. The generated README then guides `asdf exec
@@ -190,7 +192,7 @@ Compose is not required to launch the starter locally.
 ### Implemented Web CLI initializer
 
 Web `.3.2.1` is implemented as a CLI-owned Next.js baseline: the root pins
-`nodejs 24.18.0`, and selected Web Apply stages and invokes this exact
+`nodejs 24.18.0` and `pnpm 11.24.0`, and selected Web Apply stages and invokes this exact
 argument-array command:
 
 ```sh
@@ -199,21 +201,21 @@ asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript -
 
 The CLI owns the generated `package.json`, App Router, Tailwind, `AGENTS.md`,
 and related baseline files. Apply preserves that output, merges the CLI
-`.gitignore`, publishes no package-manager lockfile, and performs no `pnpm install` or
-dependency resolution. Staging is atomic: a failed initializer leaves the
+`.gitignore`, then runs `asdf exec pnpm install` in the staged child. If pnpm
+blocks build scripts, Apply runs `asdf exec pnpm approve-builds --all` and
+retries. Staging is atomic: a failed initializer or dependency setup leaves the
 destination unpublished and reports `asdf install nodejs 24.18.0`,
 `asdf current nodejs`, and the pinned CLI `--help` recovery path. Apply also
 generates Web-specific `web_worker` routing and skills metadata.
 
-The pinned `npx create-next-app` call is the sole Apply exception that may
-access the npm registry. Non-Web and static Apply paths remain offline; Web
-still performs no installation, lockfile publication, or dependency
-resolution.
+The pinned `npx create-next-app` call is the initializer exception that may
+access the npm registry. Web dependency setup is also staged and atomic;
+E2E packages and browsers remain explicit runtime setup.
 
-After Apply, the local Web workflow is `pnpm install` followed by
-`pnpm run dev` from `web-app/`. The later `.3.2.2/.3` Web worker lanes
-own pnpm lockfile creation, quality, browser, and runtime checks; `.3.2.1`
-does not claim real pnpm or runtime evidence. Future Web build contexts and
+After Apply, the local Web workflow can run `pnpm run dev` immediately from
+`web-app/`; rerun `pnpm install` only after changing the manifest. The later
+`.3.2.2/.3` Web worker lanes own quality, browser, and runtime checks; `.3.2.1`
+does not claim browser or runtime evidence. Future Web build contexts and
 Containerfiles, Database lifecycle tasks, broader Mobile API integration,
 platform runtime work, a remote module registry, and `smt extend` remain
 deferred. Database `.3.4.1` now provides its independent PostgreSQL runtime
@@ -284,17 +286,19 @@ listener and exposes Go/process plus bounded request metrics. Safe
 `X-Request-ID` values are accepted or generated and returned. Gin panic recovery logs panic/stack,
 route, method, and request ID through JSON `slog` before returning generic 500;
 SIGINT/SIGTERM performs timed graceful shutdown. API-selected Apply writes
-embedded assets only and performs no network, Go/package-manager command, tool
-installation, Task execution, Podman, listener, or runtime execution. Credentials, domain CRUD, DB
+embedded assets, then runs `asdf exec go mod download` in the staged API child
+before publication. It does not install tools, execute Task, invoke Podman,
+start listeners, or run runtime verification. Credentials, domain CRUD, DB
 connectivity/readiness, root Taskfile changes, Containerfiles, non-root
 packaging, and `smt extend` remain out of scope. Durable unit/race/fuzz/
 integration tests are `.3.3.3`; non-root packaging/runtime verification is
 `.3.3.4`, with later human and Podman gates still required.
 
-Blueprint and static generation remains byte-stable without network access for
-identical selections in fresh destinations. Selected Web `.3.2.1` Apply is the documented
-pinned `npx` initializer exception and may access the npm registry without
-installing or resolving dependencies. All other Apply paths remain offline.
+Blueprint and static generation remains byte-stable for identical selections in
+fresh destinations. Selected Web `.3.2.1` Apply may access the npm registry for
+the pinned `npx` initializer and staged `pnpm install`; selected Mobile and API
+Apply may access their dependency registries for staged setup. E2E packages,
+browsers, devices, services, and host tooling remain explicit.
 `smt apply` rejects missing, unsupported, or unknown provenance before mutation
 and refuses an existing file or directory without overwrite,
 merge, regeneration, upgrade, or `smt extend` execution. A general non-generated

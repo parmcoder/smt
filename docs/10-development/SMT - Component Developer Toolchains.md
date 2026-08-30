@@ -18,7 +18,7 @@ updated: 2026-08-23
 
 This is a researched planned contract for generated component repositories; its
 component toolchain sections remain planned unless marked implemented. It
-refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it; `.3.2.1` adds the staged CLI-owned Web baseline; `.3.3.2` adds deterministic API source and OpenAPI assets; and `.3.3.4` adds API packaging and non-root runtime verification tasks. Current `smt apply` remains deterministic: non-Web and static paths are offline and do not install host tools, skills, plugins, MCP servers, dependencies, or runtime configuration. Selected Web `.3.2.1` is the sole pinned `npx` initializer exception that may access the npm registry, while still skipping `pnpm install`, lockfile publication, and dependency resolution. Apply rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
+refines [[../superpowers/specs/2026-08-17-smt-extensible-modules-design|the module design]] and [[../superpowers/plans/2026-08-17-smt-v0.1.0-production|the v0.1.0 plan]]. The implemented `.5` slice adds the static schema-v1 catalog and validation metadata; `.3.1` adds a deterministic root OCI runtime contract without executing it; `.3.2.1` adds the staged CLI-owned Web baseline; `.3.3.2` adds deterministic API source and OpenAPI assets; and `.3.3.4` adds API packaging and non-root runtime verification tasks. Current `smt apply` remains deterministic: selected Web, Mobile, and API project dependencies are prepared in staging, while host tools, skills, plugins, MCP servers, E2E packages, browsers, devices, services, and runtime configuration remain explicit. Apply rejects non-selectable platform metadata before topology or staging/destination mutation. Future generator work may emit checked-in component declarations and `doctor` guidance.
 
 Each component has four layers: native CLI/toolchain; a repeatable local
 verification interface; agent skills; and optional MCP/live-runtime
@@ -115,16 +115,19 @@ reviewed runtime/readiness assets and has no component manifest or lockfile.
 Mobile `.3.5.1` owns the reviewed
 Flutter base-manifest policy: the CLI creates `pubspec.yaml`,
 `analysis_options.yaml`, and the project baseline during Apply; `pubspec.lock`
-and the pinned lint policy are produced and verified later after `pub get`. The
+and the pinned lint policy are produced during Apply by `flutter pub get`. The
 API `go.mod`/`go.sum`
 exception is implemented in `.3.3.1`, and the API source/OpenAPI assets are
 implemented in `.3.3.2`; future static generator work may copy remaining
-reviewed manifests deterministically and offline. Web lockfile creation belongs
-to the later explicit `pnpm install` lane, not Apply.
-`smt apply` never runs a package manager.
+reviewed manifests deterministically and offline. Apply now resolves the
+selected project dependencies in staging: Web creates `pnpm-lock.yaml` and
+`node_modules`, Mobile runs `flutter pub get`, and API runs `go mod download`.
+Database has no package dependency setup; E2E packages, browsers, devices,
+Podman images, and services remain explicit operator actions.
 
 - **Web `.3.2.1` (implemented)** — root `.tool-versions` pins Node.js
-  `24.18.0`. Apply stages and invokes the exact CLI command below, preserves
+  `24.18.0` and pnpm `11.24.0`. Before Apply, install the pnpm asdf plugin and
+  version described above. Apply stages and invokes the exact CLI command below, preserves
   the CLI-owned `package.json`, App Router, Tailwind, `AGENTS.md`, and other
   generated files, and merges `.gitignore` entries:
 
@@ -132,12 +135,16 @@ to the later explicit `pnpm install` lane, not Apply.
   asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
   ```
 
-  Apply publishes no package-manager lockfile, runs no `pnpm install`, and
-  performs no dependency resolution. A failure is atomic and reports
+  Apply preserves the CLI baseline, then runs `asdf exec pnpm install` in the
+  staged child before publication. If pnpm blocks dependency build scripts,
+  Apply runs `asdf exec pnpm approve-builds --all` and retries. A setup failure is atomic and reports
   `asdf install nodejs 24.18.0`, `asdf current nodejs`, and the pinned CLI
   `--help` path. After Apply, `web_worker` uses `pnpm install` and
-  `pnpm run dev` from `web-app/`; `.3.2.2/.3` own the `pnpm-lock.yaml`, quality,
-  browser, and runtime verification. The pinned `npx create-next-app` call may
+  `pnpm run dev` from `web-app/`; Apply owns the `pnpm-lock.yaml` and ignored
+  dependency setup, preserves safe internal pnpm relative links, and rejects
+  unsafe links with source, destination, target, and reason details, while
+  `.3.2.2/.3` own quality, browser, and runtime verification. The pinned
+  `npx create-next-app` call may
   access the npm registry; no real Web lane is claimed here.
 - **API** is the implemented `.3.3.1` manifest exception: when API is selected,
   apply writes deterministic `go.mod` and `go.sum` for module
@@ -241,9 +248,9 @@ Task, or Podman as an unavailable local prerequisite; Apply never installs
 them or executes the generated tasks. Live image and runtime evidence remains
 environment-dependent.
 
-API-selected Apply writes embedded assets only and performs no network,
-Go/package-manager command, tool installation, Task execution, Podman, listener,
-or runtime execution. It adds no credentials, domain CRUD, data-service
+API-selected Apply writes embedded assets, then runs `asdf exec go mod download`
+in the staged API child before publication. It does not install tools, execute
+Task, invoke Podman, start listeners, or run runtime verification. It adds no credentials, domain CRUD, data-service
 connectivity/readiness, or root Taskfile changes. Durable unit/race/fuzz/
 integration coverage is `.3.3.3`; non-root packaging/runtime verification is
 `.3.3.4`. `go mod tidy` remains a later source-closure check; `go mod verify`
@@ -279,16 +286,17 @@ initializer is CLI-owned and runs in staging:
 asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
-Apply preserves CLI files, merges `.gitignore`, publishes no package-manager
-lockfile, and does not run `pnpm install` or resolve dependencies.
-The pinned `npx create-next-app` call is the sole Apply exception that may
-access the npm registry; non-Web and static Apply paths remain offline.
+Apply preserves CLI files, merges `.gitignore`, and runs
+`asdf exec pnpm install` in the staged child after SMT files are written.
+The pinned `npx create-next-app` call and staged Web dependency setup may
+access the npm registry. Apply performs only selected project dependency setup;
+E2E packages, browsers, devices, services, and host tooling remain explicit.
 The generated `web_worker` manifest owns Next.js/TypeScript production code
 and focused tests and requires `build-web-apps:react-best-practices` plus
 `build-web-apps:frontend-testing-debugging`. After Apply, use
 `asdf exec pnpm install` and `asdf exec pnpm run dev` locally; that explicit
-install creates or refreshes `pnpm-lock.yaml`. `.3.2.2/.3`
-remain deferred and own lockfile creation, `eslint . --max-warnings=0`,
+install refreshes `pnpm-lock.yaml` after a manifest change. `.3.2.2/.3`
+remain deferred and own `eslint . --max-warnings=0`,
 Prettier, `tsc --noEmit`, Vitest/React Testing Library, `next build`,
 and related Web app quality evidence. Root `.14.4` owns Playwright/browser
 contract smoke; no package-local E2E harness is generated in `web-app`. No
@@ -300,8 +308,8 @@ Baseline: Flutter `>=3.44.9`, pinned in the generated root as
 `flutter 3.44.9-stable`. Implemented `.3.5.1` owns the Flutter base-manifest
 policy: the CLI creates `pubspec.yaml`, `analysis_options.yaml`, and the
 project baseline with Dart `>=3.12.0 <4.0.0`; `pubspec.lock` and pinned
-`flutter_lints 6.0.0` policy are produced and verified later by `mobile_worker`
-after `asdf exec flutter pub get`. SDK tools, skills, MCP,
+`flutter_lints 6.0.0` policy are produced during Apply by
+`asdf exec flutter pub get`. SDK tools, skills, MCP,
 signing, and host prerequisites are not app dependencies.
 
 `.3.5.2` (implemented) — after staging the root `.tool-versions`, Mobile Apply
@@ -313,8 +321,9 @@ asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=andro
 
 Flutter owns the generated platform baseline; the Mobile worker owns the
 stable app/config/unit/widget/native-integration contract. Apply uses no static
-Android/iOS templates. `--no-pub` keeps Apply offline and prevents pub-get or
-package resolution. If the pinned toolchain is unavailable, the failure guidance is
+Android/iOS templates. `--no-pub` keeps CLI creation offline; Apply then runs
+`asdf exec flutter pub get` after the generated Mobile files are complete. If
+the pinned toolchain is unavailable, the failure guidance is
 `asdf install flutter 3.44.9-stable` followed by `asdf current flutter`, and
 the Apply remains atomic. Current `.3.5.3` evidence is asdf Flutter create,
 pub get, Dart format, analyze, and unit/widget tests passing. Android SDK
@@ -391,9 +400,9 @@ candidate. SBOM, signing, and remote CI are deferred.
 | Component | Generated manifest/lockfile | Required local tools | Task gates | Required skills | Optional MCP/runtime |
 | --- | --- | --- | --- | --- | --- |
 | Go API | `go.mod`, `go.sum`, `.3.3.2` source/OpenAPI assets, `.3.3.4` `Containerfile` and `Taskfile.yml`; `.3.4.2` conditional migration assets | Go, Huma, Gin, Prometheus, `env/v11`, pgx/migrate when Database, golangci-lint, govulncheck, Task, Podman | child `build`, `run`, `test`, `coverage`, `format:check`, `lint`, `vet`, `race`, `fuzz`, `vuln`, `mod`, `openapi`, `container:build`, `container:verify`, `verify:fast`, `verify`; API+Database adds `migrate:create`, `migrate:up`, `migrate:version`, `migrate:validate` | `$godex:godex-go-backend` | gopls local; no Go MCP |
-| Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; `pnpm-lock.yaml` after explicit `pnpm install` | Node.js 24.18.0, Next.js 16.2.9, pnpm | package scripts `format:check`, `lint`, `typecheck`, `test`, `build`, `verify:fast`, `verify`; no Web Taskfile | React best practices; frontend testing/debugging | Browser for rendered/E2E |
-| Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; lockfile and pinned lint policy after `pub get`; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `asdf exec dart format` plus direct `asdf exec flutter` analyze/test/integration/build commands; fast pre-push format/analyze; no Mobile Taskfile | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
-| Root E2E | `.14` package manifests; Web lockfile after explicit local install | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
+| Next.js Web | `.3.2.1` CLI-owned `package.json` and baseline; Apply-created `pnpm-lock.yaml` and ignored `node_modules` | Node.js 24.18.0, Next.js 16.2.9, pnpm | package scripts `format:check`, `lint`, `typecheck`, `test`, `build`, `verify:fast`, `verify`; no Web Taskfile | React best practices; frontend testing/debugging | Browser for rendered/E2E |
+| Flutter Mobile | `.3.5.1` policy: Flutter CLI `pubspec.yaml`/analysis baseline; Apply-created `pubspec.lock` and resolved dependencies; `.3.5.2` CLI project plus `.3.5.3` stable app/test contract | Flutter/Dart 3.44.9 stable, Android/iOS debug toolchains | `asdf exec dart format` plus direct `asdf exec flutter` analyze/test/integration/build commands; fast pre-push format/analyze; no Mobile Taskfile | Flutter agent-plugin core | Dart MCP/UI driving opt-in |
+| Root E2E | `.14` package manifests; E2E lockfiles and package dependencies after explicit E2E setup | Node/Playwright browser and Flutter/Dart device toolchains | Web contract smoke, Mobile integration smoke, local orchestration, retained reports | `$build-web-apps:frontend-testing-debugging`; `$flutter-add-integration-test` | Browser/device live lanes; no MCP or device farm required |
 | PostgreSQL | None; `.3.4.1` `Containerfile`, `.env.example`, and `Taskfile.yml` | PostgreSQL, psql, pg_isready, Podman | `.3.4.1` build/run/readiness/diagnose/verify with no fast pre-push gate; API+Database `.3.4.2` migration create/up/version/validate; `.3.4.3` disposable integration | Godex database guidance | No DB MCP in v0.1.0 |
 | Root/container | `compose.yaml`, `.env.example`, conditional identity `traefik/dynamic.yaml`, root `Taskfile.yml` | none for Apply; Podman/Compose for local lifecycle | root `verify:fast`/`verify`, explicit root `.env` Compose config/build/up/down/ps; Lefthook fast pre-push; broader smoke, non-root, security, and E2E remain explicit | project workflow guidance | Podman/Compose runtime is operator-run |
 

@@ -19,8 +19,9 @@ asdf exec flutter devices
 cd ..
 ~~~
 
-Apply does not install or resolve anything. Mobile is a native target and
-remains outside Compose.
+Apply bootstraps the selected Mobile application dependencies. E2E package
+dependencies, device setup, and the native runtime remain explicit; Mobile
+also remains outside Compose.
 
 ## Run one explicit lane
 
