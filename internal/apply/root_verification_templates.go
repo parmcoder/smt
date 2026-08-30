@@ -3,11 +3,25 @@ package apply
 import "strings"
 
 func rootTaskfileForSelection(webSelected, mobileSelected, apiSelected, databaseSelected bool, identitySelected ...bool) string {
-	taskfile := rootComposeTaskfileBase + rootVerificationTaskfile(webSelected, mobileSelected, apiSelected, databaseSelected)
+	identity := len(identitySelected) > 0 && identitySelected[0]
+	taskfile := rootComposeTaskfileBase
+	taskfile = insertRootSecurityVars(taskfile)
+	taskfile += rootSecurityTaskfile(webSelected, mobileSelected, apiSelected, databaseSelected, identity)
+	taskfile += rootVerificationTaskfile(webSelected, mobileSelected, apiSelected, databaseSelected)
 	if webSelected || apiSelected || databaseSelected || (len(identitySelected) > 0 && identitySelected[0]) {
 		taskfile += rootComposeTaskfileTasksForDatabase(databaseSelected, identitySelected...)
 	}
 	return taskfile
+}
+
+func insertRootSecurityVars(taskfile string) string {
+	marker := "\ntasks:\n"
+	index := strings.Index(taskfile, marker)
+	if index < 0 {
+		return taskfile
+	}
+	vars := "\nvars:\n  OSV_SCANNER_VERSION: 2.4.0\n  GITLEAKS_VERSION: 8.30.1\n"
+	return taskfile[:index] + vars + taskfile[index:]
 }
 
 func rootVerificationTaskfile(webSelected, mobileSelected, apiSelected, databaseSelected bool) string {
@@ -106,13 +120,39 @@ func writeTaskCommand(builder *strings.Builder, command string) {
 }
 
 func mergeTaskfile(base, extension string) string {
-	if vars := taskfileVars(extension); vars != "" && !strings.Contains(base, "\nvars:\n") {
+	base = mergeTaskfileVars(base, extension)
+	return appendTaskfileTasks(base, extension)
+}
+
+func mergeTaskfileVars(base, extension string) string {
+	extensionVars := taskfileVars(extension)
+	if extensionVars == "" {
+		return base
+	}
+	baseVars := taskfileVars(base)
+	if baseVars == "" {
 		marker := "\ntasks:\n"
 		if index := strings.Index(base, marker); index >= 0 {
-			base = base[:index] + "\nvars:\n" + vars + base[index:]
+			return base[:index] + "\nvars:\n" + extensionVars + base[index:]
 		}
+		return base
 	}
-	return appendTaskfileTasks(base, extension)
+	marker := "\nvars:\n"
+	tasksMarker := "\ntasks:\n"
+	varsIndex := strings.Index(base, marker)
+	tasksIndex := strings.Index(base, tasksMarker)
+	if varsIndex < 0 || tasksIndex < varsIndex {
+		return base
+	}
+	mergedVars := baseVars
+	for _, line := range strings.Split(extensionVars, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(mergedVars, "\n"+line+"\n") || strings.HasPrefix(strings.TrimSpace(mergedVars), line+"\n") {
+			continue
+		}
+		mergedVars += "  " + line + "\n"
+	}
+	return base[:varsIndex+len(marker)] + mergedVars + base[tasksIndex:]
 }
 
 func appendTaskfileTasks(base, extension string) string {

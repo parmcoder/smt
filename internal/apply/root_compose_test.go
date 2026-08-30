@@ -51,11 +51,11 @@ func TestApplyGeneratesRootComposeTaskfileWithExplicitEnvFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(envExample), "DATABASE_PASSWORD=smt-dev-password\n") {
-		t.Fatalf("root env example is missing the local development password:\n%s", envExample)
+	if !strings.Contains(string(envExample), "DATABASE_PASSWORD=\n") {
+		t.Fatalf("root env example must leave the password empty:\n%s", envExample)
 	}
-	if !strings.Contains(string(envExample), "DATABASE_URL=postgresql://smt:smt-dev-password@database:5432/smt?sslmode=disable\n") {
-		t.Fatalf("root env example is missing the local API database URL:\n%s", envExample)
+	if !strings.Contains(string(envExample), "DATABASE_URL=postgresql://smt:@database:5432/smt?sslmode=disable\n") {
+		t.Fatalf("root env example is missing the password-free API database URL:\n%s", envExample)
 	}
 }
 

@@ -37,7 +37,7 @@ func TestApplyGeneratesDatabaseRuntimeAndReadinessAssets(t *testing.T) {
 		".env.example": {
 			"POSTGRES_DB=smt\n",
 			"POSTGRES_USER=smt\n",
-			"POSTGRES_PASSWORD=smt-dev-password\n",
+			"POSTGRES_PASSWORD=\n",
 			"DATABASE_VOLUME=smt-postgres-data\n",
 		},
 		"README.md": {

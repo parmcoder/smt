@@ -83,8 +83,8 @@ Web uses `/healthz`; API health/readiness use `/healthz` and `/readyz`; and
 Database uses `pg_isready`. Web-to-API and API-to-Database dependencies are
 conditional on `service_healthy`. `.env.example` is examples-only with the
 generated local resource names and the local-development
-`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable
-local use; no `.env` is generated.
+`DATABASE_PASSWORD=` and other empty credential placeholders. Set them in the
+ignored local `.env` before starting services; no `.env` is generated.
 
 `runtime.Preflight` is a pure, injectable contract for future Taskfile/CLI use:
 it reports invalid or colliding/occupied ports and missing Podman or Podman
@@ -100,8 +100,8 @@ and Database runtime/readiness contract.
 
 When Database is selected, Apply emits `database/Containerfile` from the pinned
 PostgreSQL `18-alpine` image, `database/.env.example` with the local-development
-`POSTGRES_PASSWORD=smt-dev-password` example, and `database/Taskfile.yml`. Replace
-the example value outside disposable local use. The child Taskfile builds the
+empty `POSTGRES_PASSWORD=` placeholder, and `database/Taskfile.yml`. Set the
+value only in the ignored local `.env`. The child Taskfile builds the
 image, runs it with a named persistent volume on localhost, checks readiness
 with `pg_isready`, and exposes fail-fast `psql`/`diagnose` and stop/verify
 commands. The generated child has no API source, application schema, or
@@ -394,6 +394,16 @@ runtime, browser, device, and security lanes remain explicit.
 Podman/Compose smoke tests cover build, start, health/readiness, shutdown, and
 non-root identity. Gitleaks/security tasks are required before a production
 candidate. SBOM, signing, and remote CI are deferred.
+
+The v0.1.0 security lanes are `security`, `security:static`,
+`security:dependencies`, and `security:secrets`. They verify OSV-Scanner
+`v2.4.0` and Gitleaks `v8.30.1`; dependency scanning uses only the selected
+`apis/go.mod`, `web-app/pnpm-lock.yaml`, and `mobile-app/pubspec.lock` paths.
+Static checks require selected lockfiles, numeric image versions, non-root Web
+and API images, no `privileged` Compose service, and
+`no-new-privileges:true`. Apply does not install these tools or fetch their
+databases. E2E dependency installation, SBOMs, signing, attestations, and
+remote CI remain outside this contract.
 
 ## Deferred ownership matrix
 

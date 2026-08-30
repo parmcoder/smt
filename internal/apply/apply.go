@@ -755,6 +755,7 @@ func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []componen
 	}
 	if len(cs) > 0 {
 		files["Taskfile.yml"] = rootTaskfileForSelection(selection.Web, componentSelected(cs, "mobile"), selection.API, selection.Database, selection.Identity)
+		files[filepath.Join("scripts", "verify-security.sh")] = securityVerificationScript(selection.Web, componentSelected(cs, "mobile"), selection.API, selection.Database, selection.Identity)
 	}
 	webSelected := webE2ESelected(cfg, cs)
 	mobileSelected := mobileE2ESelected(cfg, cs)
