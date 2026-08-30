@@ -240,8 +240,8 @@ Web probes `/healthz`; API probes `/healthz` and `/readyz`; Database probes with
 `pg_isready`. Web-to-API and API-to-Database dependencies are conditional and
 use `service_healthy`. `.env.example` contains examples only, including the
 generated local resource names and the local-development
-`DATABASE_PASSWORD=smt-dev-password` value. Replace it outside disposable
-local use; no `.env` file is generated.
+`DATABASE_PASSWORD=` and other empty credential placeholders. Set them in the
+ignored local `.env` before starting services; no `.env` file is generated.
 
 When Web, API, or Database is selected, Apply also emits the root Compose
 Taskfile entrypoints `compose:config`, `compose:build`, `compose:up`,
@@ -252,7 +252,7 @@ before starting a Database workspace:
 
 ```sh
 cp .env.example .env
-# review or replace DATABASE_PASSWORD and DATABASE_URL, then run
+# set DATABASE_PASSWORD and DATABASE_URL, then run
 task compose:config
 task compose:build
 task compose:up
@@ -287,12 +287,35 @@ The child uses PostgreSQL `18-alpine`, a named volume, `pg_isready` health and
 readiness checks, and fail-fast `psql` diagnostics. Its Taskfile surface is
 `build`, `run`, `ready`, `psql`, `diagnose`, `stop`, and `verify`; the final
 task runs the runtime checks and stops the container afterward. Copy
-`.env.example` to a local `.env`, review or replace the
-`POSTGRES_PASSWORD=smt-dev-password` example before `task run`; no `.env` is
+`.env.example` to a local `.env`, set the empty `POSTGRES_PASSWORD=` value
+before `task run`; no `.env` is
 generated or committed. The child contains no application schema or migration
 commands. Apply writes these files only; Podman, PostgreSQL, and Task remain
 operator-run checks owned by the later Database lifecycle task. Database
 remains commit-msg-only and receives no fast pre-push quality gate.
+
+### Run supply-chain security lanes
+
+Every generated component workspace with a selected component includes the
+explicit root security lanes. Install and activate OSV-Scanner `v2.4.0` and
+Gitleaks `v8.30.1` before running them; the Taskfile verifies those versions.
+
+```sh
+task security:static
+task security:dependencies
+task security:secrets
+task security
+```
+
+The dependency lane scans only selected Apply-owned lockfiles:
+`apis/go.mod`, `web-app/pnpm-lock.yaml`, and `mobile-app/pubspec.lock`. The
+static lane checks selected lockfiles, numeric image tags, non-root Web/API
+runtime users, and Compose `no-new-privileges`/`privileged` policy. The secrets
+lane uses Gitleaks with redacted findings. These lanes are separate from
+`task verify:fast` and `task verify`; Apply remains offline and does not install
+security tools, fetch vulnerability databases, install E2E dependencies, or
+execute containers. SBOMs, signing, attestations, and remote CI are outside
+this v0.1.0 contract.
 
 ### Inspect generated API manifests
 

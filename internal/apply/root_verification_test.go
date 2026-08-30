@@ -102,6 +102,151 @@ func TestRootTaskfileDispatchesOnlySelectedComponents(t *testing.T) {
 	}
 }
 
+func TestRootTaskfileIncludesSelectionAwareSecurityLanes(t *testing.T) {
+	tests := []struct {
+		name     string
+		web      bool
+		mobile   bool
+		api      bool
+		database bool
+		want     []string
+		forbid   []string
+	}{
+		{
+			name: "web only",
+			web:  true,
+			want: []string{"web-app/pnpm-lock.yaml", "web-app/Containerfile"},
+			forbid: []string{
+				"mobile-app/pubspec.lock",
+				"apis/go.mod",
+				"database/Containerfile",
+			},
+		},
+		{
+			name:   "mobile only",
+			mobile: true,
+			want:   []string{"mobile-app/pubspec.lock"},
+			forbid: []string{
+				"web-app/pnpm-lock.yaml",
+				"apis/go.mod",
+				"database/Containerfile",
+			},
+		},
+		{
+			name: "api only",
+			api:  true,
+			want: []string{"apis/go.mod", "apis/go.sum", "apis/Containerfile"},
+			forbid: []string{
+				"web-app/pnpm-lock.yaml",
+				"mobile-app/pubspec.lock",
+				"database/Containerfile",
+			},
+		},
+		{
+			name:     "database only",
+			database: true,
+			want:     []string{"database/Containerfile", "compose.yaml"},
+			forbid: []string{
+				"web-app/pnpm-lock.yaml",
+				"mobile-app/pubspec.lock",
+				"apis/go.mod",
+			},
+		},
+		{
+			name:     "api and database",
+			api:      true,
+			database: true,
+			want:     []string{"apis/go.mod", "apis/go.sum", "apis/Containerfile", "database/Containerfile", "compose.yaml"},
+			forbid: []string{
+				"web-app/pnpm-lock.yaml",
+				"mobile-app/pubspec.lock",
+			},
+		},
+		{
+			name:     "all components",
+			web:      true,
+			mobile:   true,
+			api:      true,
+			database: true,
+			want: []string{
+				"web-app/pnpm-lock.yaml",
+				"mobile-app/pubspec.lock",
+				"apis/go.mod",
+				"apis/go.sum",
+				"web-app/Containerfile",
+				"apis/Containerfile",
+				"database/Containerfile",
+				"compose.yaml",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text := rootTaskfileForSelection(tt.web, tt.mobile, tt.api, tt.database)
+			for _, marker := range []string{
+				"\n  security:",
+				"\n  security:static:",
+				"\n  security:dependencies:",
+				"\n  security:secrets:",
+				"OSV_SCANNER_VERSION: 2.4.0",
+				"GITLEAKS_VERSION: 8.30.1",
+				"scripts/verify-security.sh",
+			} {
+				if !strings.Contains(text, marker) {
+					t.Errorf("security taskfile missing %q:\n%s", marker, text)
+				}
+			}
+			for _, marker := range tt.want {
+				if !strings.Contains(text, marker) {
+					t.Errorf("security taskfile missing selected marker %q:\n%s", marker, text)
+				}
+			}
+			for _, marker := range tt.forbid {
+				if strings.Contains(text, marker) {
+					t.Errorf("security taskfile contains unselected marker %q:\n%s", marker, text)
+				}
+			}
+			if strings.Contains(taskfileTaskBlock(text, "verify:fast"), "security") {
+				t.Fatalf("verify:fast must remain separate from security:\n%s", text)
+			}
+			if strings.Contains(taskfileTaskBlock(text, "verify"), "security") {
+				t.Fatalf("verify must remain separate from security:\n%s", text)
+			}
+		})
+	}
+}
+
+func TestApplyGeneratesSecurityVerificationScript(t *testing.T) {
+	installFakeNextASDF(t, false)
+	destination := filepath.Join(t.TempDir(), "workspace")
+	applyWorkspace(t, destination, blueprintBytes())
+
+	script, err := os.ReadFile(filepath.Join(destination, "scripts", "verify-security.sh"))
+	if err != nil {
+		t.Fatalf("generated security verification script: %v", err)
+	}
+	for _, marker := range []string{
+		"set -eu",
+		"web-app/pnpm-lock.yaml",
+		"web-app/Containerfile",
+		"no-new-privileges",
+		"privileged",
+		"redact",
+	} {
+		if !strings.Contains(string(script), marker) {
+			t.Errorf("security verification script missing %q:\n%s", marker, script)
+		}
+	}
+	taskPath := generatedTaskBinary(t)
+	command := exec.Command(taskPath, "security:static")
+	command.Dir = destination
+	command.Env = generatedTaskEnvironment()
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("generated security static lane failed: %v\n%s", err, output)
+	}
+}
+
 func TestRootTaskfileParsesWithTask(t *testing.T) {
 	taskPath := generatedTaskBinary(t)
 	destination := t.TempDir()

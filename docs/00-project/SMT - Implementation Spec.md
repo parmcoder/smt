@@ -399,12 +399,34 @@ the fallback. Generated local resource names are scoped by that project as
 `<project>-postgres-data`, `<project>-zitadel`, and
 `<project>-zitadel-bootstrap`, while explicit resource overrides remain
 supported. The same values appear in `.env.example`, which contains examples
-only and the local-development `DATABASE_PASSWORD=smt-dev-password` value plus
-the matching internal `DATABASE_URL`. Replace them outside disposable local use.
+only and empty `DATABASE_PASSWORD=` and matching password-free `DATABASE_URL`
+placeholders. Set credentials only in the ignored local `.env` before starting
+services.
 Its declarative examples include `COMPOSE_PROJECT_NAME`, the three port
 overrides, `DATABASE_VOLUME`, `API_BASE_URL`, `DATABASE_HOST`, `DATABASE_NAME`,
 `DATABASE_USER`, and `DATABASE_URL`; no production or secret credentials or
 `.env` file is generated.
+
+## v0.1.0 supply-chain security gates
+
+When at least one component is selected, the generated root Taskfile emits
+`security`, `security:static`, `security:dependencies`, and `security:secrets`.
+These lanes are explicit and remain separate from `verify:fast` and `verify`.
+The root pins and verifies OSV-Scanner `v2.4.0` and Gitleaks `v8.30.1`.
+
+`security:dependencies` scans only selected Apply-owned lockfiles with explicit
+paths: `apis/go.mod`, `web-app/pnpm-lock.yaml`, and
+`mobile-app/pubspec.lock`. `security:static` requires selected lockfiles and
+runtime files, checks numeric image versions, rejects root Web/API users and
+`privileged` Compose services, and requires `no-new-privileges`. The secrets
+lane invokes Gitleaks with redacted findings. Apply does not install tools,
+fetch vulnerability databases, execute security scans, or change the public
+CLI.
+
+This contract intentionally excludes SBOM generation, image signing,
+attestations, remote CI, and E2E dependency installation. The existing API
+`task vuln` contract remains unchanged; its separate API defect is not part of
+this security slice.
 
 When the optional identity module is selected, the generated proxy uses
 Traefik's file provider with a generated dynamic configuration file. It routes

@@ -75,11 +75,46 @@ func TestRenderComposeHonorsSelectionAndHealthDependencies(t *testing.T) {
 	if strings.Index(compose, "  web:") > strings.Index(compose, "  api:") || strings.Index(compose, "  api:") > strings.Index(compose, "  database:") {
 		t.Fatalf("compose services are not ordered web, api, database:\n%s", compose)
 	}
-	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_VOLUME=platform-workspace-postgres-data\n") || !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=smt-dev-password\n") || !strings.Contains(string(artifacts.EnvExample), "SMT_API_TARGETARCH=\n") {
-		t.Fatalf("env example must contain the local development password example:\n%s", artifacts.EnvExample)
+	if !strings.Contains(string(artifacts.EnvExample), "DATABASE_VOLUME=platform-workspace-postgres-data\n") || !strings.Contains(string(artifacts.EnvExample), "DATABASE_PASSWORD=\n") || !strings.Contains(string(artifacts.EnvExample), "SMT_API_TARGETARCH=\n") {
+		t.Fatalf("env example must leave the database password empty:\n%s", artifacts.EnvExample)
 	}
 	if strings.Contains(compose, "secret") || strings.Contains(compose, "token") || strings.Contains(compose, "password: ") {
 		t.Fatalf("compose contains a credential-like value:\n%s", compose)
+	}
+}
+
+func TestRenderComposeUsesSecurityDefaultsWithoutCredentialValues(t *testing.T) {
+	artifacts, err := Render(RenderOptions{
+		WorkspacePath: "/tmp/security-workspace",
+		Selection:     Selection{Web: true, API: true, Database: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(artifacts.Compose)
+	if got := strings.Count(compose, "no-new-privileges:true"); got != 3 {
+		t.Fatalf("security option count = %d, want one per generated service:\n%s", got, compose)
+	}
+	if strings.Contains(compose, "privileged:") {
+		t.Fatalf("Compose must not enable privileged mode:\n%s", compose)
+	}
+	for _, marker := range []string{
+		`DATABASE_PASSWORD: "${DATABASE_PASSWORD:-}"`,
+		"DATABASE_PASSWORD=\n",
+	} {
+		if !strings.Contains(compose+string(artifacts.EnvExample), marker) {
+			t.Fatalf("security-safe Compose/env output missing %q:\ncompose=%s\nenv=%s", marker, compose, artifacts.EnvExample)
+		}
+	}
+	for _, secret := range []string{
+		"smt-dev-password",
+		"smt-zitadel-password",
+		"smt-zitadel-masterkey-local-0000",
+		"Smt-Zitadel-Local-2026!",
+	} {
+		if strings.Contains(compose+string(artifacts.EnvExample), secret) {
+			t.Fatalf("generated Compose/env output contains literal credential %q", secret)
+		}
 	}
 }
 
@@ -96,8 +131,8 @@ func TestRenderAPIComposeInjectsDatabaseURLFromRootEnv(t *testing.T) {
 	if !strings.Contains(compose, `DATABASE_URL: "${DATABASE_URL:-}"`) {
 		t.Fatalf("API Compose must pass the operator DATABASE_URL into the container:\n%s", compose)
 	}
-	if !strings.Contains(envExample, "DATABASE_URL=postgresql://smt:smt-dev-password@database:5432/smt?sslmode=disable\n") {
-		t.Fatalf("root .env.example must contain the complete local API database URL:\n%s", envExample)
+	if !strings.Contains(envExample, "DATABASE_URL=postgresql://smt:@database:5432/smt?sslmode=disable\n") {
+		t.Fatalf("root .env.example must contain a password-free API database URL:\n%s", envExample)
 	}
 }
 
@@ -152,6 +187,9 @@ func TestRenderIdentityAddsPinnedServicesAndOIDCContract(t *testing.T) {
 	if err := yaml.Unmarshal(artifacts.Compose, &document); err != nil {
 		t.Fatalf("identity Compose is invalid YAML: %v\n%s", err, artifacts.Compose)
 	}
+	if got := strings.Count(compose, "no-new-privileges:true"); got != 6 {
+		t.Fatalf("identity security option count = %d, want one per generated service:\n%s", got, compose)
+	}
 	for _, service := range []string{"database", "zitadel-db-init", "zitadel", "zitadel-login", "proxy"} {
 		if !strings.Contains(compose, "  "+service+":\n") {
 			t.Fatalf("Compose missing identity service %q:\n%s", service, compose)
@@ -179,8 +217,8 @@ func TestRenderIdentityAddsPinnedServicesAndOIDCContract(t *testing.T) {
 			t.Fatalf("identity artifacts missing %q:\ncompose=%s\nenv=%s\ntraefik=%s", marker, compose, artifacts.EnvExample, artifacts.TraefikDynamic)
 		}
 	}
-	if !strings.Contains(string(artifacts.EnvExample), "ZITADEL_MASTERKEY=smt-zitadel-masterkey-local-0000\n") {
-		t.Fatalf("identity env example must use the 32-byte local master key placeholder:\n%s", artifacts.EnvExample)
+	if !strings.Contains(string(artifacts.EnvExample), "ZITADEL_MASTERKEY=\n") {
+		t.Fatalf("identity env example must leave the master key empty:\n%s", artifacts.EnvExample)
 	}
 	if strings.Index(compose, "  database:") > strings.Index(compose, "  zitadel-db-init:") || strings.Index(compose, "  zitadel-db-init:") > strings.Index(compose, "  zitadel:\n") || strings.Index(compose, "  zitadel:\n") > strings.Index(compose, "  zitadel-login:") || strings.Index(compose, "  zitadel-login:") > strings.Index(compose, "  proxy:") {
 		t.Fatalf("identity services are not dependency ordered:\n%s", compose)
@@ -208,7 +246,7 @@ func TestRenderIdentityEmitsFirstInstanceLoginBootstrapContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=zitadel-admin\n",
-		"ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=Smt-Zitadel-Local-2026!\n",
+		"ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=\n",
 		"ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED=false\n",
 		"ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=2099-12-31T23:59:59Z\n",
 	} {

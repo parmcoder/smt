@@ -17,7 +17,7 @@ HEALTHCHECK --interval=5s --timeout=5s --start-period=5s --retries=10 CMD pg_isr
 
 const databaseEnvExample = `POSTGRES_DB=smt
 POSTGRES_USER=smt
-POSTGRES_PASSWORD=smt-dev-password
+POSTGRES_PASSWORD=
 DATABASE_PORT=5432
 DATABASE_VOLUME=smt-postgres-data
 DATABASE_CONTAINER_NAME=smt-database
@@ -114,9 +114,8 @@ does not contain application schema, API code, or migration commands.
 
 The generated assets use PostgreSQL 18, expose port 5432 on localhost, and keep
 data in the named Podman volume configured by DATABASE_VOLUME. The example
-password is smt-dev-password for disposable local development only; replace
-it outside a local environment. Copy the example file and run the readiness and
-diagnostic checks explicitly:
+leaves POSTGRES_PASSWORD empty so operators must provide a local-only value.
+Copy the example file and run the readiness and diagnostic checks explicitly:
 
 ~~~sh
 cp .env.example .env

@@ -19,11 +19,8 @@ const (
 	defaultAPIPort           = 8080
 	defaultDatabasePort      = 5432
 	defaultIdentityPort      = 8081
-	defaultDatabasePassword  = "smt-dev-password"
-	defaultIdentityPassword  = "smt-zitadel-password"
-	defaultIdentityMasterkey = "smt-zitadel-masterkey-local-0000"
+	defaultIdentityPassword  = ""
 	defaultIdentityHumanUser = "zitadel-admin"
-	defaultIdentityHumanPass = "Smt-Zitadel-Local-2026!"
 	defaultIdentityPATExpiry = "2099-12-31T23:59:59Z"
 	defaultZitadelVersion    = "v4.16.2"
 )
@@ -230,6 +227,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 	if selection.Web {
 		b.WriteString("  web:\n")
 		b.WriteString("    build:\n      context: ./web-app\n      dockerfile: Containerfile\n")
+		b.WriteString("    security_opt:\n      - no-new-privileges:true\n")
 		fmt.Fprintf(&b, "    ports:\n      - \"${WEB_PORT:-%d}:3000\"\n", ports.web)
 		if selection.API {
 			b.WriteString("    environment:\n      API_BASE_URL: \"${API_BASE_URL:-http://api:8080}\"\n")
@@ -242,6 +240,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 	if selection.API {
 		b.WriteString("  api:\n")
 		b.WriteString("    build:\n      context: ./apis\n      dockerfile: Containerfile\n      args:\n        TARGETOS: \"${SMT_API_TARGETOS:-linux}\"\n        TARGETARCH: \"${SMT_API_TARGETARCH:-}\"\n")
+		b.WriteString("    security_opt:\n      - no-new-privileges:true\n")
 		fmt.Fprintf(&b, "    ports:\n      - \"${API_PORT:-%d}:8080\"\n", ports.api)
 		if selection.Database || selection.Identity {
 			b.WriteString("    environment:\n")
@@ -263,6 +262,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 	if selection.Database {
 		b.WriteString("  database:\n")
 		b.WriteString("    build:\n      context: ./database\n      dockerfile: Containerfile\n")
+		b.WriteString("    security_opt:\n      - no-new-privileges:true\n")
 		fmt.Fprintf(&b, "    ports:\n      - \"${DATABASE_PORT:-%d}:5432\"\n", ports.database)
 		b.WriteString("    environment:\n      POSTGRES_DB: smt\n      POSTGRES_USER: smt\n      POSTGRES_PASSWORD: \"${DATABASE_PASSWORD:-}\"\n")
 		b.WriteString("    volumes:\n      - database-data:/var/lib/postgresql\n")
@@ -274,14 +274,16 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 	if selection.Identity {
 		b.WriteString("  zitadel-db-init:\n")
 		b.WriteString("    image: \"${ZITADEL_DB_INIT_IMAGE:-postgres:18-alpine}\"\n")
+		b.WriteString("    security_opt:\n      - no-new-privileges:true\n")
 		b.WriteString("    restart: \"no\"\n")
 		b.WriteString("    depends_on:\n      database:\n        condition: service_healthy\n")
-		b.WriteString("    environment:\n      PGHOST: database\n      PGPORT: \"5432\"\n      PGPASSWORD: \"${DATABASE_PASSWORD:-}\"\n      POSTGRES_USER: smt\n      POSTGRES_DB: smt\n      ZITADEL_DB_NAME: \"${ZITADEL_DB_NAME:-zitadel}\"\n      ZITADEL_DB_USER: \"${ZITADEL_DB_USER:-zitadel}\"\n      ZITADEL_DB_PASSWORD: \"${ZITADEL_DB_PASSWORD:-" + defaultIdentityPassword + "}\"\n")
+		b.WriteString("    environment:\n      PGHOST: database\n      PGPORT: \"5432\"\n      PGPASSWORD: \"${DATABASE_PASSWORD:-}\"\n      POSTGRES_USER: smt\n      POSTGRES_DB: smt\n      ZITADEL_DB_NAME: \"${ZITADEL_DB_NAME:-zitadel}\"\n      ZITADEL_DB_USER: \"${ZITADEL_DB_USER:-zitadel}\"\n      ZITADEL_DB_PASSWORD: \"${ZITADEL_DB_PASSWORD:-}\"\n")
 		b.WriteString("    command:\n      - /bin/sh\n      - -c\n      - |\n        set -eu\n        psql --set=ON_ERROR_STOP=1 --username=\"$$POSTGRES_USER\" --dbname=\"$$POSTGRES_DB\" --set=zitadel_user=\"$$ZITADEL_DB_USER\" --set=zitadel_password=\"$$ZITADEL_DB_PASSWORD\" <<'SQL'\n        SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'zitadel_user', :'zitadel_password') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'zitadel_user') \\gexec\n        SQL\n        psql --set=ON_ERROR_STOP=1 --username=\"$$POSTGRES_USER\" --dbname=\"$$POSTGRES_DB\" --set=zitadel_db=\"$$ZITADEL_DB_NAME\" --set=zitadel_user=\"$$ZITADEL_DB_USER\" <<'SQL'\n        SELECT format('CREATE DATABASE %I OWNER %I', :'zitadel_db', :'zitadel_user') WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'zitadel_db') \\gexec\n        SQL\n")
 		b.WriteString("  zitadel:\n")
 		b.WriteString("    image: \"${ZITADEL_IMAGE:-ghcr.io/zitadel/zitadel:" + defaultZitadelVersion + "}\"\n")
+		b.WriteString("    security_opt:\n      - no-new-privileges:true\n")
 		b.WriteString("    restart: unless-stopped\n")
-		b.WriteString("    command: [\"start-from-init\", \"--masterkey\", \"${ZITADEL_MASTERKEY:-" + defaultIdentityMasterkey + "}\"]\n")
+		b.WriteString("    command: [\"start-from-init\", \"--masterkey\", \"${ZITADEL_MASTERKEY:-}\"]\n")
 		b.WriteString("    environment:\n      ZITADEL_PORT: \"8080\"\n      ZITADEL_EXTERNALDOMAIN: \"${ZITADEL_DOMAIN:-localhost}\"\n      ZITADEL_EXTERNALPORT: \"${ZITADEL_EXTERNALPORT:-" + fmt.Sprintf("%d", ports.identity) + "}\"\n      ZITADEL_EXTERNALSECURE: \"${ZITADEL_EXTERNALSECURE:-false}\"\n      ZITADEL_TLS_ENABLED: \"false\"\n      ZITADEL_DATABASE_POSTGRES_DSN: \"${ZITADEL_DATABASE_POSTGRES_DSN:-postgresql://zitadel:" + defaultIdentityPassword + "@database:5432/zitadel?sslmode=disable}\"\n      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: \"false\"\n      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat\n      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client\n      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Automatically Initialized IAM_LOGIN_CLIENT\n      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: \"true\"\n      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: \"${ZITADEL_PUBLIC_SCHEME:-http}://${ZITADEL_DOMAIN:-localhost}:${ZITADEL_EXTERNALPORT:-" + fmt.Sprintf("%d", ports.identity) + "}/ui/v2/login/\"\n      ZITADEL_OIDC_DEFAULTLOGINURLV2: \"${ZITADEL_PUBLIC_SCHEME:-http}://${ZITADEL_DOMAIN:-localhost}:${ZITADEL_EXTERNALPORT:-" + fmt.Sprintf("%d", ports.identity) + "}/ui/v2/login/login?authRequest=\"\n      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: \"${ZITADEL_PUBLIC_SCHEME:-http}://${ZITADEL_DOMAIN:-localhost}:${ZITADEL_EXTERNALPORT:-" + fmt.Sprintf("%d", ports.identity) + "}/ui/v2/login/logout?post_logout_redirect=\"\n      ZITADEL_LOGSTORE_ACCESS_STDOUT_ENABLED: \"${ZITADEL_ACCESS_LOG_STDOUT_ENABLED:-true}\"\n")
 		b.WriteString("    volumes:\n      - zitadel-bootstrap:/zitadel/bootstrap\n")
 		b.WriteString("    networks: [zitadel]\n")
@@ -290,6 +292,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 		b.WriteString("  zitadel-login:\n    image: \"${ZITADEL_LOGIN_IMAGE:-ghcr.io/zitadel/zitadel-login:" + defaultZitadelVersion + "}\"\n    restart: unless-stopped\n    environment:\n      ZITADEL_API_URL: http://zitadel:8080\n      NEXT_PUBLIC_BASE_PATH: /ui/v2/login\n      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat\n      CUSTOM_REQUEST_HEADERS: \"Host:${ZITADEL_DOMAIN:-localhost},X-Forwarded-Proto:${ZITADEL_PUBLIC_SCHEME:-http}\"\n    volumes:\n      - zitadel-bootstrap:/zitadel/bootstrap:ro\n    networks: [zitadel]\n    depends_on:\n      zitadel:\n        condition: service_healthy\n    healthcheck:\n      test: [\"CMD\", \"/bin/sh\", \"-c\", \"node /app/healthcheck.mjs http://localhost:3000/ui/v2/login/healthy\"]\n      interval: 10s\n      timeout: 30s\n      retries: 12\n      start_period: 20s\n")
 		b.WriteString("  proxy:\n")
 		b.WriteString("    image: \"${TRAEFIK_IMAGE:-traefik:v3.5.3}\"\n")
+		b.WriteString("    security_opt:\n      - no-new-privileges:true\n")
 		b.WriteString("    restart: unless-stopped\n")
 		b.WriteString("    command:\n      - --providers.file.directory=/etc/traefik/dynamic\n      - --providers.file.watch=true\n      - --entrypoints.web.address=:80\n      - --ping=true\n")
 		b.WriteString("    ports:\n      - \"${ZITADEL_PORT:-" + fmt.Sprintf("%d", ports.identity) + "}:80\"\n")
@@ -300,6 +303,7 @@ func renderCompose(project string, selection Selection, ports resolvedPorts) str
 		fmt.Fprintf(&b, "networks:\n  zitadel:\n    name: \"${ZITADEL_NETWORK:-%s-zitadel}\"\n", project)
 		fmt.Fprintf(&b, "\nvolumes:\n  database-data:\n    name: \"${DATABASE_VOLUME:-%s-postgres-data}\"\n  zitadel-bootstrap:\n    name: \"${ZITADEL_BOOTSTRAP_VOLUME:-%s-zitadel-bootstrap}\"\n", project, project)
 		compose := b.String()
+		compose = strings.ReplaceAll(compose, "  zitadel-login:\n    image:", "  zitadel-login:\n    security_opt:\n      - no-new-privileges:true\n    image:")
 		compose = strings.ReplaceAll(compose, `ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"`, `ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED:-false}"`)
 		compose = strings.ReplaceAll(compose, "      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: \"${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED:-false}\"\n", "      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: \"${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED:-false}\"\n      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: \"${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME:-"+defaultIdentityHumanUser+"}\"\n      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: \"${ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD:-}\"\n      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: \"${ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE:-}\"\n")
 		return compose
@@ -338,11 +342,11 @@ func renderTraefikDynamic(identitySelected bool) string {
 }
 
 func renderEnvExample(project string, ports resolvedPorts, identitySelected bool) string {
-	env := fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nDATABASE_VOLUME=%s-postgres-data\nAPI_BASE_URL=http://api:8080\nSMT_API_TARGETOS=linux\nSMT_API_TARGETARCH=\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=%s\nDATABASE_URL=postgresql://smt:%s@database:5432/smt?sslmode=disable\n", project, ports.web, ports.api, ports.database, project, defaultDatabasePassword, defaultDatabasePassword)
+	env := fmt.Sprintf("COMPOSE_PROJECT_NAME=%s\nWEB_PORT=%d\nAPI_PORT=%d\nDATABASE_PORT=%d\nDATABASE_VOLUME=%s-postgres-data\nAPI_BASE_URL=http://api:8080\nSMT_API_TARGETOS=linux\nSMT_API_TARGETARCH=\nDATABASE_HOST=database\nDATABASE_NAME=smt\nDATABASE_USER=smt\nDATABASE_PASSWORD=\nDATABASE_URL=postgresql://smt:@database:5432/smt?sslmode=disable\n", project, ports.web, ports.api, ports.database, project)
 	if identitySelected {
 		env += "# Production deployments must replace the pinned tags below with immutable @sha256 image references.\n"
-		env += fmt.Sprintf("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=%s\nZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=%s\nZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED=false\nZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=%s\n", defaultIdentityHumanUser, defaultIdentityHumanPass, defaultIdentityPATExpiry)
-		env += fmt.Sprintf("ZITADEL_PORT=%d\nZITADEL_NETWORK=%s-zitadel\nZITADEL_BOOTSTRAP_VOLUME=%s-zitadel-bootstrap\nZITADEL_VERSION=%s\nZITADEL_IMAGE=ghcr.io/zitadel/zitadel:%s\nZITADEL_LOGIN_IMAGE=ghcr.io/zitadel/zitadel-login:%s\nTRAEFIK_IMAGE=traefik:v3.5.3\nZITADEL_DB_INIT_IMAGE=postgres:18-alpine\nZITADEL_DB_NAME=zitadel\nZITADEL_DB_USER=zitadel\nZITADEL_DB_PASSWORD=%s\nZITADEL_DATABASE_POSTGRES_DSN=postgresql://zitadel:%s@database:5432/zitadel?sslmode=disable\nZITADEL_MASTERKEY=%s\nZITADEL_DOMAIN=localhost\nZITADEL_EXTERNALPORT=%d\nZITADEL_EXTERNALSECURE=false\nZITADEL_PUBLIC_SCHEME=http\nZITADEL_HEALTH_PATH=/debug/healthz\nZITADEL_READY_PATH=/debug/ready\nOIDC_ISSUER_URL=http://localhost:%d\nOIDC_DISCOVERY_URL=http://localhost:%d/.well-known/openid-configuration\nOIDC_JWKS_URL=http://localhost:%d/oauth/v2/keys\nOIDC_AUDIENCE=smt-api\nOIDC_REQUIRED_SCOPES=openid,profile,email\nOIDC_CLIENT_ID=local-placeholder\nOIDC_WEB_REDIRECT_URI=http://localhost:%d/auth/callback\nOIDC_MOBILE_REDIRECT_URI=com.example.smt:/oauth/callback\n", ports.identity, project, project, defaultZitadelVersion, defaultZitadelVersion, defaultZitadelVersion, defaultIdentityPassword, defaultIdentityPassword, defaultIdentityMasterkey, ports.identity, ports.identity, ports.identity, ports.identity, ports.web)
+		env += fmt.Sprintf("ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=%s\nZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=\nZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED=false\nZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=%s\n", defaultIdentityHumanUser, defaultIdentityPATExpiry)
+		env += fmt.Sprintf("ZITADEL_PORT=%d\nZITADEL_NETWORK=%s-zitadel\nZITADEL_BOOTSTRAP_VOLUME=%s-zitadel-bootstrap\nZITADEL_VERSION=%s\nZITADEL_IMAGE=ghcr.io/zitadel/zitadel:%s\nZITADEL_LOGIN_IMAGE=ghcr.io/zitadel/zitadel-login:%s\nTRAEFIK_IMAGE=traefik:v3.5.3\nZITADEL_DB_INIT_IMAGE=postgres:18-alpine\nZITADEL_DB_NAME=zitadel\nZITADEL_DB_USER=zitadel\nZITADEL_DB_PASSWORD=\nZITADEL_DATABASE_POSTGRES_DSN=postgresql://zitadel:@database:5432/zitadel?sslmode=disable\nZITADEL_MASTERKEY=\nZITADEL_DOMAIN=localhost\nZITADEL_EXTERNALPORT=%d\nZITADEL_EXTERNALSECURE=false\nZITADEL_PUBLIC_SCHEME=http\nZITADEL_HEALTH_PATH=/debug/healthz\nZITADEL_READY_PATH=/debug/ready\nOIDC_ISSUER_URL=http://localhost:%d\nOIDC_DISCOVERY_URL=http://localhost:%d/.well-known/openid-configuration\nOIDC_JWKS_URL=http://localhost:%d/oauth/v2/keys\nOIDC_AUDIENCE=smt-api\nOIDC_REQUIRED_SCOPES=openid,profile,email\nOIDC_CLIENT_ID=local-placeholder\nOIDC_WEB_REDIRECT_URI=http://localhost:%d/auth/callback\nOIDC_MOBILE_REDIRECT_URI=com.example.smt:/oauth/callback\n", ports.identity, project, project, defaultZitadelVersion, defaultZitadelVersion, defaultZitadelVersion, ports.identity, ports.identity, ports.identity, ports.identity, ports.web)
 	}
 	return env
 }

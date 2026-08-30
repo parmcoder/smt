@@ -151,9 +151,8 @@ back to `smt-workspace`; generated local resource names use that project as
 Web probes `/healthz`; API health/readiness are `/healthz` and `/readyz`; and
 Database health uses `pg_isready`. Web depends conditionally on a healthy API,
 and API depends conditionally on a healthy Database. `.env.example` contains
-examples only with the generated local resource names and the
-`DATABASE_PASSWORD=smt-dev-password` value; replace it outside disposable
-local use. No `.env` file is generated. The pure preflight API reports invalid or occupied ports
+examples only with the generated local resource names and empty credential
+placeholders; set them in the ignored local `.env` before use. No `.env` file is generated. The pure preflight API reports invalid or occupied ports
 and missing Podman/Podman Compose prerequisites through injectable checks, but
 the root Apply path does not invoke Preflight, Podman, Compose, socket probing,
 or health checks. Selected project dependency setup is limited to the staged
