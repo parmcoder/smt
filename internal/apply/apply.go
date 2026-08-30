@@ -30,6 +30,10 @@ type commandInitializer func(context.Context, string) error
 
 func (f commandInitializer) Initialize(ctx context.Context, path string) error { return f(ctx, path) }
 
+const (
+	pnpmVersion = "11.24.0"
+)
+
 var runBeads = func(ctx context.Context, dir, name string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -44,6 +48,12 @@ var runFlutterCreate = func(ctx context.Context, cwd string, args []string) erro
 }
 
 var runNextCreate = func(ctx context.Context, cwd string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "asdf", args...)
+	cmd.Dir = cwd
+	return cmd.CombinedOutput()
+}
+
+var runDependencySetup = func(ctx context.Context, cwd string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "asdf", args...)
 	cmd.Dir = cwd
 	return cmd.CombinedOutput()
@@ -314,10 +324,6 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 	} else if err := os.MkdirAll(bootstrap, 0o755); err != nil {
 		return plumbing.ZeroHash, err
 	}
-	repo, err := initChildRepository(bootstrap)
-	if err != nil {
-		return plumbing.ZeroHash, err
-	}
 	if c.id == "web" {
 		if err := mergeIgnoreFile(filepath.Join(bootstrap, ".gitignore"), componentIgnore(c.kind)); err != nil {
 			return plumbing.ZeroHash, err
@@ -362,6 +368,13 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 			return plumbing.ZeroHash, err
 		}
 	}
+	if err := setupComponentDependencies(ctx, c, bootstrap); err != nil {
+		return plumbing.ZeroHash, err
+	}
+	repo, err := initChildRepository(bootstrap)
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
 	wt, err := repo.Worktree()
 	if err != nil {
 		return plumbing.ZeroHash, err
@@ -372,8 +385,8 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 	if _, err := commit(repo, "chore("+c.scope+"): initialize "+c.id); err != nil {
 		return plumbing.ZeroHash, err
 	}
-	if err := copyDirectory(bootstrap, filepath.Join(root, c.path)); err != nil {
-		return plumbing.ZeroHash, err
+	if err := copyStagedDirectory(bootstrap, filepath.Join(root, c.path), filepath.Join(".smt", "bootstrap", c.id), c.path); err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("publish %s child failed: %w", c.id, err)
 	}
 	child, err := ggit.PlainOpen(filepath.Join(root, c.path))
 	if err != nil {
@@ -387,6 +400,91 @@ func addChildWithDatabase(ctx context.Context, root, publishedRoot string, c com
 		return plumbing.ZeroHash, err
 	}
 	return head.Hash(), nil
+}
+
+func setupComponentDependencies(ctx context.Context, c component, cwd string) error {
+	if c.id == "web" {
+		return setupWebDependencies(ctx, cwd)
+	}
+
+	var args []string
+	switch c.id {
+	case "mobile":
+		args = []string{"exec", "flutter", "pub", "get"}
+	case "api":
+		args = []string{"exec", "go", "mod", "download"}
+	default:
+		return nil
+	}
+
+	output, err := runDependencySetup(ctx, cwd, args)
+	return dependencySetupError(c, args, output, err)
+}
+
+func setupWebDependencies(ctx context.Context, cwd string) error {
+	installArgs := []string{"exec", "pnpm", "install"}
+	installOutput, installErr := runDependencySetup(ctx, cwd, installArgs)
+	if installErr == nil {
+		return nil
+	}
+	if !strings.Contains(string(installOutput), "ERR_PNPM_IGNORED_BUILDS") {
+		return dependencySetupError(component{id: "web"}, installArgs, installOutput, installErr)
+	}
+
+	approvalArgs := []string{"exec", "pnpm", "approve-builds", "--all"}
+	approvalOutput, approvalErr := runDependencySetup(ctx, cwd, approvalArgs)
+	if approvalErr != nil {
+		return webBuildApprovalError(installOutput, approvalArgs, approvalOutput, nil, false, approvalErr)
+	}
+
+	retryOutput, retryErr := runDependencySetup(ctx, cwd, installArgs)
+	if retryErr == nil {
+		return nil
+	}
+	return webBuildApprovalError(installOutput, installArgs, approvalOutput, retryOutput, true, retryErr)
+}
+
+func dependencySetupError(c component, args []string, output []byte, err error) error {
+	if err == nil {
+		return nil
+	}
+	message := fmt.Errorf("%s dependency setup failed; command: asdf %s: %w", c.id, strings.Join(args, " "), err)
+	if c.id == "web" && pnpmASDFFailure(output, err) {
+		message = fmt.Errorf("%w\n\nWeb dependency setup could not execute pnpm through asdf. Install the pnpm plugin and pinned version, then rerun smt apply:\n  asdf plugin add pnpm\n  asdf install pnpm %s\n  asdf reshim pnpm %s", message, pnpmVersion, pnpmVersion)
+	}
+	return capturedDependencySetupError(message, output)
+}
+
+func pnpmASDFFailure(output []byte, err error) bool {
+	text := string(output) + " " + err.Error()
+	for _, marker := range []string{
+		"No version is set for command pnpm",
+		"No preset version installed for command pnpm",
+		"unknown command: pnpm",
+		"pnpm: command not found",
+		"exit status 126",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func webBuildApprovalError(installOutput []byte, failedArgs []string, approvalOutput, retryOutput []byte, retried bool, err error) error {
+	message := fmt.Errorf("web dependency setup failed after pnpm build approval; commands: asdf exec pnpm install; asdf exec pnpm approve-builds --all; failed command: asdf %s: %w", strings.Join(failedArgs, " "), err)
+	output := fmt.Sprintf("initial install:\n%s\napproval:\n%s", installOutput, approvalOutput)
+	if retried {
+		output += fmt.Sprintf("\nretry install:\n%s", retryOutput)
+	}
+	return fmt.Errorf("%w; captured output:\n%s", message, output)
+}
+
+func capturedDependencySetupError(message error, output []byte) error {
+	if len(output) == 0 {
+		return message
+	}
+	return fmt.Errorf("%w; captured output:\n%s", message, output)
 }
 
 func initChildRepository(path string) (*ggit.Repository, error) {
@@ -524,6 +622,22 @@ func writeGitmodules(root string, cs []component) error {
 	return writeFile(filepath.Join(root, ".gitmodules"), b.String())
 }
 func copyDirectory(source, destination string) error {
+	resolvedRoot, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return fmt.Errorf("resolve copy source %s: %w", source, err)
+	}
+	return copyDirectoryTree(source, destination, source, destination, source, destination, resolvedRoot)
+}
+
+func copyStagedDirectory(source, destination, sourceLabel, destinationLabel string) error {
+	resolvedRoot, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return fmt.Errorf("resolve copy source %s: %w", sourceLabel, err)
+	}
+	return copyDirectoryTree(source, destination, source, destination, sourceLabel, destinationLabel, resolvedRoot)
+}
+
+func copyDirectoryTree(source, destination, sourceRoot, destinationRoot, sourceLabel, destinationLabel, resolvedRoot string) error {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return err
@@ -545,10 +659,31 @@ func copyDirectory(source, destination string) error {
 			return err
 		}
 		if i.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refuse symlink")
+			linkTarget, readErr := os.Readlink(from)
+			if readErr != nil {
+				return copySymlinkError(sourceRoot, destinationRoot, sourceLabel, destinationLabel, from, to, "<unreadable>", "could not read symlink target", readErr)
+			}
+			if filepath.IsAbs(linkTarget) {
+				return copySymlinkError(sourceRoot, destinationRoot, sourceLabel, destinationLabel, from, to, linkTarget, "absolute symlink target", nil)
+			}
+			resolvedTarget, resolveErr := filepath.EvalSymlinks(from)
+			if resolveErr != nil {
+				return copySymlinkError(sourceRoot, destinationRoot, sourceLabel, destinationLabel, from, to, linkTarget, "dangling symlink target", resolveErr)
+			}
+			relativeTarget, relativeErr := filepath.Rel(resolvedRoot, resolvedTarget)
+			if relativeErr != nil {
+				return copySymlinkError(sourceRoot, destinationRoot, sourceLabel, destinationLabel, from, to, linkTarget, "could not validate symlink target", relativeErr)
+			}
+			if relativeTarget == ".." || strings.HasPrefix(relativeTarget, ".."+string(os.PathSeparator)) {
+				return copySymlinkError(sourceRoot, destinationRoot, sourceLabel, destinationLabel, from, to, linkTarget, "target escapes staged component", nil)
+			}
+			if err := os.Symlink(linkTarget, to); err != nil {
+				return copySymlinkError(sourceRoot, destinationRoot, sourceLabel, destinationLabel, from, to, linkTarget, "could not recreate symlink", err)
+			}
+			continue
 		}
 		if i.IsDir() {
-			if err := copyDirectory(from, to); err != nil {
+			if err := copyDirectoryTree(from, to, sourceRoot, destinationRoot, sourceLabel, destinationLabel, resolvedRoot); err != nil {
 				return err
 			}
 		} else if i.Mode().IsRegular() {
@@ -564,6 +699,24 @@ func copyDirectory(source, destination string) error {
 		}
 	}
 	return nil
+}
+
+func copySymlinkError(sourceRoot, destinationRoot, sourceLabel, destinationLabel, source, destination, target, reason string, cause error) error {
+	sourcePath := copyPathLabel(sourceRoot, sourceLabel, source)
+	destinationPath := copyPathLabel(destinationRoot, destinationLabel, destination)
+	message := fmt.Sprintf("refuse unsafe symlink\n\tsource: %s\n\tdestination: %s\n\tsymlink target: %s\n\treason: %s", sourcePath, destinationPath, target, reason)
+	if cause != nil {
+		message += fmt.Sprintf(": %v", cause)
+	}
+	return fmt.Errorf("%s", message)
+}
+
+func copyPathLabel(root, label, path string) string {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == "." {
+		return label
+	}
+	return filepath.Join(label, relative)
 }
 
 func writeArtifacts(root, publishedRoot string, cfg config.Config, cs []component) error {
@@ -802,7 +955,11 @@ func appendWebReadme(path string) error {
 		text += `
 ## SMT Web development
 
-Install dependencies and start the development server after Apply:
+Apply bootstraps the selected Web dependencies in staging, including the
+pnpm-lock.yaml, pnpm-workspace.yaml build approval policy, and node_modules.
+If pnpm blocks native build scripts, Apply automatically runs
+asdf exec pnpm approve-builds --all to approve all pending builds and retries.
+To refresh dependencies after changing the manifest, run:
 
 ~~~sh
 asdf exec pnpm install
@@ -817,9 +974,9 @@ asdf exec pnpm run dev
 		text += `
 ## SMT Web quality
 
-Run these explicit quality checks from this repository after installing
-dependencies. Apply does not run a package manager; the operator-created
-pnpm-lock.yaml is the source of truth for repeatable installation.
+Run these explicit quality checks from this repository. Apply has already
+resolved the selected project dependencies; rerun pnpm install only after
+changing the manifest.
 
 ~~~sh
 asdf exec pnpm install
@@ -836,8 +993,8 @@ asdf exec pnpm run verify
 ## SMT Web runtime
 
 The generated Web runtime uses the pinned Node.js 24.18.0 toolchain and can
-run directly or through the checked-in non-root Containerfile. The generated
-Containerfile requires an operator-created pnpm-lock.yaml:
+run directly or through the checked-in non-root Containerfile. Apply creates
+the pnpm-lock.yaml required by the generated Containerfile:
 
 ~~~sh
 asdf exec pnpm install
@@ -874,7 +1031,8 @@ func appendAPIReadme(path string, databaseSelected bool) error {
 	text += `
 ## SMT API runtime
 
-The generated API uses the pinned Go 1.26.5 toolchain. Install and select the
+The generated API uses the pinned Go 1.26.5 toolchain. Apply downloads the
+selected API modules before publishing the child. Install and select the
 toolchain manually before running the child checks:
 
 ~~~sh
@@ -1028,7 +1186,7 @@ func toolVersions(cs []component) string {
 		case "api":
 			v = append(v, "golang 1.26.5")
 		case "web":
-			v = append(v, "nodejs 24.18.0")
+			v = append(v, "nodejs 24.18.0", "pnpm "+pnpmVersion)
 		case "mobile":
 			v = append(v, "flutter 3.44.9-stable")
 		}
@@ -1076,8 +1234,9 @@ is not installed, run that command before continuing.
 
 ## Verification
 
-Apply does not resolve dependencies or run verification. After the explicit
-asdf exec flutter pub get setup above, the fast local checks are:
+Apply resolves the selected Mobile dependencies and writes pubspec.lock before
+publication. Run asdf exec flutter pub get again after changing pubspec.yaml;
+the fast local checks are:
 
 ~~~sh
 asdf exec dart format --output=none --set-exit-if-changed lib test integration_test

@@ -48,18 +48,21 @@ Beads lifecycle commands. Implemented commands are:
   bootstrap submodules, ignore files, Beads metadata, and repository-local
   agent workflow files plus deterministic root `compose.yaml` and
   `.env.example` at a new destination; root `.gitignore` ignores `.env`. It
-  does not install dependencies, create remote repositories, call provider
-  APIs, or invoke Podman/Compose. It refuses an existing destination file or
+  bootstraps selected Web, Mobile, and API project dependencies in staging; it
+  does not create remote repositories, call provider APIs, or invoke
+  Podman/Compose. It refuses an existing destination file or
   directory; apply has no overwrite, merge, regenerate, upgrade, or `smt extend`
   path. Generated blueprints must contain the exact repository module
   annotations from the static catalog; apply persists those annotations but
   does not execute their verification recipes, install their tools, skills, or
   MCP integrations, mutate host configuration, or create module repositories.
-- When Web is selected, apply stages the root `nodejs 24.18.0` pin and runs the
+- When Web is selected, apply stages the root `nodejs 24.18.0` and `pnpm 11.24.0`
+  pins and runs the
   accepted local Next.js initializer described below. It publishes the
-  CLI-owned baseline without a package-manager lockfile, `pnpm install`, or dependency
-  resolution; a failed staged initializer is atomic and leaves no published
-  destination.
+  CLI-owned baseline, then runs `asdf exec pnpm install` in staging. If pnpm
+  blocks dependency build scripts, Apply runs `asdf exec pnpm
+  approve-builds --all` and retries. A failed initializer or dependency setup
+  is atomic and leaves no published destination.
 - `smt push [--dry-run]` — preflight every configured repository, then push
   each child repository's current branch before the root. Remote URLs come from
   `repositories[].remote.url`; dry-run validates and prints the order without
@@ -121,7 +124,7 @@ coordination.
 ## Next.js Web component
 
 The Web stack value is `nextjs`, with Next.js `16.2.9` on root-pinned Node.js
-`24.18.0`. When Web is selected, `smt apply` stages the child outside the
+`24.18.0` and pnpm `11.24.0`. When Web is selected, `smt apply` stages the child outside the
 published destination and invokes this exact argument-array command:
 
 ```sh
@@ -130,26 +133,27 @@ asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript -
 
 Apply preserves the CLI-owned `package.json`, App Router, Tailwind, `AGENTS.md`,
 and other generated files, merges the CLI `.gitignore` with SMT-required
-entries, and publishes no package-manager lockfile. `--skip-install` means
-Apply does not run `pnpm install` or resolve dependencies. The staged CLI output is
+entries, then runs `asdf exec pnpm install` in the staged child. If pnpm blocks
+dependency build scripts, Apply runs `asdf exec pnpm approve-builds --all` and
+retries. `--skip-install`
+only defers installation until after SMT files are written. The staged CLI output is
 published only after initialization succeeds; failures preserve CLI output in
 the error, report `asdf install nodejs 24.18.0`, `asdf current nodejs`, and
 `asdf exec npx --yes create-next-app@16.2.9 --help`, and leave the destination
 unpublished.
 
-The pinned `npx create-next-app` invocation is the sole Apply exception that
-may access the npm registry. Non-Web and static Apply paths remain offline;
-Web still performs no `pnpm install`, lockfile publication, or dependency
-resolution. After Apply, the operator explicitly runs `pnpm install` in
-`web-app/` to create or refresh the committed `pnpm-lock.yaml` before runtime
-or E2E verification.
+The pinned `npx create-next-app` invocation and staged Web dependency setup may
+access the npm registry. Non-Web and static Apply paths remain provider-neutral;
+E2E package dependencies and browsers remain explicit. After Apply, the
+generated Web lockfile and dependencies are ready for runtime or Compose
+verification.
 
 Selecting Web also generates Web-specific `web_worker` routing and a worker
 manifest requiring `build-web-apps:react-best-practices` and
 `build-web-apps:frontend-testing-debugging`. After Apply, the local workflow
-is `pnpm install` followed by `pnpm run dev` from `web-app/`; the later
-`.3.2.2/.3` Web worker lanes own dependency lockfile, quality, browser, and
-runtime verification. `.3.2.1` claims no real pnpm, browser, or runtime
+is `pnpm run dev` from `web-app/`; Apply owns the project lockfile and ignored
+dependencies, while the later `.3.2.2/.3` Web worker lanes own quality, browser,
+and runtime verification. `.3.2.1` claims no real browser or runtime
 evidence.
 
 ## Flutter Mobile component
@@ -188,10 +192,8 @@ submodule, a `mobile_worker` manifest, Flutter-oriented README and ignore
 rules, and a root `.tool-versions` entry containing `flutter 3.44.9-stable`.
 The `.3.5.1` contract owns the Flutter base-manifest policy: Flutter owns the
 `pubspec.yaml`, `analysis_options.yaml`, and project baseline created during
-Apply. The `pubspec.lock` and pinned `flutter_lints 6.0.0` policy are produced
-and verified later by `mobile_worker` after `asdf exec flutter pub get`.
-Because Apply uses `--no-pub`, it emits no lockfile and performs no package
-resolution.
+Apply. After the `--no-pub` CLI step, Apply runs `asdf exec flutter pub get` in
+staging and publishes `pubspec.lock` with the resolved project dependencies.
 
 For `.3.5.2`, Apply stages the Mobile child, stages the root
 `.tool-versions`, then runs this exact local command in the staged directory:
@@ -202,8 +204,9 @@ asdf exec flutter --suppress-analytics create --empty --no-pub --platforms=andro
 
 Apply preserves the CLI output. It does not use static Android/iOS templates
 and Go does not write app source, tests, or analysis files after the CLI
-returns. `--no-pub` keeps Apply offline: it does not run `flutter pub get`,
-resolve packages, access the network, sign an app, or publish an app. If the
+returns. `--no-pub` keeps CLI creation offline; Apply then runs `asdf exec
+flutter pub get` after the generated Mobile files are written. Apply does not
+sign an app or publish an app. If the
 pinned asdf/Flutter toolchain is unavailable, Apply reports:
 `asdf install flutter 3.44.9-stable` and `asdf current flutter`, then fails
 atomically before destination publication. The child README guides the
@@ -531,9 +534,10 @@ is the manual `.3.4.3` lane below. The generated Task CLI harness was verified
 with Task v3.52.0, including dotenv-driven `/healthz` and bounded process
 cleanup.
 
-API-selected Apply writes embedded deterministic assets only: it performs no
-network, Go or package-manager command, tool installation, Task execution, Podman invocation,
-listener start, or runtime execution. The generated root Taskfile is an
+API-selected Apply writes embedded deterministic assets, then runs
+`asdf exec go mod download` in the staged API child before publication. It does
+not install tools, execute Task, invoke Podman, start listeners, or run runtime
+verification. The generated root Taskfile is an
 operator-run aggregate and is never executed by Apply. This slice adds no
 credentials or domain CRUD,
 Containerfiles, non-root packaging, or `smt extend`. Durable unit/race/fuzz/integration coverage is
@@ -557,8 +561,9 @@ then version and preserves native failures without rollback. These tasks are
 explicit and are never dependencies of `verify`.
 
 API-only and Database-only selections emit no migration assets or migration
-tasks. Apply remains offline: it does not invoke Go, Task, migrations,
-PostgreSQL, Podman, or database provisioning. `DATABASE_URL` is an explicit
+tasks. Apply runs only the selected API's staged `asdf exec go mod download`;
+it does not invoke Task, migrations, PostgreSQL, Podman, or database
+provisioning. `DATABASE_URL` is an explicit
 operator contract; real PostgreSQL/Podman lifecycle verification belongs to
 `.3.4.3`. No automatic down, drop, force, startup migration, credentials, or
 root orchestration is generated.
@@ -641,8 +646,8 @@ runtime starter or Web component Containerfile, while Database `.3.4.1`
 provides its independent PostgreSQL runtime/readiness starter. Platform
 repositories or scaffolds, Podman/Compose execution, Kubernetes/ArgoCD/OpenTofu runtime,
 remote module registry, or `smt extend` command. Web `.3.2.1` is the implemented
-CLI-owned Next.js baseline; its dependency lockfile, quality, browser, and
-runtime lanes remain `.3.2.2/.3` work. Mobile `.3.5.2` is a Flutter
+CLI-owned Next.js baseline; its quality, browser, and runtime lanes remain
+`.3.2.2/.3` work, while Apply prepares its project dependencies. Mobile `.3.5.2` is a Flutter
 CLI-generated Android/iOS starter, and `.3.5.3` adds the stable app/test
 contract plus the local verification lane. Platform SDK/device execution,
 signing, API integration, and store publication remain outside Apply; the

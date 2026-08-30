@@ -84,6 +84,7 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 	}
 	for _, want := range []string{
 		"asdf exec pnpm install",
+		"asdf exec pnpm approve-builds --all",
 		"asdf exec pnpm run verify:fast",
 		"asdf exec pnpm run verify",
 	} {
@@ -102,9 +103,12 @@ func TestWebApplyGeneratesQualitySuiteAndPatchesManifest(t *testing.T) {
 		t.Fatalf("Web package still declares @playwright/test: %#v", packageJSON.DevDependencies)
 	}
 
-	for _, relative := range []string{"package-lock.json", "pnpm-lock.yaml"} {
-		if _, err := os.Stat(filepath.Join(destination, "web-app", relative)); !os.IsNotExist(err) {
-			t.Fatalf("Apply emitted %s before explicit installation: %v", relative, err)
+	if _, err := os.Stat(filepath.Join(destination, "web-app", "package-lock.json")); !os.IsNotExist(err) {
+		t.Fatalf("Apply emitted package-lock.json instead of using pnpm: %v", err)
+	}
+	for _, relative := range []string{"pnpm-lock.yaml", "node_modules"} {
+		if _, err := os.Stat(filepath.Join(destination, "web-app", relative)); err != nil {
+			t.Fatalf("Apply did not publish Web dependency output %s: %v", relative, err)
 		}
 	}
 	for _, relative := range []string{"playwright.config.ts", "e2e"} {
@@ -140,8 +144,11 @@ func TestWebApplyUsesPnpmVerificationScriptsWithoutPublishingANpmLockfile(t *tes
 	if _, err := os.Stat(filepath.Join(web, "package-lock.json")); !os.IsNotExist(err) {
 		t.Fatalf("Apply emitted package-lock.json: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(web, "pnpm-lock.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("Apply emitted pnpm-lock.yaml before explicit installation: %v", err)
+	if _, err := os.Stat(filepath.Join(web, "pnpm-lock.yaml")); err != nil {
+		t.Fatalf("Apply did not publish pnpm-lock.yaml: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(web, "node_modules")); err != nil {
+		t.Fatalf("Apply did not publish Web dependencies: %v", err)
 	}
 }
 

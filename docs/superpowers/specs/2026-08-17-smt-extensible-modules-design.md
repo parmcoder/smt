@@ -24,7 +24,7 @@ exact deterministic provenance contract in [[../../00-project/SMT - Implementati
 the Mobile `.3.5.1/.3.5.2/.3.5.3` contracts are implemented below; remaining
 Web quality/runtime work, Database runnable assets, and packaging remain
 planned. `.3.2.1` uses the local Next.js CLI to create the staged Web project;
-it preserves CLI files, merges ignores, and does not install packages during
+it preserves CLI files, merges ignores, and runs the pinned pnpm setup during
 Apply. `.3.5.2` uses the local Flutter CLI to create the staged Android/iOS
 project, and `.3.5.3` adds the stable app/test contract; it does not use
 static platform templates. Mobile integration/device/build lanes remain
@@ -84,11 +84,12 @@ after Web. They omit `workspace.stack.devops`, the DevOps prompt, the combined
 DevOps-shaped configurations are rejected before apply mutation with a
 migration-oriented removal/regeneration error.
 
-Blueprint and static generation remains byte-stable without network access for
-identical selections in fresh destinations. Selected Web `.3.2.1` Apply is the
-documented pinned `npx` initializer exception and may access the npm registry
-without installing or resolving dependencies. All other Apply paths remain
-offline. Missing, unsupported, or unknown provenance fails before service or
+Blueprint and static generation remains byte-stable for identical selections in
+fresh destinations. Selected Web `.3.2.1` Apply may access the npm registry for
+its pinned `npx` initializer and staged `pnpm install`; selected Mobile and API
+Apply may access their dependency registries for staged setup. E2E packages,
+browsers, devices, services, and host tooling remain explicit. Missing,
+unsupported, or unknown provenance fails before service or
 destination mutation; a general non-generated version-1 configuration may
 remain usable for lifecycle and diagnostics without provenance but is not
 applyable as a new generated blueprint. Existing destination files and
@@ -104,8 +105,8 @@ include health/readiness, graceful shutdown, migrations owned by the API,
 non-root container images, lockfiles, and smoke commands without inventing
 CRUD or domain behavior. Workspace creation remains deterministic; blueprint,
 static, and non-Web paths are offline. Selected Web `.3.2.1` uses the pinned
-`npx create-next-app` exception and may access the npm registry, but it still
-performs no installation or dependency resolution. Runtime tools are used only
+`npx create-next-app` exception and may access the npm registry; selected
+project dependencies are then resolved in staging. Runtime tools are used only
 by later verification. `.3.1` emits the root `compose.yaml`, `.env.example`,
 and, for identity selection, `traefik/dynamic.yaml`; when an OCI service is
 selected, it also emits a root Taskfile whose Compose commands
@@ -134,27 +135,29 @@ command:
 asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
+The root `.tool-versions` pins Node.js `24.18.0` and pnpm `11.24.0`; install the
+pnpm asdf plugin before Web Apply with `asdf plugin add pnpm`, then install and
+reshim pnpm `11.24.0`.
 The Next.js CLI owns the generated `package.json`, App Router, Tailwind,
 `AGENTS.md`, and other baseline files. Apply preserves those files, merges the
-CLI `.gitignore`, publishes no package-manager lockfile, and performs no
-`pnpm install` or dependency resolution. The CLI output is staged before
-publication; a failure retains its output in the error, reports
+CLI `.gitignore`, and runs `asdf exec pnpm install` in the staged child after
+SMT files are written. The CLI output is staged before
+publication; if pnpm blocks dependency build scripts, Apply runs
+`asdf exec pnpm approve-builds --all` and retries. A failure retains its output in the error, reports
 `asdf install nodejs 24.18.0`, `asdf current nodejs`, and the pinned CLI
 `--help` path, and leaves no published partial destination.
 
 This pinned `npx create-next-app` call is the sole Apply exception that may
-access the npm registry. Non-Web and static Apply paths remain offline; Web
-still performs no `pnpm install`, lockfile publication, or dependency
-resolution.
+access the npm registry. Selected Web Apply then resolves the project in
+staging; E2E packages and browsers remain explicit runtime setup.
 
 Web selection also generates `web_worker` routing and skills metadata. The
 worker owns assigned Next.js/TypeScript production code and focused tests and
 uses `build-web-apps:react-best-practices` and
 `build-web-apps:frontend-testing-debugging`. After Apply, the local workflow is
-`pnpm install` followed by `pnpm run dev` from `web-app/`. The later
-`.3.2.2/.3` lanes own pnpm lockfile creation, quality, browser, and runtime
-verification; `.3.2.1` claims no real Web pnpm, browser, or runtime
-evidence.
+`pnpm run dev` from `web-app/`; rerun `pnpm install` only after manifest edits.
+The later `.3.2.2/.3` lanes own quality, browser, and runtime verification;
+`.3.2.1` claims no real Web browser or runtime evidence.
 
 ## Approved mobile-first roadmap
 
@@ -175,9 +178,8 @@ iOS lanes explicitly.
 - **`.3.5.1` manifest/analysis (implemented)** — Flutter owns the Mobile
   `pubspec.yaml`, `analysis_options.yaml`, and project baseline for Flutter
   `>=3.44.9` and Dart `>=3.12.0 <4.0.0`. The `pubspec.lock` and pinned
-  `flutter_lints 6.0.0` policy are produced and verified later by
-  `mobile_worker` after `asdf exec flutter pub get`; Apply's `--no-pub` emits
-  no lockfile and performs no package resolution. The generated root pins
+  `flutter_lints 6.0.0` policy are produced by staged `asdf exec flutter pub
+  get` after the CLI's `--no-pub` creation step. The generated root pins
   `flutter 3.44.9-stable`, and the README gives the pinned asdf install/current
   path.
 - **`.3.5.2` runnable MVP (implemented)** — after staging root
@@ -279,8 +281,9 @@ failures without rollback. These tasks are explicit and are not dependencies
 of `verify`.
 
 API-only and Database-only outputs contain no migration assets or commands.
-Apply remains offline and does not execute migrations, provision credentials or
-databases, start services, add startup migration behavior, emit destructive
+Apply performs only selected project dependency setup; it does not execute
+migrations, provision credentials or databases, start services, add startup
+migration behavior, emit destructive
 down/drop/force commands, or change root orchestration. `DATABASE_URL` is an
 operator contract; API+Database startup must treat an empty or malformed
 `DATABASE_URL` as an actionable configuration error. `.3.4.3` owns live
@@ -344,9 +347,9 @@ golangci-lint
 `github.com/golang-migrate/migrate/v4/cmd/migrate`. Direct pinned sums are
 present; full transitive closure is deferred.
 
-Apply writes static templates only and performs no `go`, `go mod`,
-package-manager, network, or tool installation work; PATH-empty tests cover
-that boundary. gofmt, vet, test, race, coverage, fuzzing, Godex, and gopls are
+Apply writes static templates and runs `asdf exec go mod download` for a
+selected API in staging; it does not install Go tools or execute verification.
+gofmt, vet, test, race, coverage, fuzzing, Godex, and gopls are
 SDK/editor/agent tools, not module dependencies. `go mod tidy` remains a later
 source-closure check; the generated child `mod` task exercises `go mod verify`
 for the emitted manifest.
@@ -401,11 +404,13 @@ recovery logs panic/stack/route/method/request ID through JSON `slog` and
 returns generic 500. SIGINT/SIGTERM marks the service not ready and performs
 graceful shutdown with the configured timeout.
 
-API-selected Apply writes embedded deterministic assets only: no network, Go or
-package-manager command, tool installation, Podman, listener, or runtime
-execution. No credentials, domain CRUD, root Taskfile changes, Containerfiles,
+API-selected Apply writes embedded deterministic assets, then runs `asdf exec go
+mod download` in the staged API child before publication. It does not install
+tools, execute Task, invoke Podman, start listeners, or run runtime verification.
+No credentials, domain CRUD, root Taskfile changes, Containerfiles,
 non-root packaging, or `smt extend` are added; Apply never executes the
-generated child Taskfile. No implicit installs or network work are performed.
+generated child Taskfile. No implicit runtime, service, browser, device, or
+host-tool setup is performed.
 Durable unit/race/fuzz/integration coverage is `.3.3.3`; non-root packaging and
 runtime verification are `.3.3.4`. Later human and Podman gates remain
 required. No `go mod tidy` or human E2E completion is claimed here; `go mod
@@ -455,23 +460,24 @@ metadata before topology checks, staging, or destination mutation.
 default-no quality-root question derived from the catalog role and placement.
 The current built-in prompt is `Include E2E quality declaration? [y/N]`.
 Component repositories receive exact selectable IDs. Opting in records only
-`modules: [e2e]` on the root; current Apply remains metadata-only. The P0
+`modules: [e2e]` on the root; E2E selection remains metadata-only during Apply.
+The P0
 `smt-4xf.14` rollup will generate separate attached `e2e/web` and `e2e/mobile`
 packages only for selected Web or Mobile targets; no-target E2E remains valid
 metadata-only. Web uses Playwright and Mobile uses Flutter's native
 `integration_test`, with contract smoke for stable hooks, Web `/healthz`,
 optional API reachability, and Mobile `mobile-home`/`api-status`. Local tasks
 delegate startup/shutdown to existing component tasks and report unavailable
-browser/device lanes explicitly. Apply still does not install dependencies,
-browsers, SDKs, devices, credentials, or remote CI. The `.5` slice retains its
+browser/device lanes explicitly. Apply does not install E2E dependencies,
+browsers, SDKs, devices, credentials, or remote CI; selected project
+dependencies are prepared before publication. The `.5` slice retains its
 platform/runtime boundaries, and `smt extend` remains deferred.
 
-Remaining Web dependency lockfile, quality, browser, and runtime assets are
-deferred runnable-starter work. Database has no component manifests or
-lockfiles; its `.3.4.1` runtime and readiness assets are implemented. Mobile
-`.3.5.1` lockfile/lint production and
-verification occur after `pub get`, while `.3.5.2` is the implemented Flutter
-CLI project/source/platform baseline.
+Remaining Web quality, browser, and runtime assets are deferred runnable-starter
+work. Database has no component manifests or lockfiles; its `.3.4.1` runtime
+and readiness assets are implemented. Apply creates the Mobile lockfile and
+resolves project dependencies after the Flutter CLI baseline; `.3.5.2` remains
+the implemented Flutter CLI project/source/platform baseline.
 Skills and MCP integrations remain distinct metadata and prerequisite
 declarations; they are never application dependencies or silently installed by
 SMT.

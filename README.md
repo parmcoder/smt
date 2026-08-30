@@ -17,8 +17,9 @@ reviewable blueprints and visible lifecycle operations.
 > starters remain evolving. `apply` creates a deterministic, Git-ready
 > workspace; when Web is selected it runs the pinned local Next.js CLI with
 > `--skip-install`, and when Mobile is selected it runs the pinned local Flutter
-> CLI with `--no-pub`. Apply never performs dependency resolution or package
-> installation.
+> CLI with `--no-pub`. Apply then resolves dependencies for selected Web,
+> Mobile, and API components in staging before publication. E2E packages,
+> browsers, devices, services, and host tooling remain explicit.
 
 ## Why SMT
 
@@ -63,10 +64,10 @@ smt doctor
 
 `smt new` writes a blueprint only after confirmation. Inspect it before
 `apply`; the destination must be new. `apply` initializes Beads metadata and
-does not run `flutter pub get`, `npm install`, resolve packages, call provider
-APIs, or create remote projects. Selected Web and Mobile applies require their
-pinned local asdf toolchains; other components remain independent of those
-prerequisites.
+bootstraps selected Web, Mobile, and API project dependencies in staging. It
+does not call provider APIs or create remote projects. Selected Web and Mobile
+applies require their pinned local asdf toolchains; E2E, browser, device,
+service, and host-tool setup remains explicit.
 
 ## Current Web in-development workflow
 
@@ -76,29 +77,32 @@ argument-array command in a temporary Web directory and preserves the CLI
 files:
 
 ```sh
-asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-npm --skip-install --disable-git --agents-md --import-alias=@/*
+asdf exec npx --yes create-next-app@16.2.9 <staged-web-directory> --typescript --eslint --app --empty --tailwind --use-pnpm --skip-install --disable-git --agents-md --import-alias=@/*
 ```
 
-The root pin is `nodejs 24.18.0`. Apply merges the CLI `.gitignore`, publishes
-no `package-lock.json`, runs no `npm install`, and performs no dependency
-resolution. If initialization fails, the staged workspace is discarded and
-the destination is not published; retry with:
+The root pins `nodejs 24.18.0` and `pnpm 11.24.0`. Before applying a Web
+blueprint, install the pnpm asdf plugin and pinned version:
 
 ```sh
 asdf install nodejs 24.18.0
-asdf current nodejs
-asdf exec npx --yes create-next-app@16.2.9 --help
+asdf plugin add pnpm
+asdf install pnpm 11.24.0
+asdf reshim pnpm 11.24.0
 ```
 
-This pinned `npx create-next-app` invocation is the only Apply path that may
-access the npm registry. Non-Web and static Apply paths remain offline; the
-Web exception still performs no installation, lockfile publication, or
-dependency resolution.
+Apply merges the CLI `.gitignore`, runs `asdf exec pnpm install` in staging,
+automatically approves pending pnpm build scripts with
+`asdf exec pnpm approve-builds --all` when required, retries the install, and
+publishes the Web lockfile, approval policy, and dependencies atomically. The
+pinned initializer and dependency setup may access the npm registry. pnpm's
+internal relative dependency links are preserved during publication; unsafe,
+dangling, absolute, or out-of-tree links fail Apply with source, destination,
+target, and reason details. E2E packages, browsers, devices, services, and host
+tooling remain explicit.
 
-After Apply, work from `web-app/` with `asdf exec npm install` and
-`asdf exec npm run dev`. The later `web_worker` lane owns the lockfile,
-quality, browser, and runtime checks; this initializer does not claim that
-those checks or a real browser/device lane have run. A selected Web Apply also
+After Apply, work from `web-app/` with `asdf exec pnpm run dev`. The later
+`web_worker` lane owns quality, browser, and runtime checks; this initializer
+does not claim that those checks or a real browser/device lane have run. A selected Web Apply also
 generates Web-specific `web_worker` routing and skills metadata.
 
 ## Current Mobile in-development workflow
